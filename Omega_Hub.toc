@@ -1,0 +1,90 @@
+## Interface: 110200
+## Title: Omega Hub
+## Notes: Gestionnaire central et conteneur monolithique des addons Omega
+## Author: Lorkk
+## Version: 1.0.0
+## OptionalDeps: SpellCreator
+## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB
+## SavedVariablesPerCharacter: OS2DB
+
+## -- Hub --
+Core\Registry.lua
+Core.lua
+UI\UI.lua
+UI\Panel.lua
+UI\MinimapButton.lua
+
+## -- Omega Dice --
+Modules\Dice\Core.lua
+Modules\Dice\UI\Geometry\D4Geometry.lua
+Modules\Dice\UI\Geometry\D6Geometry.lua
+Modules\Dice\UI\Geometry\D8Geometry.lua
+Modules\Dice\UI\Geometry\D10Geometry.lua
+Modules\Dice\UI\Geometry\D12Geometry.lua
+Modules\Dice\UI\Geometry\D20Geometry.lua
+Modules\Dice\UI\Geometry\D100Geometry.lua
+Modules\Dice\UI\ResultFrame.lua
+Modules\Dice\UI\DiceAnimation.lua
+Modules\Dice\UI\D20Animation.lua
+Modules\Dice\Modules\RollDice.lua
+Modules\Dice\Modules\RandomNumber.lua
+Modules\Dice\Modules\Commands.lua
+
+## -- Omega Speak --
+Modules\Speak\Omega_Speak_UI.lua
+Modules\Speak\Omega_Speak.lua
+
+## -- Omega Spell --
+Modules\Spell\OmegaSpell_Data.lua
+Modules\Spell\OmegaSpell_DB.lua
+Modules\Spell\OmegaSpell_Arcaneum.lua
+Modules\Spell\OmegaSpell_EmoteLibrary.lua
+Modules\Spell\OmegaSpell_ArcaneumLink.lua
+Modules\Spell\MacroInterface.lua
+Modules\Spell\OmegaSpell_WTFMacroCache.generated.lua
+Modules\Spell\OmegaSpell_NewSpellImport.lua
+Modules\Spell\OmegaSpell_MacroLibrary.lua
+Modules\Spell\Slider_ui.lua
+Modules\Spell\OmegaSpell_Launcher.lua
+Modules\Spell\OmegaSpell_Bar.lua
+Modules\Spell\OmegaSpell_WoWMacroBrowser.lua
+Modules\Spell\OmegaSpell_IconBrowser.lua
+Modules\Spell\OmegaSpell_UI.lua
+Modules\Spell\OmegaSpell_Core.lua
+
+## -- Omega Survive --
+Modules\Survive\Core\MenuItems.lua
+Modules\Survive\Core\DefaultEmotes.lua
+Modules\Survive\Core\UI.lua
+Modules\Survive\Core\ModuleRules.lua
+Modules\Survive\Core\DB\DatabaseSchema.lua
+Modules\Survive\Core\DB\Lantern_db.lua
+Modules\Survive\Core\DB\Torch_db.lua
+Modules\Survive\Core\DB\System.lua
+Modules\Survive\Core\DB\Hydratation.lua
+Modules\Survive\Core\DB\Alimentation.lua
+Modules\Survive\Core\DB\ChatShare.lua
+Modules\Survive\Core\DB\InfoPanel.lua
+Modules\Survive\Core\DB\EditPanel.lua
+Modules\Survive\Modules\Lantern\LanternData.lua
+Modules\Survive\Modules\Torch\TorchData.lua
+Modules\Survive\Core\Launcher.lua
+Modules\Survive\Modules\Lantern\Lantern.lua
+Modules\Survive\Modules\Canteen\Canteen.lua
+Modules\Survive\Modules\Canteen\HumanBody.lua
+Modules\Survive\Modules\Torch\Torch.lua
+Modules\Survive\Modules\Dive\Dive.lua
+Modules\Survive\Core\DB\Database.lua
+Modules\Survive\Core\Settings.lua
+
+## -- Character --
+Modules\Character\Core.lua
+Modules\Character\UI_Player.lua
+Modules\Character\UI_MJ.lua
+Modules\Character\UI_Group.lua
+Modules\Character\Launcher.lua
+Modules\Character\Settings.lua
+
+## -- Omega Weather (désactivé — usage privé) --
+## Modules\Weather\Omega_Weather.lua
+## Modules\Weather\Omega_Weather_Data.lua
