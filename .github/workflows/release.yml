@@ -1,0 +1,51 @@
+name: Release Omega Hub
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package addon
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist/Omega_Hub
+
+          rsync -a \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "dist" \
+            --exclude "*.zip" \
+            ./ dist/Omega_Hub/
+
+          cd dist
+          zip -r Omega_Hub.zip Omega_Hub
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/Omega_Hub.zip --clobber
+          else
+            gh release create "$TAG_NAME" dist/Omega_Hub.zip \
+              --title "Omega Hub $TAG_NAME" \
+              --notes "Release $TAG_NAME"
+          fi
