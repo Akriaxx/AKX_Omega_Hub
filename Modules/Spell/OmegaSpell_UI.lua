@@ -287,8 +287,6 @@ do
     settingsBtn:SetSize(16, 16)
     settingsBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -28, -8)
     settingsBtn:SetFrameLevel(panel:GetFrameLevel() + 10)
-    settingsBtn:EnableMouse(true)
-    settingsBtn:RegisterForClicks("AnyButtonUp")
 
     local sbTex = settingsBtn:CreateTexture(nil, "ARTWORK")
     sbTex:SetAllPoints()
