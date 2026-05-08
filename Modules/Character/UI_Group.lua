@@ -294,10 +294,10 @@ local function Build()
     UI.ApplyWindowBackground(bg)
     panel.bg = bg
 
-    -- Applique les réglages sauvegardés dès la création du panel
+    -- Applique les réglages sauvegardés dès la création lazy du panel
     if C.GetSettings then
         local s = C:GetSettings()
-        if s.groupScale   then panel:SetScale(s.groupScale) end
+        if s.groupScale    then panel:SetScale(s.groupScale) end
         if s.windowOpacity then UI.ApplyWindowBackground(bg, s.windowOpacity) end
     end
 
