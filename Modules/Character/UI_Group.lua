@@ -285,12 +285,21 @@ local function Build()
     panel:SetMovable(true)
     panel:SetClampedToScreen(true)
     panel:EnableMouse(true)
-    panel:SetFrameStrata("MEDIUM")
+    panel:SetFrameStrata("HIGH")
+    panel:SetFrameLevel(100)
     panel:Hide()
 
     local bg = panel:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     UI.ApplyWindowBackground(bg)
+    panel.bg = bg
+
+    -- Applique les réglages sauvegardés dès la création du panel
+    if C.GetSettings then
+        local s = C:GetSettings()
+        if s.groupScale   then panel:SetScale(s.groupScale) end
+        if s.windowOpacity then UI.ApplyWindowBackground(bg, s.windowOpacity) end
+    end
 
     local title = CreateFrame("Frame", nil, panel)
     title:SetPoint("TOPLEFT")

@@ -6,13 +6,15 @@
 local C  = Character
 local UI = OS2.UI
 
-local PANEL_W, PANEL_H = 240, 214
+local PANEL_W, PANEL_H = 240, 302
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
     windowOpacity = 0.65,
     launcherSize  = 44,
-    windowScale   = 1.00,
+    playerScale   = 1.00,
+    mjScale       = 1.00,
+    groupScale    = 1.00,
 }
 
 local function Clamp(value, minValue, maxValue)
@@ -25,40 +27,56 @@ function C:GetSettings()
     CharacterDB.settings = CharacterDB.settings or {}
     local s = CharacterDB.settings
     if s.windowOpacity == nil then s.windowOpacity = DEFAULTS.windowOpacity end
-    if s.launcherSize  == nil then s.launcherSize  = DEFAULTS.launcherSize end
-    if s.windowScale   == nil then s.windowScale   = DEFAULTS.windowScale end
+    if s.launcherSize  == nil then s.launcherSize  = DEFAULTS.launcherSize  end
+    if s.playerScale   == nil then s.playerScale   = DEFAULTS.playerScale   end
+    if s.mjScale       == nil then s.mjScale       = DEFAULTS.mjScale       end
+    if s.groupScale    == nil then s.groupScale    = DEFAULTS.groupScale    end
     return s
-end
-
-local function EachCharacterWindow(callback)
-    if CharacterPlayerPanel then callback(CharacterPlayerPanel) end
-    if CharacterMJPanel then callback(CharacterMJPanel) end
-    if CharacterMJImpactPanel then callback(CharacterMJImpactPanel) end
 end
 
 function C:SetWindowOpacity(value)
     local s = C:GetSettings()
     s.windowOpacity = Clamp(value, 0.05, 1.00)
-    EachCharacterWindow(function(frame)
-        if frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
-    end)
+    for _, frame in ipairs({
+        CharacterPlayerPanel, CharacterMJPanel,
+        CharacterMJImpactPanel, CharacterGroupViewPanel,
+    }) do
+        if frame and frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
+    end
 end
 
-function C:SetWindowScale(value)
+function C:SetPlayerScale(value)
     local s = C:GetSettings()
     local steps = math.floor(((Clamp(value, WINDOW_SCALE_MIN, WINDOW_SCALE_MAX) - WINDOW_SCALE_MIN) / WINDOW_SCALE_STEP) + 0.5)
-    s.windowScale = WINDOW_SCALE_MIN + (steps * WINDOW_SCALE_STEP)
-    EachCharacterWindow(function(frame)
-        if frame.SetScale then frame:SetScale(s.windowScale) end
-    end)
+    s.playerScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
+    if CharacterPlayerPanel then CharacterPlayerPanel:SetScale(s.playerScale) end
+end
+
+function C:SetMJScale(value)
+    local s = C:GetSettings()
+    local steps = math.floor(((Clamp(value, WINDOW_SCALE_MIN, WINDOW_SCALE_MAX) - WINDOW_SCALE_MIN) / WINDOW_SCALE_STEP) + 0.5)
+    s.mjScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
+    if CharacterMJPanel       then CharacterMJPanel:SetScale(s.mjScale)       end
+    if CharacterMJImpactPanel then CharacterMJImpactPanel:SetScale(s.mjScale) end
+end
+
+function C:SetGroupScale(value)
+    local s = C:GetSettings()
+    local steps = math.floor(((Clamp(value, WINDOW_SCALE_MIN, WINDOW_SCALE_MAX) - WINDOW_SCALE_MIN) / WINDOW_SCALE_STEP) + 0.5)
+    s.groupScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
+    if CharacterGroupViewPanel then CharacterGroupViewPanel:SetScale(s.groupScale) end
 end
 
 function C:ApplyDisplaySettings()
     local s = C:GetSettings()
     C:SetWindowOpacity(s.windowOpacity)
-    C:SetWindowScale(s.windowScale)
+    C:SetPlayerScale(s.playerScale)
+    C:SetMJScale(s.mjScale)
+    C:SetGroupScale(s.groupScale)
     if C.SetLauncherSize then C:SetLauncherSize(s.launcherSize, false) end
 end
+
+-- ── Panneau ──────────────────────────────────────────────────────────────────
 
 local panel = CreateFrame("Frame", "CharacterSettingsPanel", UIParent)
 panel:SetSize(PANEL_W, PANEL_H)
@@ -81,8 +99,6 @@ UI.ApplyTitle(title)
 local closeBtn = UI.CreateCloseButton(panel, function() panel:Hide() end)
 if closeBtn and closeBtn.SetFrameLevel then closeBtn:SetFrameLevel(panel:GetFrameLevel() + 20) end
 
--- Note : le panneau Paramètres Character est lui-même le panneau de paramètres.
-
 local dragHandle = CreateFrame("Frame", nil, panel)
 dragHandle:SetPoint("TOPLEFT")
 dragHandle:SetPoint("TOPRIGHT")
@@ -98,6 +114,8 @@ sep:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -34)
 sep:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -34)
 sep:SetHeight(1)
 UI.ApplySeparator(sep)
+
+-- ── Sliders ───────────────────────────────────────────────────────────────────
 
 local function MakeSlider(labelText, y, minValue, maxValue, step, formatter, onChanged)
     local label = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -118,7 +136,6 @@ local function MakeSlider(labelText, y, minValue, maxValue, step, formatter, onC
     sliderBg:SetHeight(8)
     sliderBg:SetPoint("LEFT", slider)
     sliderBg:SetPoint("RIGHT", slider)
-
     slider:SetThumbTexture("Interface/Buttons/UI-SliderBar-Button-Horizontal")
 
     local valueText = slider:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -135,90 +152,103 @@ local function MakeSlider(labelText, y, minValue, maxValue, step, formatter, onC
 end
 
 local opacitySlider = MakeSlider(
-    "Opacité des fenêtres",
-    -50,
-    0.05,
-    1.00,
-    0.05,
-    function(value) return string.format("%.0f%%", value * 100) end,
-    function(value) C:SetWindowOpacity(value) end
+    "Opacité des fenêtres", -50,
+    0.05, 1.00, 0.05,
+    function(v) return string.format("%.0f%%", v * 100) end,
+    function(v) C:SetWindowOpacity(v) end
 )
 
 local launcherSlider = MakeSlider(
-    "Taille de l'icône",
-    -104,
-    28,
-    72,
-    2,
-    function(value) return string.format("%d px", math.floor(value + 0.5)) end,
-    function(value)
-        if C.SetLauncherSize then C:SetLauncherSize(value, true) end
-    end
+    "Taille de l'icône", -104,
+    28, 72, 2,
+    function(v) return string.format("%d px", math.floor(v + 0.5)) end,
+    function(v) if C.SetLauncherSize then C:SetLauncherSize(v, true) end end
 )
 
-local scaleLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-scaleLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -158)
-scaleLabel:SetText("Taille des fenêtres")
-UI.ApplyLabel(scaleLabel)
+-- ── Contrôles de taille (3 fenêtres séparées) ────────────────────────────────
 
-local scaleDecBtn = UI.CreatePanelButton(panel, 26, 22, "<")
-scaleDecBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -176)
+local function MakeScaleControl(labelText, y, getScale, setScale)
+    local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, y)
+    lbl:SetText(labelText)
+    UI.ApplyLabel(lbl)
 
-local scaleValueBox = CreateFrame("Frame", nil, panel)
-scaleValueBox:SetSize(PANEL_W - 96, 22)
-scaleValueBox:SetPoint("LEFT", scaleDecBtn, "RIGHT", 4, 0)
+    local decBtn = UI.CreatePanelButton(panel, 26, 22, "<")
+    decBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, y - 16)
 
-local scaleValueBg = scaleValueBox:CreateTexture(nil, "BACKGROUND")
-scaleValueBg:SetAllPoints()
-scaleValueBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+    local valueBox = CreateFrame("Frame", nil, panel)
+    valueBox:SetSize(PANEL_W - 96, 22)
+    valueBox:SetPoint("LEFT", decBtn, "RIGHT", 4, 0)
 
-local scaleValueBorder = scaleValueBox:CreateTexture(nil, "BORDER")
-scaleValueBorder:SetAllPoints()
-scaleValueBorder:SetColorTexture(UI.colors.panelButtonAccent[1], UI.colors.panelButtonAccent[2], UI.colors.panelButtonAccent[3], 0.50)
+    local vBg = valueBox:CreateTexture(nil, "BACKGROUND")
+    vBg:SetAllPoints()
+    vBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
 
-local scaleValueText = scaleValueBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-scaleValueText:SetPoint("CENTER")
-UI.ApplyBodyText(scaleValueText)
+    local vBorder = valueBox:CreateTexture(nil, "BORDER")
+    vBorder:SetAllPoints()
+    vBorder:SetColorTexture(
+        UI.colors.panelButtonAccent[1],
+        UI.colors.panelButtonAccent[2],
+        UI.colors.panelButtonAccent[3], 0.50)
 
-local scaleIncBtn = UI.CreatePanelButton(panel, 26, 22, ">")
-scaleIncBtn:SetPoint("LEFT", scaleValueBox, "RIGHT", 4, 0)
+    local valueText = valueBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    valueText:SetPoint("CENTER")
+    UI.ApplyBodyText(valueText)
 
-local function SetScaleBtnState(btn, enabled)
-    btn:SetEnabled(enabled)
-    btn:SetAlpha(enabled and 1 or 0.35)
-    btn:EnableMouse(enabled)
+    local incBtn = UI.CreatePanelButton(panel, 26, 22, ">")
+    incBtn:SetPoint("LEFT", valueBox, "RIGHT", 4, 0)
+
+    local function Refresh()
+        local scale = getScale()
+        valueText:SetText(string.format("%.0f%%", scale * 100))
+        decBtn:SetEnabled(scale > WINDOW_SCALE_MIN)
+        decBtn:SetAlpha(scale > WINDOW_SCALE_MIN and 1 or 0.35)
+        incBtn:SetEnabled(scale < WINDOW_SCALE_MAX)
+        incBtn:SetAlpha(scale < WINDOW_SCALE_MAX and 1 or 0.35)
+    end
+
+    decBtn:SetScript("OnClick", function()
+        setScale(getScale() - WINDOW_SCALE_STEP)
+        Refresh()
+    end)
+    incBtn:SetScript("OnClick", function()
+        setScale(getScale() + WINDOW_SCALE_STEP)
+        Refresh()
+    end)
+
+    return Refresh
 end
 
-local function RefreshScaleControl()
-    local scale = C:GetSettings().windowScale or DEFAULTS.windowScale
-    scaleValueText:SetText(string.format("%.0f%%", scale * 100))
-    SetScaleBtnState(scaleDecBtn, scale > WINDOW_SCALE_MIN)
-    SetScaleBtnState(scaleIncBtn, scale < WINDOW_SCALE_MAX)
-end
+local refreshPlayer = MakeScaleControl(
+    "Taille — Fiche personnage", -158,
+    function() return C:GetSettings().playerScale end,
+    function(v) C:SetPlayerScale(v) end
+)
 
-local function SetScaleFromControl(value)
-    C:SetWindowScale(value)
-    RefreshScaleControl()
-end
+local refreshMJ = MakeScaleControl(
+    "Taille — Vue MJ", -202,
+    function() return C:GetSettings().mjScale end,
+    function(v) C:SetMJScale(v) end
+)
 
-scaleDecBtn:SetScript("OnClick", function()
-    SetScaleFromControl((C:GetSettings().windowScale or DEFAULTS.windowScale) - WINDOW_SCALE_STEP)
-end)
+local refreshGroup = MakeScaleControl(
+    "Taille — Vue Joueur", -246,
+    function() return C:GetSettings().groupScale end,
+    function(v) C:SetGroupScale(v) end
+)
 
-scaleIncBtn:SetScript("OnClick", function()
-    SetScaleFromControl((C:GetSettings().windowScale or DEFAULTS.windowScale) + WINDOW_SCALE_STEP)
-end)
+-- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
 local function SyncControls()
     local s = C:GetSettings()
     opacitySlider:SetValue(s.windowOpacity)
     launcherSlider:SetValue(s.launcherSize)
-    RefreshScaleControl()
+    refreshPlayer()
+    refreshMJ()
+    refreshGroup()
 end
 
-panel:SetScript("OnShow", function()
-    SyncControls()
-end)
+panel:SetScript("OnShow", SyncControls)
 
 function C:ToggleSettings()
     if panel:IsShown() then
@@ -230,7 +260,6 @@ function C:ToggleSettings()
         else
             panel:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
         end
-        C:ApplyDisplaySettings()
         panel:Show()
     end
 end
