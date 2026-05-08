@@ -84,6 +84,19 @@ function OS.DB_Init()
     OmegaSpellDB.wowMacroProfiles.global = OmegaSpellDB.wowMacroProfiles.global or {}
     OmegaSpellDB.wowMacroProfiles.characters = OmegaSpellDB.wowMacroProfiles.characters or {}
 
+    -- Paramètres d'affichage
+    if not OmegaSpellDB.settings then
+        OmegaSpellDB.settings = {}
+    end
+    local cfg_s = OmegaSpellDB.settings
+    if cfg_s.launcherSize  == nil then cfg_s.launcherSize  = 36   end
+    if cfg_s.textScale     == nil then cfg_s.textScale     = 1.0  end
+    if cfg_s.windowScale   == nil then cfg_s.windowScale   = 1.0  end
+    if cfg_s.windowOpacity == nil then cfg_s.windowOpacity = 0.92 end
+    if cfg_s.slotSize      == nil then cfg_s.slotSize      = 41   end
+    if cfg_s.gapH          == nil then cfg_s.gapH          = 1    end
+    if cfg_s.gapV          == nil then cfg_s.gapV          = 1    end
+
     -- Migration : ancienne clé "groups" → "emoteGroups"
     if OmegaSpellDB.groups and not next(OmegaSpellDB.emoteGroups) then
         OmegaSpellDB.emoteGroups = OmegaSpellDB.groups

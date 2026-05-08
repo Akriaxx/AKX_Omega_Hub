@@ -11,6 +11,17 @@ local HUI = OS2.UI
 local MAX_SLOTS = 1000
 local SLOT_SIZE = 41
 local GAP = 1
+
+local function GetSlotSize()
+    return (OmegaSpellDB and OmegaSpellDB.settings and OmegaSpellDB.settings.slotSize) or SLOT_SIZE
+end
+local function GetGapH()
+    return (OmegaSpellDB and OmegaSpellDB.settings and OmegaSpellDB.settings.gapH) or GAP
+end
+local function GetGapV()
+    return (OmegaSpellDB and OmegaSpellDB.settings and OmegaSpellDB.settings.gapV) or GAP
+end
+
 local PAD = 10
 local HEADER_H = 24
 local MIN_COLS = 1
@@ -109,8 +120,8 @@ local function ApplyFrameSize(frame)
     cfg.cols = Clamp(cfg.cols or 12, MIN_COLS, MAX_COLS)
     cfg.rows = Clamp(cfg.rows or 1, MIN_ROWS, MAX_ROWS)
     local rows = GetRowCount(cfg)
-    local w = cfg.w or (PAD * 2 + (cfg.cols * SLOT_SIZE) + ((cfg.cols - 1) * GAP))
-    local h = cfg.h or (HEADER_H + PAD * 2 + (rows * SLOT_SIZE) + ((rows - 1) * GAP))
+    local w = cfg.w or (PAD * 2 + (cfg.cols * GetSlotSize()) + ((cfg.cols - 1) * GetGapH()))
+    local h = cfg.h or (HEADER_H + PAD * 2 + (rows * GetSlotSize()) + ((rows - 1) * GetGapV()))
     frame:SetSize(w, h)
 end
 
@@ -500,7 +511,12 @@ local function SlotTooltip(btn)
         -- Description du sort / sort natif / arcanum
         if btn.description and btn.description ~= "" then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine(btn.description, 1, 1, 1, true)
+            -- ||n = saut de ligne dans le format Arcanum/SpellCreator
+            -- On normalise aussi |n simple pour couvrir les deux cas
+            local desc = btn.description:gsub("||n", "\n"):gsub("|n", "\n")
+            for line in (desc .. "\n"):gmatch("(.-)\n") do
+                GameTooltip:AddLine(line ~= "" and line or " ", 1, 1, 1, true)
+            end
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Clic gauche : lancer", 0.55, 0.55, 0.55)
@@ -519,7 +535,7 @@ end
 
 local function CreateSlot(frame, slotIndex)
     local btn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+    btn:SetSize(GetSlotSize(), GetSlotSize())
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     btn:SetBackdrop({
@@ -654,8 +670,9 @@ local function RefreshSlot(frame, slotIndex)
 
     local col = (slotIndex - 1) % cfg.cols
     local row = math.floor((slotIndex - 1) / cfg.cols)
+    btn:SetSize(GetSlotSize(), GetSlotSize())
     btn:ClearAllPoints()
-    btn:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD + col * (SLOT_SIZE + GAP), -(HEADER_H + PAD + row * (SLOT_SIZE + GAP)))
+    btn:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD + col * (GetSlotSize() + GetGapH()), -(HEADER_H + PAD + row * (GetSlotSize() + GetGapV())))
     btn:Show()
 
     local data = GetSlotData(frame.barIndex, slotIndex)
@@ -721,8 +738,8 @@ local function ApplyGridFromSize(frame)
 
     cfg.w = width
     cfg.h = height
-    cfg.cols = Clamp(math.floor((width - PAD * 2 + GAP) / (SLOT_SIZE + GAP)), MIN_COLS, MAX_COLS)
-    cfg.rows = Clamp(math.floor((height - HEADER_H - PAD * 2 + GAP) / (SLOT_SIZE + GAP)), MIN_ROWS, MAX_ROWS)
+    cfg.cols = Clamp(math.floor((width - PAD * 2 + GetGapH()) / (GetSlotSize() + GetGapH())), MIN_COLS, MAX_COLS)
+    cfg.rows = Clamp(math.floor((height - HEADER_H - PAD * 2 + GetGapV()) / (GetSlotSize() + GetGapV())), MIN_ROWS, MAX_ROWS)
 
     if oldCols == cfg.cols and oldRows == cfg.rows and oldW == width and oldH == height then
         return
@@ -756,8 +773,8 @@ local function CreateResizeHandle(frame)
         frame:StopMovingOrSizing()
         -- Snap à la grille une fois le drag terminé
         local cfg = frame.cfg
-        local w = PAD * 2 + (cfg.cols * SLOT_SIZE) + ((cfg.cols - 1) * GAP)
-        local h = HEADER_H + PAD * 2 + (cfg.rows * SLOT_SIZE) + ((cfg.rows - 1) * GAP)
+        local w = PAD * 2 + (cfg.cols * GetSlotSize()) + ((cfg.cols - 1) * GetGapH())
+        local h = HEADER_H + PAD * 2 + (cfg.rows * GetSlotSize()) + ((cfg.rows - 1) * GetGapV())
         cfg.w = w
         cfg.h = h
         frame:SetSize(w, h)
@@ -992,8 +1009,8 @@ local function CreateBarFrame(barIndex, cfg)
         local w = math.max(MIN_W, self:GetWidth())
         local h = math.max(MIN_H, self:GetHeight())
         local cfg = self.cfg
-        local newCols = Clamp(math.floor((w - PAD * 2 + GAP) / (SLOT_SIZE + GAP)), MIN_COLS, MAX_COLS)
-        local newRows = Clamp(math.floor((h - HEADER_H - PAD * 2 + GAP) / (SLOT_SIZE + GAP)), MIN_ROWS, MAX_ROWS)
+        local newCols = Clamp(math.floor((w - PAD * 2 + GetGapH()) / (GetSlotSize() + GetGapH())), MIN_COLS, MAX_COLS)
+        local newRows = Clamp(math.floor((h - HEADER_H - PAD * 2 + GetGapV()) / (GetSlotSize() + GetGapV())), MIN_ROWS, MAX_ROWS)
         if newCols ~= cfg.cols or newRows ~= cfg.rows then
             cfg.cols = newCols
             cfg.rows = newRows

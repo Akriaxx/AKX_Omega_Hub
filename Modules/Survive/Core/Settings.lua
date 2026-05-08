@@ -9,6 +9,7 @@ local HEADER_H  = TITLE_H + TAB_H + 1   -- entête + tab bar + separator
 local PAD_BOT   = 20           -- bottom padding for each tab
 
 local TABS = { "Affichage", "Options", "Module", "Crédit" }
+local TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP = 0.60, 1.40, 0.05
 local WINDOW_SCALE_MIN  = 0.60
 local WINDOW_SCALE_MAX  = 1.60
 local WINDOW_SCALE_STEP = 0.05
@@ -17,6 +18,28 @@ local UI = OS2.UI or {}
 local tabBtns    = {}
 local tabContent = {}
 local selectedTab = 1
+
+-- ── Texte scale (infrastructure) ─────────────────────────────────────────
+OS2.textScaleFontStrings = OS2.textScaleFontStrings or {}
+
+OS2.RegisterTextScaleFS = OS2.RegisterTextScaleFS or function(fs, baseSize)
+    table.insert(OS2.textScaleFontStrings, { fs = fs, size = baseSize or 10 })
+end
+
+OS2.GetTextScale = OS2.GetTextScale or function()
+    return (OS2DB and OS2DB.textScale) or 1.0
+end
+
+OS2.SetTextScale = OS2.SetTextScale or function(value)
+    local scale = math.max(TEXT_SCALE_MIN, math.min(TEXT_SCALE_MAX, tonumber(value) or 1.0))
+    if OS2DB then OS2DB.textScale = scale end
+    local path = "Fonts\\FRIZQT__.TTF"
+    for _, entry in ipairs(OS2.textScaleFontStrings) do
+        if entry.fs and entry.fs.SetFont then
+            entry.fs:SetFont(path, math.max(6, math.floor(entry.size * scale + 0.5)), "")
+        end
+    end
+end
 
 ------------------------------------------------------------------------
 -- Hauteur dynamique
@@ -37,8 +60,8 @@ local function SelectTab(idx)
     end
 
     if idx == 1 then
-        -- opacity, taille des icônes, taille des fenêtres, séparateur, animations, type de menu
-        SetTabHeight(396)
+        -- opacity, lanceur, texte, icônes, fenêtres, séparateur, animations, type de menu
+        SetTabHeight(448)
     elseif idx == 2 then
         SetTabHeight(315)
     elseif idx == 3 then
@@ -211,14 +234,46 @@ end)
 launcherSizeSlider:SetValue(OS2.GetLauncherSize and OS2.GetLauncherSize() or 36)
 OS2.launcherSizeSlider = launcherSizeSlider
 
+local textSizeLabel = affichage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+textSizeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -148)
+textSizeLabel:SetText("Taille du texte")
+UI.ApplyLabel(textSizeLabel)
+
+local textSizeSlider = CreateFrame("Slider", nil, affichage)
+textSizeSlider:SetSize(PANEL_W - 28, 14)
+textSizeSlider:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -164)
+textSizeSlider:SetOrientation("HORIZONTAL")
+textSizeSlider:SetMinMaxValues(TEXT_SCALE_MIN, TEXT_SCALE_MAX)
+textSizeSlider:SetValueStep(TEXT_SCALE_STEP)
+textSizeSlider:SetObeyStepOnDrag(true)
+
+local textSizeSliderBg = textSizeSlider:CreateTexture(nil, "BACKGROUND")
+textSizeSliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
+textSizeSliderBg:SetHeight(8)
+textSizeSliderBg:SetPoint("LEFT",  textSizeSlider)
+textSizeSliderBg:SetPoint("RIGHT", textSizeSlider)
+textSizeSlider:SetThumbTexture("Interface/Buttons/UI-SliderBar-Button-Horizontal")
+
+local textSizeValueText = textSizeSlider:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+textSizeValueText:SetPoint("TOP", textSizeSlider, "BOTTOM", 0, -4)
+UI.ApplyBodyText(textSizeValueText)
+
+textSizeSlider:SetScript("OnValueChanged", function(self, value)
+    textSizeValueText:SetText(string.format("%.0f%%", value * 100))
+    OS2.SetTextScale(value)
+end)
+
+textSizeSlider:SetValue(OS2.GetTextScale())
+OS2.textSizeSlider = textSizeSlider
+
 local iconSizeLabel = affichage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-iconSizeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -148)
+iconSizeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -200)
 iconSizeLabel:SetText("Taille des icônes du menu")
 UI.ApplyLabel(iconSizeLabel)
 
 local iconSizeSlider = CreateFrame("Slider", nil, affichage)
 iconSizeSlider:SetSize(PANEL_W - 28, 14)
-iconSizeSlider:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -164)
+iconSizeSlider:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -216)
 iconSizeSlider:SetOrientation("HORIZONTAL")
 iconSizeSlider:SetMinMaxValues(24, 64)
 iconSizeSlider:SetValueStep(2)
@@ -248,7 +303,7 @@ iconSizeSlider:SetValue(OS2.GetIconSize and OS2.GetIconSize() or 36)
 OS2.iconSizeSlider = iconSizeSlider
 
 local windowSizeLabel = affichage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-windowSizeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -214)
+windowSizeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -266)
 windowSizeLabel:SetText("Taille des fenêtres")
 UI.ApplyLabel(windowSizeLabel)
 
@@ -259,7 +314,7 @@ local function NormalizeWindowScale(value)
 end
 
 local windowScaleDecBtn = CreatePanelButton(affichage, 26, 22, "<")
-windowScaleDecBtn:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -232)
+windowScaleDecBtn:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -284)
 
 local windowScaleValueBox = CreateFrame("Frame", nil, affichage)
 windowScaleValueBox:SetSize(PANEL_W - 96, 22)
@@ -317,13 +372,13 @@ OS2.RefreshWindowScaleControl()
 local animSep = affichage:CreateTexture(nil, "ARTWORK")
 UI.ApplySeparator(animSep)
 animSep:SetHeight(1)
-animSep:SetPoint("TOPLEFT",  affichage, "TOPLEFT",  14, -272)
-animSep:SetPoint("TOPRIGHT", affichage, "TOPRIGHT", -14, -272)
+animSep:SetPoint("TOPLEFT",  affichage, "TOPLEFT",  14, -324)
+animSep:SetPoint("TOPRIGHT", affichage, "TOPRIGHT", -14, -324)
 
 -- Checkbox animations
 local animCheck, animLabel = UI.CreateStyledCheckbox(affichage, "Activer les animations")
 animCheck:SetSize(18, 18)
-animCheck:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -286)
+animCheck:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -338)
 animLabel:SetPoint("LEFT", animCheck, "RIGHT", 6, 0)
 
 animCheck:SetScript("OnClick", function(self)
@@ -333,6 +388,7 @@ end)
 -- sync checkbox state on panel open
 panel:HookScript("OnShow", function()
     animCheck:SetChecked(OS2.AnimationsEnabled())
+    if OS2.textSizeSlider then OS2.textSizeSlider:SetValue(OS2.GetTextScale()) end
 end)
 
 OS2.animCheck = animCheck
@@ -343,11 +399,11 @@ OS2.animCheck = animCheck
 local menuTypeSep = affichage:CreateTexture(nil, "ARTWORK")
 UI.ApplySeparator(menuTypeSep)
 menuTypeSep:SetHeight(1)
-menuTypeSep:SetPoint("TOPLEFT",  affichage, "TOPLEFT",  14, -316)
-menuTypeSep:SetPoint("TOPRIGHT", affichage, "TOPRIGHT", -14, -316)
+menuTypeSep:SetPoint("TOPLEFT",  affichage, "TOPLEFT",  14, -368)
+menuTypeSep:SetPoint("TOPRIGHT", affichage, "TOPRIGHT", -14, -368)
 
 local menuTypeLabel = affichage:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-menuTypeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -330)
+menuTypeLabel:SetPoint("TOPLEFT", affichage, "TOPLEFT", 14, -382)
 menuTypeLabel:SetText("Type de menu")
 UI.ApplyLabel(menuTypeLabel)
 
@@ -366,7 +422,7 @@ for i, opt in ipairs(MENU_TYPE_OPTIONS) do
     local col = (i - 1) % 2
     local row = math.floor((i - 1) / 2)
     local xOff = 14 + col * (HALF_BTN_W + 4)
-    local yOff = -348 - row * 26
+    local yOff = -400 - row * 26
 
     local btn = CreatePanelButton(affichage, HALF_BTN_W, 22, opt.label)
     btn:SetPoint("TOPLEFT", affichage, "TOPLEFT", xOff, yOff)

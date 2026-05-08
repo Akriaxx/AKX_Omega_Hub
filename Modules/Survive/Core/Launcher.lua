@@ -1839,6 +1839,9 @@ local function RefreshExternalControls()
     if OS2.RefreshLanternQuickControls then
         OS2.RefreshLanternQuickControls()
     end
+    if OS2.RefreshTorchQuickControls then
+        OS2.RefreshTorchQuickControls()
+    end
 end
 
 local function GetActiveButtons()

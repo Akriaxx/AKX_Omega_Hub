@@ -33,6 +33,7 @@ Modules\Dice\Modules\Commands.lua
 ## -- Omega Speak --
 Modules\Speak\Omega_Speak_UI.lua
 Modules\Speak\Omega_Speak.lua
+Modules\Speak\OmegaSpeak_Settings.lua
 
 ## -- Omega Spell --
 Modules\Spell\OmegaSpell_Data.lua
@@ -50,6 +51,7 @@ Modules\Spell\OmegaSpell_Bar.lua
 Modules\Spell\OmegaSpell_WoWMacroBrowser.lua
 Modules\Spell\OmegaSpell_IconBrowser.lua
 Modules\Spell\OmegaSpell_UI.lua
+Modules\Spell\OmegaSpell_Settings.lua
 Modules\Spell\OmegaSpell_Core.lua
 
 ## -- Omega Survive --

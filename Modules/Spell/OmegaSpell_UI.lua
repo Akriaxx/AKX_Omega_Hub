@@ -249,6 +249,7 @@ do
     local bg = panel:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     HUI.ApplyWindowBackground(bg, 0.97)
+    panel.bg = bg
     panel:SetBackdrop({
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 16,
@@ -280,6 +281,34 @@ do
     HUI.ApplyTitle(titleFS)
 
     HUI.CreateCloseButton(panel, function() panel:Hide() end)
+
+    -- Bouton paramètres (à gauche du bouton fermeture)
+    local settingsBtn = CreateFrame("Button", nil, panel)
+    settingsBtn:SetSize(16, 16)
+    settingsBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -28, -8)
+    settingsBtn:SetFrameLevel(panel:GetFrameLevel() + 10)
+    settingsBtn:EnableMouse(true)
+    settingsBtn:RegisterForClicks("AnyButtonUp")
+
+    local sbTex = settingsBtn:CreateTexture(nil, "ARTWORK")
+    sbTex:SetAllPoints()
+    sbTex:SetTexture("Interface/Icons/INV_Misc_Gear_01")
+    sbTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local sbHl = settingsBtn:CreateTexture(nil, "HIGHLIGHT")
+    sbHl:SetTexture("Interface/Buttons/ButtonHilight-Square")
+    sbHl:SetAllPoints()
+    sbHl:SetBlendMode("ADD")
+
+    settingsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Paramètres", 0.95, 0.90, 0.78)
+        GameTooltip:Show()
+    end)
+    settingsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    settingsBtn:SetScript("OnClick", function()
+        if OS.ToggleSettings then OS:ToggleSettings() end
+    end)
 end
 
 -- Séparateur sous le header

@@ -260,6 +260,7 @@ local closeBtn = UI.CreateCloseButton(mjPanel, function() mjPanel:Hide() end)
 closeBtn:ClearAllPoints()
 closeBtn:SetPoint("TOPRIGHT", mjPanel, "TOPRIGHT", -3, -3)
 closeBtn:SetSize(18, 16)
+
 closeBtn:EnableMouse(true)
 closeBtn:RegisterForClicks("LeftButtonUp")
 if closeBtn.label then

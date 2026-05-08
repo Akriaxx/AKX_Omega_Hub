@@ -81,6 +81,8 @@ UI.ApplyTitle(title)
 local closeBtn = UI.CreateCloseButton(panel, function() panel:Hide() end)
 if closeBtn and closeBtn.SetFrameLevel then closeBtn:SetFrameLevel(panel:GetFrameLevel() + 20) end
 
+-- Note : le panneau Paramètres Character est lui-même le panneau de paramètres.
+
 local dragHandle = CreateFrame("Frame", nil, panel)
 dragHandle:SetPoint("TOPLEFT")
 dragHandle:SetPoint("TOPRIGHT")

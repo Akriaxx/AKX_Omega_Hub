@@ -121,6 +121,8 @@ initFrame:SetScript("OnEvent", function()
         btn:ClearAllPoints()
         btn:SetPoint(p.point or "CENTER", UIParent, p.relPoint or "CENTER", p.x or 0, p.y or -300)
     end
+    -- Applique les paramètres d'affichage (taille, opacité, échelle)
+    if OS.ApplySettings then OS:ApplySettings() end
     initFrame:UnregisterAllEvents()
 end)
 

@@ -325,6 +325,8 @@ local function CreateLauncher()
         TogglePanel()
     end)
 
+    OS.Launcher = launcher
+
     local mask = launcher:CreateMaskTexture()
     mask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     mask:SetAllPoints(launcher)
@@ -367,6 +369,7 @@ local function CreatePanel()
     UI.ApplyWindowBackground(bg, 0.92)
     panel.bg = bg
 
+
     local borderTop = panel:CreateTexture(nil, "ARTWORK")
     borderTop:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
     borderTop:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -1, -1)
@@ -407,10 +410,42 @@ local function CreatePanel()
         HidePanel()
     end)
 
+    -- Bouton paramètres (à gauche du bouton fermeture)
+    local settingsBtn = CreateFrame("Button", nil, panel)
+    settingsBtn:SetSize(16, 16)
+    settingsBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -28, -8)
+    settingsBtn:SetFrameLevel(panel:GetFrameLevel() + 10)
+    settingsBtn:EnableMouse(true)
+    settingsBtn:RegisterForClicks("AnyButtonUp")
+
+    local sbTex = settingsBtn:CreateTexture(nil, "ARTWORK")
+    sbTex:SetAllPoints()
+    sbTex:SetTexture("Interface/Icons/INV_Misc_Gear_01")
+    sbTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local sbHl = settingsBtn:CreateTexture(nil, "HIGHLIGHT")
+    sbHl:SetTexture("Interface/Buttons/ButtonHilight-Square")
+    sbHl:SetAllPoints()
+    sbHl:SetBlendMode("ADD")
+
+    settingsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Paramètres", 0.95, 0.90, 0.78)
+        GameTooltip:Show()
+    end)
+    settingsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    settingsBtn:SetScript("OnClick", function()
+        if OS.ToggleSettings then OS:ToggleSettings() end
+    end)
+
+    OS.panel  = panel
+
     editBox = UI.CreateStyledEditBox(panel, 396, 44, true)
     editBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
     editBox:SetFontObject(ChatFontNormal)
     editBox:SetMaxLetters(4000)
+
+    OS.editBox = editBox
 
     editBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
@@ -463,6 +498,8 @@ function OS:Enable()
     launcher:Show()
     UpdateLauncherVisualState()
 
+    if OS.ApplySettings then OS:ApplySettings() end
+
     if OS.db.panelOpen then ShowPanel() else HidePanel() end
 
     SLASH_OMEGASPEAK1 = "/ospeak"
@@ -502,6 +539,12 @@ eventFrame:SetScript("OnEvent", function()
     if OmegaSpeakDB.launcherY  == nil then OmegaSpeakDB.launcherY  = 0     end
     if OmegaSpeakDB.panelOpen  == nil then OmegaSpeakDB.panelOpen  = false  end
     if OmegaSpeakDB.channelKey == nil then OmegaSpeakDB.channelKey = "SAY" end
+    OmegaSpeakDB.settings = OmegaSpeakDB.settings or {}
+    local _s = OmegaSpeakDB.settings
+    if _s.launcherSize  == nil then _s.launcherSize  = 36   end
+    if _s.textScale     == nil then _s.textScale     = 1.0  end
+    if _s.windowScale   == nil then _s.windowScale   = 1.0  end
+    if _s.windowOpacity == nil then _s.windowOpacity = 0.92 end
     OS.db = OmegaSpeakDB
 
     -- Lie la référence du module au Hub pour Enable/Disable dynamique
