@@ -58,7 +58,7 @@ local function MakeGauge(parent, key, y)
     label:SetWidth(34)
     label:SetJustifyH("LEFT")
     label:SetText(cfg.label)
-    label:SetTextColor(0.95, 0.88, 0.56, 1)
+    UI.ApplyBodyText(label)
 
     local rParen = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     rParen:SetPoint("RIGHT", row, "RIGHT", -4, 0)
@@ -191,33 +191,7 @@ bg:SetAllPoints()
 UI.ApplyWindowBackground(bg)
 panel.bg = bg
 
-local function MakeBorder(edge)
-    local tex = panel:CreateTexture(nil, "BORDER")
-    tex:SetColorTexture(0.80, 0.70, 0.40, 0.22)
-    if edge == "TOP" then
-        tex:SetPoint("TOPLEFT")
-        tex:SetPoint("TOPRIGHT")
-        tex:SetHeight(1)
-    elseif edge == "BOTTOM" then
-        tex:SetPoint("BOTTOMLEFT")
-        tex:SetPoint("BOTTOMRIGHT")
-        tex:SetHeight(1)
-    elseif edge == "LEFT" then
-        tex:SetPoint("TOPLEFT")
-        tex:SetPoint("BOTTOMLEFT")
-        tex:SetWidth(1)
-    else
-        tex:SetPoint("TOPRIGHT")
-        tex:SetPoint("BOTTOMRIGHT")
-        tex:SetWidth(1)
-    end
-    return tex
-end
-
-MakeBorder("TOP")
-MakeBorder("BOTTOM")
-MakeBorder("LEFT")
-MakeBorder("RIGHT")
+UI.ApplyBorder(panel)
 
 MakeTitleBar(panel)
 UI.CreateCloseButton(panel, function() panel:Hide() end)

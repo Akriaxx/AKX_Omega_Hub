@@ -18,9 +18,9 @@ local panel, content, valueEB, statusFS, multiCB, applyBtn
 local ShowGroupStatus
 
 local COLORS = {
-    hp        = { fg = {0.85, 0.15, 0.15, 1}, bg = {0.20, 0.04, 0.04, 1}, label = "HP" },
-    mana      = { fg = {0.18, 0.42, 0.90, 1}, bg = {0.04, 0.11, 0.27, 1}, label = "Mana" },
-    endurance = { fg = {0.10, 0.70, 0.20, 1}, bg = {0.03, 0.16, 0.05, 1}, label = "End." },
+    hp        = UI.colors.statHP,
+    mana      = UI.colors.statMana,
+    endurance = UI.colors.statEnd,
 }
 
 local ACTIONS = {
@@ -121,12 +121,12 @@ local function MakeRow(parent, name)
 
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.06, 0.06, 0.06, 0.92)
+    bg:SetColorTexture(unpack(UI.colors.rowBg))
     row.bg = bg
 
     local selectedTex = row:CreateTexture(nil, "BORDER")
     selectedTex:SetAllPoints()
-    selectedTex:SetColorTexture(0.78, 0.62, 0.24, 0.18)
+    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
     selectedTex:Hide()
     row.selectedTex = selectedTex
 
@@ -141,17 +141,17 @@ local function MakeRow(parent, name)
     barBg:SetPoint("LEFT", row, "LEFT", 6, -9)
     barBg:SetPoint("RIGHT", row, "RIGHT", -6, -9)
     barBg:SetHeight(BAR_H)
-    barBg:SetColorTexture(COLORS.hp.bg[1], COLORS.hp.bg[2], COLORS.hp.bg[3], 1)
+    barBg:SetColorTexture(unpack(UI.colors.statHP.bg))
 
     local fill = row:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("LEFT", barBg, "LEFT", 0, 0)
     fill:SetHeight(BAR_H)
-    fill:SetColorTexture(COLORS.hp.fg[1], COLORS.hp.fg[2], COLORS.hp.fg[3], 1)
+    fill:SetColorTexture(unpack(UI.colors.statHP.fg))
     fill:SetWidth(1)
 
     local tempFill = row:CreateTexture(nil, "ARTWORK")
     tempFill:SetHeight(BAR_H)
-    tempFill:SetColorTexture(0.95, 0.74, 0.20, 0.88)
+    tempFill:SetColorTexture(unpack(UI.colors.tempFill))
     tempFill:SetWidth(1)
     tempFill:Hide()
 
@@ -196,10 +196,10 @@ local function MakeRow(parent, name)
     function row:SetSelected(selected)
         if selected then
             selectedTex:Show()
-            bg:SetColorTexture(0.10, 0.085, 0.045, 0.96)
+            bg:SetColorTexture(unpack(UI.colors.rowBgSelected))
         else
             selectedTex:Hide()
-            bg:SetColorTexture(0.06, 0.06, 0.06, 0.92)
+            bg:SetColorTexture(unpack(UI.colors.rowBg))
         end
     end
 
@@ -333,8 +333,8 @@ local function Build()
     end)
     refreshBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Actualisé", 0.95, 0.90, 0.78)
-        GameTooltip:AddLine("Recharge les données du groupe.", 0.72, 0.68, 0.55)
+        GameTooltip:AddLine("Actualisé", unpack(UI.colors.title))
+        GameTooltip:AddLine("Recharge les données du groupe.", unpack(UI.colors.textMuted))
         GameTooltip:Show()
     end)
     refreshBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -343,17 +343,7 @@ local function Build()
     closeBtn:ClearAllPoints()
     closeBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -3, -2)
     closeBtn:SetSize(18, 15)
-    closeBtn:EnableMouse(true)
-    closeBtn:RegisterForClicks("LeftButtonUp")
     closeBtn:SetFrameLevel(panel:GetFrameLevel() + 50)
-    if closeBtn.label then
-        closeBtn.label:SetText("x")
-        closeBtn.label:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-        closeBtn.label:ClearAllPoints()
-        closeBtn.label:SetAllPoints(closeBtn)
-        closeBtn.label:SetJustifyH("CENTER")
-        closeBtn.label:SetJustifyV("MIDDLE")
-    end
 
     local sep = panel:CreateTexture(nil, "ARTWORK")
     sep:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -19)

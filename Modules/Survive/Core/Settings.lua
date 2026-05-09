@@ -432,7 +432,7 @@ for i, opt in ipairs(MENU_TYPE_OPTIONS) do
     activeLine:SetHeight(2)
     activeLine:SetPoint("BOTTOMLEFT",  btn, "BOTTOMLEFT",  2, 1)
     activeLine:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
-    activeLine:SetColorTexture(0.80, 0.70, 0.40, 1)
+    activeLine:SetColorTexture(unpack(UI.colors.tabLine))
     activeLine:Hide()
     btn.activeLine = activeLine
 

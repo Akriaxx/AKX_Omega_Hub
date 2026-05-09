@@ -90,6 +90,7 @@ panel:Hide()
 local bg = panel:CreateTexture(nil, "BACKGROUND")
 bg:SetAllPoints()
 UI.ApplyWindowBackground(bg, 0.92)
+UI.ApplyBorder(panel)
 
 local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 title:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)

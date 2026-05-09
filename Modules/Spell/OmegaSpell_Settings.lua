@@ -118,18 +118,7 @@ do
     local sBg = settingsPanel:CreateTexture(nil, "BACKGROUND")
     sBg:SetAllPoints()
     HUI.ApplyWindowBackground(sBg, 0.92)
-
-    local function MakeBorder(p1, p1x, p1y, p2, p2x, p2y, isVert)
-        local t = settingsPanel:CreateTexture(nil, "ARTWORK")
-        t:SetPoint(p1, settingsPanel, p1, p1x, p1y)
-        t:SetPoint(p2, settingsPanel, p2, p2x, p2y)
-        t:SetColorTexture(0.60, 0.52, 0.28, 1)
-        if isVert then t:SetWidth(1) else t:SetHeight(1) end
-    end
-    MakeBorder("TOPLEFT",    1,-1, "TOPRIGHT",   -1,-1, false)
-    MakeBorder("BOTTOMLEFT", 1, 1, "BOTTOMRIGHT",-1, 1, false)
-    MakeBorder("TOPLEFT",    1,-1, "BOTTOMLEFT",  1, 1, true)
-    MakeBorder("TOPRIGHT",  -1,-1, "BOTTOMRIGHT",-1, 1, true)
+    HUI.ApplyBorder(settingsPanel)
 
     local sTitle = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     sTitle:SetPoint("TOPLEFT", settingsPanel, "TOPLEFT", 10, -10)

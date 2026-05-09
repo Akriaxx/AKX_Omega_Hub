@@ -6,10 +6,10 @@
 local C  = Character
 local UI = OS2.UI
 
--- Couleurs de barre (identiques à UI_Player)
-local COL_HP  = { fg = {0.85, 0.15, 0.15, 1}, dim = {0.20, 0.04, 0.04, 1} }
-local COL_MP  = { fg = {0.18, 0.42, 0.90, 1}, dim = {0.04, 0.11, 0.27, 1} }
-local COL_END = { fg = {0.10, 0.70, 0.20, 1}, dim = {0.03, 0.16, 0.05, 1} }
+-- Couleurs de barre (partagées depuis UI.lua)
+local COL_HP  = { fg = UI.colors.statHP.fg,   dim = UI.colors.statHP.bg   }
+local COL_MP  = { fg = UI.colors.statMana.fg,  dim = UI.colors.statMana.bg  }
+local COL_END = { fg = UI.colors.statEnd.fg,   dim = UI.colors.statEnd.bg   }
 
 local rows = {}
 local selectedPlayers = {}
@@ -33,10 +33,9 @@ local function MakeTitleBar(parent, text)
 
     local bgTex = bar:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints()
-    bgTex:SetColorTexture(0.08, 0.08, 0.08, 1)
+    bgTex:SetColorTexture(unpack(UI.colors.panelButtonBg))
 
     local lbl = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lbl:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     UI.ApplyTitle(lbl)
     lbl:SetText(text)
     lbl:SetPoint("LEFT", bar, "LEFT", 8, 0)
@@ -65,12 +64,11 @@ local function MiniStatRow(parent, col)
     local tempFill = row:CreateTexture(nil, "ARTWORK")
     tempFill:SetPoint("TOPLEFT", barBg)
     tempFill:SetHeight(9)
-    tempFill:SetColorTexture(0.95, 0.74, 0.20, 0.88)
+    tempFill:SetColorTexture(unpack(UI.colors.tempFill))
     tempFill:SetWidth(1)
     tempFill:Hide()
 
     local valTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    valTxt:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
     UI.ApplyMutedText(valTxt)
     valTxt:SetText("—"); valTxt:SetWidth(82); valTxt:SetHeight(12)
     valTxt:SetWordWrap(false)
@@ -137,13 +135,13 @@ local function PlayerRow(parent, playerName)
     -- Fond
     local bgTex = row:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints()
-    bgTex:SetColorTexture(0.06, 0.06, 0.06, 1)
+    bgTex:SetColorTexture(unpack(UI.colors.rowBg))
     row.bgTex = bgTex
 
     local selectedTex = row:CreateTexture(nil, "BORDER")
     selectedTex:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
     selectedTex:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
-    selectedTex:SetColorTexture(0.78, 0.62, 0.24, 0.18)
+    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
     selectedTex:Hide()
     row.selectedTex = selectedTex
 
@@ -155,15 +153,13 @@ local function PlayerRow(parent, playerName)
 
     -- Nom du joueur
     local nameTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameTxt:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     UI.ApplyBodyText(nameTxt)
     nameTxt:SetText(playerName)
     nameTxt:SetPoint("TOPLEFT", PAD, -4)
 
     -- Labels des stats
     local function StatLabel(txt, col, yOff)
-        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetTextColor(col.fg[1], col.fg[2], col.fg[3], 1)
         lbl:SetText(txt); lbl:SetWidth(28); lbl:SetJustifyH("LEFT")
         lbl:SetPoint("TOPLEFT", PAD, yOff)
@@ -189,8 +185,7 @@ local function PlayerRow(parent, playerName)
     SetBarLayout(barEN, lEN, -53)
 
     -- "Pas de données" placeholder
-    local noData = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    noData:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    local noData = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     UI.ApplySoftText(noData)
     noData:SetText("En attente de données...")
     noData:SetPoint("LEFT", PAD, 0); noData:Hide()
@@ -198,10 +193,10 @@ local function PlayerRow(parent, playerName)
     function row:SetSelected(selected)
         if selected then
             selectedTex:Show()
-            bgTex:SetColorTexture(0.10, 0.085, 0.045, 1)
+            bgTex:SetColorTexture(unpack(UI.colors.rowBgSelected))
         else
             selectedTex:Hide()
-            bgTex:SetColorTexture(0.06, 0.06, 0.06, 1)
+            bgTex:SetColorTexture(unpack(UI.colors.rowBg))
         end
     end
 
@@ -261,16 +256,6 @@ closeBtn:ClearAllPoints()
 closeBtn:SetPoint("TOPRIGHT", mjPanel, "TOPRIGHT", -3, -3)
 closeBtn:SetSize(18, 16)
 
-closeBtn:EnableMouse(true)
-closeBtn:RegisterForClicks("LeftButtonUp")
-if closeBtn.label then
-    closeBtn.label:SetText("x")
-    closeBtn.label:SetFont("Fonts\\FRIZQT__.TTF", 9, "")
-    closeBtn.label:ClearAllPoints()
-    closeBtn.label:SetAllPoints(closeBtn)
-    closeBtn.label:SetJustifyH("CENTER")
-    closeBtn.label:SetJustifyV("MIDDLE")
-end
 if closeBtn and closeBtn.SetFrameLevel then
     closeBtn:SetFrameLevel(mjPanel:GetFrameLevel() + 50)
 end

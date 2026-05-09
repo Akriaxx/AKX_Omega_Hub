@@ -1,6 +1,6 @@
 OmegaSpeak = OmegaSpeak or {}
 local OS = OmegaSpeak
-local UI = OmegaSpeak.UI
+local UI = OS2.UI
 
 OS.maxTotalLength = 255
 OS.sendDelay = 0.35
@@ -369,30 +369,7 @@ local function CreatePanel()
     UI.ApplyWindowBackground(bg, 0.92)
     panel.bg = bg
 
-
-    local borderTop = panel:CreateTexture(nil, "ARTWORK")
-    borderTop:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
-    borderTop:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -1, -1)
-    borderTop:SetHeight(1)
-    borderTop:SetColorTexture(0.60, 0.52, 0.28, 1)
-
-    local borderBottom = panel:CreateTexture(nil, "ARTWORK")
-    borderBottom:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 1, 1)
-    borderBottom:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
-    borderBottom:SetHeight(1)
-    borderBottom:SetColorTexture(0.60, 0.52, 0.28, 1)
-
-    local borderLeft = panel:CreateTexture(nil, "ARTWORK")
-    borderLeft:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
-    borderLeft:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 1, 1)
-    borderLeft:SetWidth(1)
-    borderLeft:SetColorTexture(0.60, 0.52, 0.28, 1)
-
-    local borderRight = panel:CreateTexture(nil, "ARTWORK")
-    borderRight:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -1, -1)
-    borderRight:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
-    borderRight:SetWidth(1)
-    borderRight:SetColorTexture(0.60, 0.52, 0.28, 1)
+    UI.ApplyBorder(panel)
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -12)

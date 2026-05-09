@@ -1,7 +1,7 @@
 -- OmegaSpeak — Paramètres
 OmegaSpeak = OmegaSpeak or {}
 local OS = OmegaSpeak
-local UI = OmegaSpeak.UI
+local UI = OS2.UI
 
 local PANEL_W = 240
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
@@ -78,25 +78,7 @@ settingsPanel:Hide()
 local sBg = settingsPanel:CreateTexture(nil, "BACKGROUND")
 sBg:SetAllPoints()
 UI.ApplyWindowBackground(sBg, 0.92)
-
-for _, pts in ipairs({
-    { {"TOPLEFT","TOPLEFT",1,-1},    {"TOPRIGHT","TOPRIGHT",-1,-1}    },
-    { {"BOTTOMLEFT","BOTTOMLEFT",1,1},{"BOTTOMRIGHT","BOTTOMRIGHT",-1,1}},
-    { {"TOPLEFT","TOPLEFT",1,-1},    {"BOTTOMLEFT","BOTTOMLEFT",1,1}  },
-    { {"TOPRIGHT","TOPRIGHT",-1,-1}, {"BOTTOMRIGHT","BOTTOMRIGHT",-1,1}},
-}) do
-    local t = settingsPanel:CreateTexture(nil, "ARTWORK")
-    t:SetPoint(pts[1][1], settingsPanel, pts[1][2], pts[1][3], pts[1][4])
-    t:SetPoint(pts[2][1], settingsPanel, pts[2][2], pts[2][3], pts[2][4])
-    t:SetColorTexture(0.60, 0.52, 0.28, 1)
-    if pts[1][1] == "TOPLEFT" and pts[2][1] == "BOTTOMLEFT" then
-        t:SetWidth(1)
-    elseif pts[1][1] == "TOPRIGHT" then
-        t:SetWidth(1)
-    else
-        t:SetHeight(1)
-    end
-end
+UI.ApplyBorder(settingsPanel)
 
 local sTitle = settingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 sTitle:SetPoint("TOPLEFT", settingsPanel, "TOPLEFT", 10, -10)

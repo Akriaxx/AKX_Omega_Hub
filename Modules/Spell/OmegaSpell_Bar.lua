@@ -659,13 +659,22 @@ local function CreateSlot(frame, slotIndex)
 end
 
 local function RefreshSlot(frame, slotIndex)
-    local btn = frame.slots[slotIndex] or CreateSlot(frame, slotIndex)
     local cfg = frame.cfg
     local visibleCount = GetVisibleSlotCount(cfg)
 
+    -- Ne crée jamais un slot juste pour le cacher immédiatement.
+    -- Avant ce fix : MAX_SLOTS (1000) frames/textures créés à la première passe.
     if slotIndex > visibleCount then
-        btn:Hide()
+        local btn = frame.slots[slotIndex]
+        if btn then btn:Hide() end
         return
+    end
+
+    local btn = frame.slots[slotIndex] or CreateSlot(frame, slotIndex)
+    -- Mémorise le plus grand index jamais créé pour pouvoir masquer les
+    -- anciens slots lors d'un rétrécissement sans boucler jusqu'à MAX_SLOTS.
+    if slotIndex > (frame.maxSlotCreated or 0) then
+        frame.maxSlotCreated = slotIndex
     end
 
     local col = (slotIndex - 1) % cfg.cols
@@ -747,7 +756,11 @@ local function ApplyGridFromSize(frame)
 
     ApplyFrameSize(frame)
     SavePosition(frame)
-    for i = 1, MAX_SLOTS do
+    -- Couvre les nouveaux slots visibles ET les anciens qui doivent être cachés.
+    local oldVisCount = math.max(1, (oldCols or 1) * (oldRows or 1))
+    local newVisCount = GetVisibleSlotCount(cfg)
+    local loopTo = math.max(newVisCount, math.max(oldVisCount, frame.maxSlotCreated or 0))
+    for i = 1, loopTo do
         RefreshSlot(frame, i)
     end
 end
@@ -765,7 +778,7 @@ local function CreateResizeHandle(frame)
 
     handle:SetScript("OnMouseDown", function()
         frame.isOmegaResizing = true
-        for i = 1, MAX_SLOTS do RefreshSlot(frame, i) end
+        -- Le redimensionnement en temps réel est géré par OnSizeChanged (pas de polling).
         frame:StartSizing("BOTTOMRIGHT")
     end)
     handle:SetScript("OnMouseUp", function()
@@ -779,7 +792,8 @@ local function CreateResizeHandle(frame)
         cfg.h = h
         frame:SetSize(w, h)
         SavePosition(frame)
-        for i = 1, MAX_SLOTS do RefreshSlot(frame, i) end
+        local loopTo = math.max(GetVisibleSlotCount(cfg), frame.maxSlotCreated or 0)
+        for i = 1, loopTo do RefreshSlot(frame, i) end
     end)
     frame.resizeHandle = handle
 end
@@ -866,7 +880,8 @@ local function CreateBarFrame(barIndex, cfg)
             frame.closeBtn:Hide()
             if frame.resizeHandle then frame.resizeHandle:Hide() end
         end
-        for i = 1, MAX_SLOTS do
+        local visCount = GetVisibleSlotCount(frame.cfg)
+        for i = 1, visCount do
             RefreshSlot(frame, i)
         end
     end
@@ -917,104 +932,23 @@ local function CreateBarFrame(barIndex, cfg)
         self:StopMovingOrSizing()
         SavePosition(self)
     end)
-    frame:SetScript("OnUpdate", function(self)
-        -- Détection unifiée de tous les drags natifs :
-        --   · curseur WoW (sort spellbook, macro menu ESC)
-        --   · drag SpellCreator (frame DIALOG custom)
-        -- Dans tous les cas, le bouton source garde la capture → GLOBAL_MOUSE_UP.
-        local cursorType, cursorID = GetCursorInfo()
-        local hasWoWCursor = (cursorType == "spell" or cursorType == "macro")
 
-        -- Résolution slot→spellID pour les sorts du spellbook Epsilon.
-        -- Sur Epsilon, GetCursorInfo renvoie l'index du slot (ex : 8) et non le spellID
-        -- réel (ex : 283362). On appelle GetSpellBookItemInfo ici, pendant le drag,
-        -- dans un contexte Lua normal — et NON dans GLOBAL_MOUSE_UP qui s'exécute
-        -- au moment où Blizzard finalise une action protégée (risque de taint).
-        if cursorType == "spell" then
-            local rawID = tonumber(cursorID)
-            if rawID and not (spellInfoCache[rawID] and spellInfoCache[rawID].resolved) then
-                local spellID = rawID
-                local name, icon
-
-                -- Résolution via C_SpellBook (TWW)
-                if C_SpellBook then
-                    if C_SpellBook.GetSpellBookItemInfo then
-                        local ok, info = pcall(C_SpellBook.GetSpellBookItemInfo, rawID)
-                        if ok and info and info.actionID and info.actionID ~= 0 then
-                            spellID = info.actionID
-                        end
-                    end
-                    if C_SpellBook.GetSpellBookItemName then
-                        local ok, n = pcall(C_SpellBook.GetSpellBookItemName, rawID)
-                        if ok and n then name = n end
-                    end
-                    if C_SpellBook.GetSpellBookItemTexture then
-                        local ok, ic = pcall(C_SpellBook.GetSpellBookItemTexture, rawID)
-                        if ok and ic then icon = ic end
-                    end
-                end
-                -- Fallback ancienne API
-                if spellID == rawID and GetSpellBookItemInfo then
-                    local ok, itype, sid = pcall(GetSpellBookItemInfo, rawID, "SPELL")
-                    if ok and itype == "SPELL" and sid and sid ~= 0 then spellID = sid end
-                end
-                if not name and GetSpellBookItemName then
-                    local ok, n = pcall(GetSpellBookItemName, rawID, "SPELL")
-                    if ok and n then name = n end
-                end
-                if not icon and GetSpellBookItemTexture then
-                    local ok, ic = pcall(GetSpellBookItemTexture, rawID, "SPELL")
-                    if ok and ic then icon = ic end
-                end
-
-                -- Si on n'a pas encore de nom/icône, essayer directement avec spellID résolu
-                if not name or not icon then
-                    local n2, ic2 = GetWoWSpellData(spellID)
-                    name = name or n2
-                    icon = icon or ic2
-                end
-
-                spellInfoCache[rawID] = {
-                    resolved   = true,
-                    resolvedID = spellID,
-                    name       = name,
-                    icon       = icon,
-                }
-                -- Indexer aussi par spellID réel pour que GetWoWSpellData le trouve
-                if spellID ~= rawID then
-                    spellInfoCache[spellID] = spellInfoCache[spellID] or { name = name, icon = icon }
-                end
-            end
-        end
-
-        local sc = GetSCDragFrame()
-        local hasSCDrag = sc ~= nil and sc:IsShown()
-        -- hasSCDrag est stocké séparément : utilisé dans OnEvent où sc:IsShown()
-        -- est déjà false (SC cache dragIcon avant GLOBAL_MOUSE_UP dans le même frame).
-        self.hasSCDrag = hasSCDrag
-
-        local hasNative = hasWoWCursor or hasSCDrag
-        if hasNative ~= self.hasNativeDrag then
-            self.hasNativeDrag = hasNative
-            if hasNative then
-                self:RegisterEvent("GLOBAL_MOUSE_UP")
-            else
-                self:UnregisterEvent("GLOBAL_MOUSE_UP")
-            end
-            for i = 1, MAX_SLOTS do RefreshSlot(self, i) end
-        end
-
+    -- Resize en temps réel : OnSizeChanged se déclenche uniquement quand la taille change,
+    -- pas à chaque frame. Remplace complètement le polling OnUpdate pour le resize.
+    frame:SetScript("OnSizeChanged", function(self)
         if not self.isOmegaResizing then return end
-        -- Pendant le drag : recalcule la grille sans toucher à SetSize
+        local cfg = self.cfg
         local w = math.max(MIN_W, self:GetWidth())
         local h = math.max(MIN_H, self:GetHeight())
-        local cfg = self.cfg
         local newCols = Clamp(math.floor((w - PAD * 2 + GetGapH()) / (GetSlotSize() + GetGapH())), MIN_COLS, MAX_COLS)
         local newRows = Clamp(math.floor((h - HEADER_H - PAD * 2 + GetGapV()) / (GetSlotSize() + GetGapV())), MIN_ROWS, MAX_ROWS)
         if newCols ~= cfg.cols or newRows ~= cfg.rows then
+            local oldVisCount = GetVisibleSlotCount(cfg)
             cfg.cols = newCols
             cfg.rows = newRows
-            for i = 1, MAX_SLOTS do RefreshSlot(self, i) end
+            local newVisCount = GetVisibleSlotCount(cfg)
+            local loopTo = math.max(newVisCount, math.max(oldVisCount, self.maxSlotCreated or 0))
+            for i = 1, loopTo do RefreshSlot(self, i) end
         end
     end)
 
@@ -1042,7 +976,9 @@ function Bar.Refresh(barIndex)
         if frame.SetChromeVisible then
             frame.SetChromeVisible(not frame.cfg.locked)
         end
-        for i = 1, MAX_SLOTS do
+        -- Couvre les slots visibles ET ceux précédemment créés (pour les masquer si besoin).
+        local loopTo = math.max(GetVisibleSlotCount(frame.cfg), frame.maxSlotCreated or 0)
+        for i = 1, loopTo do
             RefreshSlot(frame, i)
         end
         return
@@ -1504,6 +1440,149 @@ function Bar.RefreshManager()
         RefreshManager()
     end
 end
+
+-- ── Ticker à la demande ──────────────────────────────────────────────────────
+-- OnUpdate n'est actif QUE pendant un drag effectif (sort/macro WoW ou SpellCreator).
+-- Le resize est géré par OnSizeChanged — aucun polling nécessaire pour ça.
+--
+-- Démarrage : CURSOR_CHANGED (spell/macro) ou SC drag frame OnShow.
+-- Arrêt     : automatique — le ticker se coupe lui-même dès que plus rien n'est en drag.
+
+local OmegaSpellSharedTicker = CreateFrame("Frame")
+
+local function StopTicker()
+    OmegaSpellSharedTicker:SetScript("OnUpdate", nil)
+    -- Nettoie l'état drag sur toutes les barres (cas d'annulation sans GLOBAL_MOUSE_UP).
+    for _, frame in pairs(frames) do
+        if frame.hasNativeDrag then
+            frame.hasNativeDrag = false
+            frame:UnregisterEvent("GLOBAL_MOUSE_UP")
+            if frame:IsShown() then
+                local visCount = GetVisibleSlotCount(frame.cfg)
+                for i = 1, visCount do RefreshSlot(frame, i) end
+            end
+        end
+    end
+end
+
+local function StartTicker()
+    -- Réentrant : si déjà actif on ne rebranche pas (évite de perdre l'état intermédiaire).
+    if OmegaSpellSharedTicker:GetScript("OnUpdate") then return end
+
+    OmegaSpellSharedTicker:SetScript("OnUpdate", function()
+
+        -- ── État du drag (une seule fois pour toutes les barres) ────────────
+        local cursorType, cursorID = GetCursorInfo()
+        local hasWoWCursor = (cursorType == "spell" or cursorType == "macro")
+        local sc = GetSCDragFrame()
+
+        -- Hook SC une seule fois dès qu'on le trouve : OnShow relancera StartTicker.
+        if sc and not sc._omegaSpellHooked then
+            sc:HookScript("OnShow", StartTicker)
+            sc._omegaSpellHooked = true
+        end
+
+        local hasSCDrag = sc ~= nil and sc:IsShown()
+        local hasNative = hasWoWCursor or hasSCDrag
+
+        -- ── Auto-stop ───────────────────────────────────────────────────────
+        -- SC masque son frame dans le même render-frame que GLOBAL_MOUSE_UP,
+        -- mais les events s'exécutent AVANT OnUpdate. Donc quand on arrive ici
+        -- et que hasSCDrag=false, OnEvent a déjà traité le drop → on peut couper.
+        if not hasNative then
+            StopTicker()
+            return
+        end
+
+        -- ── Résolution slot→spellID (une fois, pas par barre) ──────────────
+        if cursorType == "spell" then
+            local rawID = tonumber(cursorID)
+            if rawID and not (spellInfoCache[rawID] and spellInfoCache[rawID].resolved) then
+                local spellID = rawID
+                local name, icon
+
+                if C_SpellBook then
+                    if C_SpellBook.GetSpellBookItemInfo then
+                        local ok, info = pcall(C_SpellBook.GetSpellBookItemInfo, rawID)
+                        if ok and info and info.actionID and info.actionID ~= 0 then
+                            spellID = info.actionID
+                        end
+                    end
+                    if C_SpellBook.GetSpellBookItemName then
+                        local ok, n = pcall(C_SpellBook.GetSpellBookItemName, rawID)
+                        if ok and n then name = n end
+                    end
+                    if C_SpellBook.GetSpellBookItemTexture then
+                        local ok, ic = pcall(C_SpellBook.GetSpellBookItemTexture, rawID)
+                        if ok and ic then icon = ic end
+                    end
+                end
+                if spellID == rawID and GetSpellBookItemInfo then
+                    local ok, itype, sid = pcall(GetSpellBookItemInfo, rawID, "SPELL")
+                    if ok and itype == "SPELL" and sid and sid ~= 0 then spellID = sid end
+                end
+                if not name and GetSpellBookItemName then
+                    local ok, n = pcall(GetSpellBookItemName, rawID, "SPELL")
+                    if ok and n then name = n end
+                end
+                if not icon and GetSpellBookItemTexture then
+                    local ok, ic = pcall(GetSpellBookItemTexture, rawID, "SPELL")
+                    if ok and ic then icon = ic end
+                end
+                if not name or not icon then
+                    local n2, ic2 = GetWoWSpellData(spellID)
+                    name = name or n2
+                    icon = icon or ic2
+                end
+
+                spellInfoCache[rawID] = {
+                    resolved   = true,
+                    resolvedID = spellID,
+                    name       = name,
+                    icon       = icon,
+                }
+                if spellID ~= rawID then
+                    spellInfoCache[spellID] = spellInfoCache[spellID] or { name = name, icon = icon }
+                end
+            end
+        end
+
+        -- ── Mise à jour par barre ───────────────────────────────────────────
+        for _, frame in pairs(frames) do
+            if frame:IsShown() then
+                frame.hasSCDrag = hasSCDrag
+                if hasNative ~= frame.hasNativeDrag then
+                    frame.hasNativeDrag = hasNative
+                    if hasNative then
+                        frame:RegisterEvent("GLOBAL_MOUSE_UP")
+                    else
+                        frame:UnregisterEvent("GLOBAL_MOUSE_UP")
+                    end
+                    local visCount = GetVisibleSlotCount(frame.cfg)
+                    for i = 1, visCount do RefreshSlot(frame, i) end
+                end
+            elseif frame.hasNativeDrag then
+                frame.hasNativeDrag = false
+                frame:UnregisterEvent("GLOBAL_MOUSE_UP")
+            end
+        end
+    end)
+end
+
+-- ── Déclencheur : curseur WoW (sort / macro du menu ESC) ─────────────────────
+-- CURSOR_CHANGED se déclenche quand le contenu du curseur change (TWW 10.0+).
+-- On démarre le ticker uniquement pour les types qui nous intéressent.
+local cursorEventFrame = CreateFrame("Frame")
+cursorEventFrame:RegisterEvent("CURSOR_CHANGED")
+cursorEventFrame:SetScript("OnEvent", function(_, event)
+    if event == "CURSOR_CHANGED" then
+        local t = GetCursorInfo()
+        if t == "spell" or t == "macro" then
+            StartTicker()
+        end
+        -- L'arrêt est géré par le ticker lui-même (auto-stop quand hasNative=false).
+    end
+end)
 
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")

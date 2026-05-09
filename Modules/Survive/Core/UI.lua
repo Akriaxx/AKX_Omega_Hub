@@ -5,37 +5,57 @@ OS2.UI = OS2.UI or {}
 local UI = OS2.UI
 
 UI.colors = {
-    windowBg      = { 0.05, 0.05, 0.05 },
-    panelButtonBg = { 0.10, 0.10, 0.10, 1.00 },
+    -- Fenêtres
+    windowBg           = { 0.05, 0.05, 0.05 },
+    border             = { 0.60, 0.52, 0.28, 1.00 },
+    -- Boutons
+    panelButtonBg      = { 0.10, 0.10, 0.10, 1.00 },
     panelButtonBgPressed = { 0.06, 0.06, 0.06, 1.00 },
-    panelButtonAccent = { 0.65, 0.55, 0.28, 0.70 },
+    panelButtonAccent  = { 0.65, 0.55, 0.28, 0.70 },
     panelButtonHighlight = { 0.85, 0.75, 0.40, 0.10 },
-    separator     = { 0.25, 0.25, 0.25, 1.00 },
-    separatorSoft = { 0.18, 0.18, 0.18, 1.00 },
-    closeBg       = { 0.18, 0.18, 0.18, 1.00 },
-    closeText     = { 0.65, 0.65, 0.65, 1.00 },
-    closeHighlight = { 0.75, 0.20, 0.20, 0.35 },
-    title         = { 0.95, 0.90, 0.78, 1.00 },
-    text          = { 0.88, 0.82, 0.65, 1.00 },
-    textMuted     = { 0.72, 0.68, 0.55, 1.00 },
-    textSoft      = { 0.60, 0.58, 0.48, 1.00 },
-    label         = { 0.70, 0.65, 0.50, 1.00 },
-    labelStrong   = { 0.80, 0.70, 0.40, 1.00 },
-    warning       = { 0.85, 0.35, 0.35, 1.00 },
-    placeholder   = { 0.40, 0.40, 0.40, 1.00 },
-    tabActive     = { 1.00, 1.00, 1.00, 1.00 },
-    tabInactive   = { 0.50, 0.50, 0.50, 1.00 },
-    tabLine       = { 0.80, 0.70, 0.40, 1.00 },
-    tabHighlight  = { 1.00, 1.00, 1.00, 0.06 },
-    checkboxGlow  = { 0.78, 0.62, 0.18, 0.25 },
-    checkboxBorder = { 0.82, 0.66, 0.20, 1.00 },
-    checkboxBox   = { 0.10, 0.10, 0.10, 1.00 },
-    checkboxHighlight = { 0.90, 0.78, 0.30, 0.22 },
-    editBoxBg     = { 0.08, 0.08, 0.08, 1.00 },
-    editBoxAccent = { 0.45, 0.38, 0.18, 0.80 },
-    addButtonBg   = { 0.12, 0.16, 0.10, 1.00 },
-    addButtonText = { 0.50, 0.90, 0.30, 1.00 },
+    -- Séparateurs
+    separator          = { 0.25, 0.25, 0.25, 1.00 },
+    separatorSoft      = { 0.18, 0.18, 0.18, 1.00 },
+    -- Bouton fermer
+    closeBg            = { 0.18, 0.18, 0.18, 1.00 },
+    closeText          = { 0.65, 0.65, 0.65, 1.00 },
+    closeHighlight     = { 0.75, 0.20, 0.20, 0.35 },
+    -- Texte
+    title              = { 0.95, 0.90, 0.78, 1.00 },
+    text               = { 0.88, 0.82, 0.65, 1.00 },
+    textMuted          = { 0.72, 0.68, 0.55, 1.00 },
+    textSoft           = { 0.60, 0.58, 0.48, 1.00 },
+    label              = { 0.70, 0.65, 0.50, 1.00 },
+    labelStrong        = { 0.80, 0.70, 0.40, 1.00 },
+    warning            = { 0.85, 0.35, 0.35, 1.00 },
+    placeholder        = { 0.40, 0.40, 0.40, 1.00 },
+    -- Onglets
+    tabActive          = { 1.00, 1.00, 1.00, 1.00 },
+    tabInactive        = { 0.50, 0.50, 0.50, 1.00 },
+    tabLine            = { 0.80, 0.70, 0.40, 1.00 },
+    tabHighlight       = { 1.00, 1.00, 1.00, 0.06 },
+    -- Checkbox
+    checkboxGlow       = { 0.78, 0.62, 0.18, 0.25 },
+    checkboxBorder     = { 0.82, 0.66, 0.20, 1.00 },
+    checkboxBox        = { 0.10, 0.10, 0.10, 1.00 },
+    checkboxHighlight  = { 0.90, 0.78, 0.30, 0.22 },
+    -- Champs de saisie
+    editBoxBg          = { 0.08, 0.08, 0.08, 1.00 },
+    editBoxAccent      = { 0.45, 0.38, 0.18, 0.80 },
+    -- Bouton ajout
+    addButtonBg        = { 0.12, 0.16, 0.10, 1.00 },
+    addButtonText      = { 0.50, 0.90, 0.30, 1.00 },
     addButtonHighlight = { 0.40, 0.80, 0.20, 0.25 },
+    -- Lignes de joueur (listes)
+    rowBg              = { 0.06, 0.06, 0.06, 0.92 },
+    rowBgSelected      = { 0.10, 0.085, 0.045, 0.96 },
+    rowSelection       = { 0.78, 0.62, 0.24, 0.18 },
+    -- Barre temporaire
+    tempFill           = { 0.95, 0.74, 0.20, 0.88 },
+    -- Stats (partagées entre tous les modules Character)
+    statHP   = { fg = {0.85, 0.15, 0.15, 1}, bg = {0.20, 0.04, 0.04, 1}, label = "HP"  },
+    statMana = { fg = {0.18, 0.42, 0.90, 1}, bg = {0.04, 0.11, 0.27, 1}, label = "MP"  },
+    statEnd  = { fg = {0.10, 0.70, 0.20, 1}, bg = {0.03, 0.16, 0.05, 1}, label = "END" },
 }
 
 local function ApplyVertexColor(region, color)

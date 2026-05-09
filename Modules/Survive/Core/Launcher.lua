@@ -1984,7 +1984,7 @@ local function OpenMenu()
     menuOpen = true
     -- Gold tint (#CCB366) when the menu is open
     if Launcher.iconTex then
-        Launcher.iconTex:SetVertexColor(0.80, 0.70, 0.40, 1)
+        Launcher.iconTex:SetVertexColor(unpack(UI.colors.tabLine))
     end
     for _, btn in ipairs(GetActiveButtons()) do
         btn.hideAG:Stop()
