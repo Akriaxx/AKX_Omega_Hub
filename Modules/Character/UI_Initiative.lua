@@ -92,6 +92,16 @@ local function MakeCard(parent)
     cbg:SetAllPoints()
     cbg:SetColorTexture(unpack(UI.colors.rowBg))
 
+    -- Surbrillance légère quand ce participant est sélectionné dans le
+    -- Gestionnaire de ressources (Vue MJ) : juste un repère visuel pour le
+    -- MJ, distinct du cadre cyan "tour en cours".
+    local spotlight = card:CreateTexture(nil, "BACKGROUND", nil, 1)
+    spotlight:SetAllPoints()
+    spotlight:SetColorTexture(unpack(UI.colors.rowSelection))
+    spotlight:Hide()
+    card.spotlight = spotlight
+    function card:SetSpotlight(isOn) spotlight:SetShown(isOn) end
+
     -- Juste un cadre (4 fines lignes), pas un pavé plein derrière la carte.
     local function GlowLine(p1, p1x, p1y, p2, p2x, p2y, isVert)
         local t = card:CreateTexture(nil, "BORDER")
@@ -159,7 +169,7 @@ local function MakeCard(parent)
                 icon:SetTexCoord(0, 1, 0, 1)
             end
         else
-            icon:SetTexture("Interface\\Icons\\INV_Misc_Head_Dragon_01")
+            icon:SetTexture(p.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
             icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         end
 
@@ -168,6 +178,8 @@ local function MakeCard(parent)
         else
             closeBtn:Hide()
         end
+
+        card:SetSpotlight(C.IsImpactSelected and C:IsImpactSelected(p.id))
     end
 
     closeBtn:SetScript("OnClick", function()
@@ -201,6 +213,17 @@ local function Rebuild()
     end
 
     banner:SetWidth(math.max(200, x + 6))
+end
+
+-- Appelé depuis UI_MJ.lua quand la sélection du Gestionnaire de ressources
+-- change (clic sur une ligne joueur/PNJ) : pas de Rebuild complet, juste la
+-- surbrillance légère des cartes déjà affichées.
+function C:RefreshBannerSelection()
+    for _, card in ipairs(cards) do
+        if card:IsShown() and card.participantId then
+            card:SetSpotlight(C.IsImpactSelected and C:IsImpactSelected(card.participantId))
+        end
+    end
 end
 
 local function Refresh()

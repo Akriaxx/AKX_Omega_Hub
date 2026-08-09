@@ -335,31 +335,55 @@ local function SortParticipants(list)
     end)
 end
 
--- Les PNJ portent un bloc HP/Mana/Endurance (comme une fiche perso, en plus
--- léger) pour s'afficher dans la Vue MJ — PNJ. Inutilisé pour les joueurs
--- (leurs vraies stats viennent de C.groupData / GetMyChar), mais toujours
--- empaqueté pour garder un format à largeur fixe, simple à parser.
+-- Les PNJ portent un bloc HP/Mana/Endurance + icone (comme une fiche perso,
+-- en plus léger) pour s'afficher dans la Vue MJ — PNJ / la bannière.
+-- Les joueurs n'en ont pas besoin (leurs vraies stats viennent de
+-- C.groupData / GetMyChar, leur nom d'affichage de GetDisplayName) : on ne
+-- les empaquette QUE pour les PNJ. Avec beaucoup de participants, un format
+-- à largeur fixe pour tout le monde (15 champs chacun, PNJ comme joueurs)
+-- a fait dépasser la limite de taille d'un message addon sur ce serveur et
+-- tronquait le payload en cours de route — d'où des valeurs à 0 côté
+-- réception. D'où aussi l'icone raccourcie (sans le préfixe "Interface\Icons\").
+local ICON_PREFIX = "Interface\\Icons\\"
+
+local function EncodeIcon(icon)
+    if not icon or icon == "" then return "-" end
+    if icon:sub(1, #ICON_PREFIX) == ICON_PREFIX then
+        return Enc(icon:sub(#ICON_PREFIX + 1))
+    end
+    return Enc(icon)
+end
+
+local function DecodeIcon(raw)
+    if not raw or raw == "" or raw == "-" then return nil end
+    if raw:find("[/\\]") then return raw end  -- déjà un chemin complet
+    return ICON_PREFIX .. raw
+end
+
 local function PackInitiative()
     local st = C.initiative
     local parts = { st.active and 1 or 0, st.currentIndex, #st.participants }
     for _, p in ipairs(st.participants) do
-        local hp   = p.hp or {}
-        local mana = p.mana or {}
-        local endu = p.endurance or {}
         table.insert(parts, p.kind)
         table.insert(parts, Enc(p.id))
-        table.insert(parts, Enc(p.name))
         table.insert(parts, p.initiative)
-        table.insert(parts, Enc(p.creator))
-        table.insert(parts, math.floor(hp.cur or 0))
-        table.insert(parts, math.floor(hp.max or 0))
-        table.insert(parts, math.floor(hp.temp or 0))
-        table.insert(parts, math.floor(mana.cur or 0))
-        table.insert(parts, math.floor(mana.max or 0))
-        table.insert(parts, math.floor(mana.temp or 0))
-        table.insert(parts, math.floor(endu.cur or 0))
-        table.insert(parts, math.floor(endu.max or 0))
-        table.insert(parts, math.floor(endu.temp or 0))
+        if p.kind == "npc" then
+            local hp   = p.hp or {}
+            local mana = p.mana or {}
+            local endu = p.endurance or {}
+            table.insert(parts, Enc(p.name))
+            table.insert(parts, Enc(p.creator))
+            table.insert(parts, math.floor(hp.cur or 0))
+            table.insert(parts, math.floor(hp.max or 0))
+            table.insert(parts, math.floor(hp.temp or 0))
+            table.insert(parts, math.floor(mana.cur or 0))
+            table.insert(parts, math.floor(mana.max or 0))
+            table.insert(parts, math.floor(mana.temp or 0))
+            table.insert(parts, math.floor(endu.cur or 0))
+            table.insert(parts, math.floor(endu.max or 0))
+            table.insert(parts, math.floor(endu.temp or 0))
+            table.insert(parts, EncodeIcon(p.icon))
+        end
     end
     return table.concat(parts, SEP)
 end
@@ -372,17 +396,25 @@ local function UnpackInitiative(payload)
     local participants = {}
     local idx = 4
     for i = 1, n do
-        participants[i] = {
-            kind       = t[idx],
+        local kind = t[idx]
+        local entry = {
+            kind       = kind,
             id         = t[idx + 1],
-            name       = t[idx + 2],
-            initiative = tonumber(t[idx + 3]) or 0,
-            creator    = t[idx + 4],
-            hp         = { cur = tonumber(t[idx + 5]) or 0, max = tonumber(t[idx + 6]) or 0, temp = tonumber(t[idx + 7]) or 0 },
-            mana       = { cur = tonumber(t[idx + 8]) or 0, max = tonumber(t[idx + 9]) or 0, temp = tonumber(t[idx + 10]) or 0 },
-            endurance  = { cur = tonumber(t[idx + 11]) or 0, max = tonumber(t[idx + 12]) or 0, temp = tonumber(t[idx + 13]) or 0 },
+            initiative = tonumber(t[idx + 2]) or 0,
         }
-        idx = idx + 14
+        idx = idx + 3
+        if kind == "npc" then
+            entry.name      = t[idx]
+            entry.creator   = t[idx + 1]
+            entry.hp        = { cur = tonumber(t[idx + 2]) or 0, max = tonumber(t[idx + 3]) or 0, temp = tonumber(t[idx + 4]) or 0 }
+            entry.mana      = { cur = tonumber(t[idx + 5]) or 0, max = tonumber(t[idx + 6]) or 0, temp = tonumber(t[idx + 7]) or 0 }
+            entry.endurance = { cur = tonumber(t[idx + 8]) or 0, max = tonumber(t[idx + 9]) or 0, temp = tonumber(t[idx + 10]) or 0 }
+            entry.icon      = DecodeIcon(t[idx + 11])
+            idx = idx + 12
+        else
+            entry.name = entry.id
+        end
+        participants[i] = entry
     end
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
@@ -412,29 +444,34 @@ function C:StartCombat()
 end
 
 function C:EndCombat()
-    if not C.initiative.isHost then return end
+    if not C.initiative.isHost then return false end
     C.initiative.active       = false
     C.initiative.participants = {}
     C.initiative.currentIndex = 1
     BroadcastInitiative()
     C.initiative.isHost = false
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
 end
 
-function C:AddNPC(name, initiative, hp, mana, endurance)
-    if not C.initiative.isHost or not C.initiative.active then return end
+local DEFAULT_NPC_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+function C:AddNPC(name, initiative, hp, mana, endurance, icon)
+    if not C.initiative.isHost or not C.initiative.active then return false end
     name = tostring(name or ""):match("^%s*(.-)%s*$") or ""
-    if name == "" then return end
+    if name == "" then return false end
     nextNpcSeq = nextNpcSeq + 1
     local hpMax  = math.max(0, math.floor(tonumber(hp) or 0))
     local mpMax  = math.max(0, math.floor(tonumber(mana) or 0))
     local endMax = math.max(0, math.floor(tonumber(endurance) or 0))
+    icon = (icon and icon ~= "" and icon) or DEFAULT_NPC_ICON
     table.insert(C.initiative.participants, {
         kind       = "npc",
         id         = "npc" .. nextNpcSeq,
         name       = name,
         initiative = math.floor(tonumber(initiative) or 0),
         creator    = MyName(),
+        icon       = icon,
         hp         = { cur = hpMax,  max = hpMax,  temp = 0 },
         mana       = { cur = mpMax,  max = mpMax,  temp = 0 },
         endurance  = { cur = endMax, max = endMax, temp = 0 },
@@ -442,6 +479,7 @@ function C:AddNPC(name, initiative, hp, mana, endurance)
     SortParticipants(C.initiative.participants)
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
 end
 
 -- Même mécanique que C:Delta / C:AddTemp pour un joueur, mais appliquée
@@ -495,12 +533,37 @@ function C:RemoveNPC(id)
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
 
+-- Annonce en /rw (raid warning, ou /p si pas en raid) le nom/prénom RP (TRP3)
+-- du joueur dont c'est le tour, ou juste son nom brut si c'est un PNJ.
+function C:AnnounceCurrentTurn()
+    local p = C.initiative.participants[C.initiative.currentIndex]
+    if not p then return end
+
+    local label
+    if p.kind == "npc" then
+        label = p.name
+    else
+        local data = (p.id == MyName()) and MyChar() or C.groupData[p.id]
+        label = C:GetDisplayName(p.id, data)
+    end
+    if not label or label == "" then return end
+
+    local text = "Au tour de " .. label .. " !"
+    if IsInRaid and IsInRaid() then
+        SendChatMessage(text, "RAID_WARNING")
+    elseif IsInGroup and IsInGroup() then
+        SendChatMessage(text, "PARTY")
+    end
+end
+
 function C:NextTurn()
-    if not C.initiative.isHost or not C.initiative.active then return end
-    if #C.initiative.participants == 0 then return end
+    if not C.initiative.isHost or not C.initiative.active then return false end
+    if #C.initiative.participants == 0 then return false end
     C.initiative.currentIndex = (C.initiative.currentIndex % #C.initiative.participants) + 1
     BroadcastInitiative()
+    C:AnnounceCurrentTurn()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
 end
 
 function C:_ApplyInitiativeInput(name, value)

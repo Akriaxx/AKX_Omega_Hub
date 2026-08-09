@@ -45,23 +45,34 @@ local function MakeTitleBar(parent, text)
 end
 
 -- ── Mini-barre pour une stat (dans la liste MJ) ───────────────────────────────
+-- La barre remplit tout l'espace disponible (LEFT/RIGHT dynamiques) au lieu
+-- d'une largeur fixe : avant, la barre + le texte gardaient toujours la même
+-- taille peu importe la largeur du panneau, laissant un grand vide à droite.
 
-local MBAR_W = 86
+local VAL_TXT_W = 70
 
 local function MiniStatRow(parent, col)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(18)
 
+    local valTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    UI.ApplyMutedText(valTxt)
+    valTxt:SetText("—"); valTxt:SetWidth(VAL_TXT_W); valTxt:SetHeight(12)
+    valTxt:SetWordWrap(false)
+    valTxt:SetJustifyH("RIGHT")
+    valTxt:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+
     local barBg = row:CreateTexture(nil, "BACKGROUND")
-    barBg:SetPoint("LEFT", 0, 0)
-    barBg:SetSize(MBAR_W, 9)
+    barBg:SetPoint("LEFT", row, "LEFT", 0, 0)
+    barBg:SetPoint("RIGHT", valTxt, "LEFT", -4, 0)
+    barBg:SetHeight(9)
     barBg:SetColorTexture(col.dim[1], col.dim[2], col.dim[3], 1)
 
     local fill = row:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("TOPLEFT", barBg)
     fill:SetHeight(9)
     fill:SetColorTexture(col.fg[1], col.fg[2], col.fg[3], 1)
-    fill:SetWidth(MBAR_W)
+    fill:SetWidth(1)
 
     local tempFill = row:CreateTexture(nil, "ARTWORK")
     tempFill:SetPoint("TOPLEFT", barBg)
@@ -69,12 +80,6 @@ local function MiniStatRow(parent, col)
     tempFill:SetColorTexture(unpack(UI.colors.tempFill))
     tempFill:SetWidth(1)
     tempFill:Hide()
-
-    local valTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    UI.ApplyMutedText(valTxt)
-    valTxt:SetText("—"); valTxt:SetWidth(82); valTxt:SetHeight(12)
-    valTxt:SetWordWrap(false)
-    valTxt:SetPoint("LEFT", barBg, "RIGHT", 3, 0)
 
     local function Fmt(n)
         if     n >= 10000 then return string.format("%.0fk", n / 1000)
@@ -85,15 +90,16 @@ local function MiniStatRow(parent, col)
     function row:Set(cur, max, temp)
         temp = math.max(0, tonumber(temp) or 0)
         valTxt:SetText(Fmt(cur) .. "/" .. Fmt(max) .. (temp > 0 and (" (" .. Fmt(temp) .. ")") or ""))
+        local barW = math.max(1, barBg:GetWidth() or 1)
         local total = math.max(1, max + temp)
-        local curW = math.max(1, MBAR_W * math.max(0, math.min(1, cur / total)))
+        local curW = math.max(1, barW * math.max(0, math.min(1, cur / total)))
         fill:SetWidth(curW)
 
         if temp > 0 then
             tempFill:ClearAllPoints()
             tempFill:SetPoint("TOPLEFT", barBg, "TOPLEFT", curW, 0)
             tempFill:SetHeight(9)
-            tempFill:SetWidth(math.max(1, MBAR_W * math.max(0, math.min(1, temp / total))))
+            tempFill:SetWidth(math.max(1, barW * math.max(0, math.min(1, temp / total))))
             tempFill:Show()
         else
             tempFill:Hide()
@@ -258,7 +264,7 @@ end
 
 -- ── Panneau MJ ────────────────────────────────────────────────────────────────
 
-local MJ_W, MJ_H = 340, 380
+local MJ_W, MJ_H = 250, 380
 
 local mjPanel = CreateFrame("Frame", "CharacterMJPanel", UIParent)
 mjPanel:SetSize(MJ_W, MJ_H)
@@ -410,19 +416,40 @@ local combatToggleBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Début de co
 combatToggleBtn:SetPoint("TOPLEFT", impactPanel, "BOTTOMLEFT", 10, -4)
 combatToggleBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 combatToggleBtn:SetScript("OnClick", function()
-    if C.initiative.active then C:EndCombat() else C:StartCombat() end
+    if C.initiative.active then
+        -- "Fin de combat" ne fait rien si un AUTRE client est l'hôte (combat
+        -- déjà en cours, lancé par quelqu'un d'autre) : le dire clairement
+        -- plutôt que de laisser croire que le clic n'a servi à rien.
+        if not C:EndCombat() and ShowImpactStatus then
+            ShowImpactStatus("Vous n'êtes pas l'hôte de ce combat")
+        end
+    else
+        C:StartCombat()
+    end
 end)
 
 local nextTurnBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Joueur suivant")
 nextTurnBtn:SetPoint("TOPLEFT", combatToggleBtn, "BOTTOMLEFT", 0, -4)
 nextTurnBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 nextTurnBtn:SetScript("OnClick", function()
-    C:NextTurn()
+    if not C:NextTurn() and not C.initiative.isHost and ShowImpactStatus then
+        ShowImpactStatus("Vous n'êtes pas l'hôte de ce combat")
+    end
 end)
 
 local addNpcBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Rajouter un NPC")
 addNpcBtn:SetPoint("TOPLEFT", nextTurnBtn, "BOTTOMLEFT", 0, -4)
 addNpcBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+
+-- Qui pilote le combat : sans ça, un non-hôte qui clique Fin de combat /
+-- Joueur suivant / Rajouter un NPC pendant qu'un combat est en cours ne
+-- comprend pas pourquoi rien ne se passe (ces actions n'ont d'effet que
+-- pour l'hôte, celui qui a cliqué Début de combat).
+local hostStatus = impactPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+hostStatus:SetPoint("TOPLEFT", addNpcBtn, "BOTTOMLEFT", 2, -3)
+hostStatus:SetPoint("RIGHT", impactPanel, "RIGHT", -10, 0)
+hostStatus:SetJustifyH("LEFT")
+UI.ApplyMutedText(hostStatus)
 
 -- Popup d'ajout de PNJ (nom, initiative, HP/MP/End.), affichée au centre de
 -- l'écran : ancrée près du bouton elle recouvrait le reste du panneau MJ.
@@ -444,13 +471,51 @@ UI.ApplyBorder(npcPopup)
 local npcPopupTitleBar = MakeTitleBar(npcPopup, "Rajouter un NPC")
 npcPopupTitleBar:SetFrameLevel(npcPopup:GetFrameLevel() + 1)
 
+-- Icone du PNJ (à gauche du nom) : ouvre le navigateur d'icones déjà utilisé
+-- par le module Spell, pour distinguer les PNJ entre eux dans la bannière.
+local selectedNpcIcon = nil
+
+local npcIconBtn = CreateFrame("Button", nil, npcPopup)
+npcIconBtn:SetSize(28, 28)
+npcIconBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -30)
+
+local npcIconTex = npcIconBtn:CreateTexture(nil, "ARTWORK")
+npcIconTex:SetAllPoints()
+npcIconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+npcIconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+
+local npcIconBorder = npcIconBtn:CreateTexture(nil, "BORDER")
+npcIconBorder:SetPoint("TOPLEFT", npcIconBtn, "TOPLEFT", -1, 1)
+npcIconBorder:SetPoint("BOTTOMRIGHT", npcIconBtn, "BOTTOMRIGHT", 1, -1)
+npcIconBorder:SetColorTexture(unpack(UI.colors.panelButtonAccent))
+
+local npcIconHL = npcIconBtn:CreateTexture(nil, "HIGHLIGHT")
+npcIconHL:SetAllPoints()
+npcIconHL:SetColorTexture(1, 1, 1, 0.20)
+
+npcIconBtn:SetScript("OnClick", function()
+    if OmegaSpell and OmegaSpell.IconBrowser and OmegaSpell.IconBrowser.Open then
+        OmegaSpell.IconBrowser.Open(function(iconPath)
+            selectedNpcIcon = iconPath
+            npcIconTex:SetTexture(iconPath)
+        end)
+    end
+end)
+npcIconBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Icone du PNJ", unpack(UI.colors.title))
+    GameTooltip:AddLine("Clic pour en choisir une autre.", unpack(UI.colors.textMuted))
+    GameTooltip:Show()
+end)
+npcIconBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
 local npcNameLbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-npcNameLbl:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -32)
+npcNameLbl:SetPoint("TOPLEFT", npcIconBtn, "TOPRIGHT", 8, 0)
 npcNameLbl:SetText("Nom")
 UI.ApplyLabel(npcNameLbl)
 
-local npcNameEB = UI.CreateStyledEditBox(npcPopup, 200, 22)
-npcNameEB:SetPoint("TOPLEFT", npcNameLbl, "BOTTOMLEFT", 0, -4)
+local npcNameEB = UI.CreateStyledEditBox(npcPopup, 164, 22)
+npcNameEB:SetPoint("TOPLEFT", npcIconBtn, "TOPRIGHT", 8, -14)
 npcNameEB:SetMaxLetters(32)
 
 -- Rangée compacte : Initiative / HP / MP / End., 4 petits champs numériques.
@@ -458,7 +523,7 @@ local NPC_FIELD_W, NPC_FIELD_GAP = 44, 6
 local npcStatFields = {}
 
 local npcFieldsLbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-npcFieldsLbl:SetPoint("TOPLEFT", npcNameEB, "BOTTOMLEFT", 0, -10)
+npcFieldsLbl:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -76)
 npcFieldsLbl:SetText("Init.")
 UI.ApplyLabel(npcFieldsLbl)
 
@@ -491,6 +556,8 @@ local function CloseNpcPopup()
     npcPopup:Hide()
     for _, eb in ipairs(npcStatFields) do eb:SetText("") end
     npcNameEB:SetText("")
+    selectedNpcIcon = nil
+    npcIconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
 end
 
 local npcPopupCloseBtn = UI.CreateCloseButton(npcPopup, function() CloseNpcPopup() end)
@@ -503,9 +570,16 @@ npcAddConfirmBtn:SetScript("OnClick", function()
     local name = npcNameEB:GetText()
     local init = npcInitEB:GetText()
     if name and name:match("%S") and init and init ~= "" then
-        C:AddNPC(name, init, npcHpEB:GetText(), npcMpEB:GetText(), npcEndEB:GetText())
-        CloseNpcPopup()
-        if ShowImpactStatus then ShowImpactStatus("PNJ ajouté") end
+        local added = C:AddNPC(name, init, npcHpEB:GetText(), npcMpEB:GetText(), npcEndEB:GetText(), selectedNpcIcon)
+        if added then
+            CloseNpcPopup()
+            if ShowImpactStatus then ShowImpactStatus("PNJ ajouté") end
+        elseif ShowImpactStatus then
+            -- N'arrive que si un AUTRE client est l'hôte du combat en cours :
+            -- seul l'hôte peut faire apparaître le PNJ dans la Vue MJ — PNJ
+            -- de tout le monde. On le dit plutôt que de fermer en silence.
+            ShowImpactStatus("Vous n'êtes pas l'hôte de ce combat")
+        end
     end
 end)
 
@@ -526,6 +600,12 @@ local function RefreshCombatControls()
     nextTurnBtn:SetAlpha((active and hasParticipants) and 1 or 0.45)
     addNpcBtn:SetAlpha(active and 1 or 0.45)
     if not active then npcPopup:Hide() end
+
+    if active then
+        hostStatus:SetText(C.initiative.isHost and "Hôte : vous" or "Hôte : un autre MJ")
+    else
+        hostStatus:SetText("")
+    end
 end
 
 local prevInitMJ = C.OnInitiativeChanged
@@ -537,8 +617,8 @@ end
 RefreshCombatControls()
 
 -- Bouton Actualiser (à gauche du bouton fermer)
-local refreshBtn = UI.CreatePanelButton(mjPanel, 88, 16, "Actualiser")
-refreshBtn:SetPoint("TOPRIGHT", mjPanel, "TOPRIGHT", -28, -3)
+local refreshBtn = UI.CreatePanelButton(mjPanel, 64, 16, "Actualiser")
+refreshBtn:SetPoint("TOPRIGHT", mjPanel, "TOPRIGHT", -26, -3)
 refreshBtn:SetFrameLevel(mjPanel:GetFrameLevel() + 40)
 refreshBtn:SetScript("OnClick", function()
     C:RequestAll()
@@ -670,6 +750,12 @@ local function SendImpact(targetId)
     return true
 end
 
+-- Lu par la bannière d'initiative (UI_Initiative.lua) pour savoir quel
+-- participant surligner légèrement quand on clique sa ligne ici.
+function C:IsImpactSelected(id)
+    return selectedPlayers[id] == true
+end
+
 UpdateAllSelections = function()
     for name, row in pairs(rows) do
         if row.SetSelected then row:SetSelected(selectedPlayers[name]) end
@@ -677,6 +763,7 @@ UpdateAllSelections = function()
     for npcId, row in pairs(pnjRows) do
         if row.SetSelected then row:SetSelected(selectedPlayers[npcId]) end
     end
+    if C.RefreshBannerSelection then C:RefreshBannerSelection() end
 end
 
 ApplyImpactToPlayer = function(playerName, forceApply)
@@ -870,9 +957,15 @@ local function NpcRow(parent, npcId)
         if SelectPlayerForImpact then SelectPlayerForImpact(row.npcId) end
     end)
 
+    local iconTex = row:CreateTexture(nil, "ARTWORK")
+    iconTex:SetSize(16, 16)
+    iconTex:SetPoint("TOPLEFT", row, "TOPLEFT", PAD, -4)
+    iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    row.iconTex = iconTex
+
     local nameTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     UI.ApplyBodyText(nameTxt)
-    nameTxt:SetPoint("TOPLEFT", PAD, -4)
+    nameTxt:SetPoint("TOPLEFT", iconTex, "TOPRIGHT", 4, 2)
     nameTxt:SetPoint("RIGHT", row, "RIGHT", -20, 0)
     nameTxt:SetWordWrap(false)
 
@@ -912,6 +1005,7 @@ local function NpcRow(parent, npcId)
     function row:Refresh(p)
         row.npcId = p.id
         nameTxt:SetText(p.name or "?")
+        iconTex:SetTexture(p.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
         local hp = p.hp or {}
         local mp = p.mana or {}
         local en = p.endurance or {}
