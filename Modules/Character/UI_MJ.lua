@@ -717,6 +717,9 @@ SelectPlayerForImpact = function(playerName)
     end
 end
 
+-- Ne liste que les membres présents : un membre du groupe déconnecté n'a
+-- aucune chance d'envoyer ses données, sa ligne resterait bloquée sur
+-- "Profil en attente" indéfiniment et prendrait de la place pour rien.
 local function GetVisibleMembers()
     local members, seen = {}, {}
     local myName = UnitName("player")
@@ -726,12 +729,17 @@ local function GetVisibleMembers()
     end
 
     Add(myName)
-    for name in pairs(C.groupData) do Add(name) end
 
     if IsInRaid and IsInRaid() then
-        for i = 1, GetNumGroupMembers() do Add(UnitName("raid"..i)) end
+        for i = 1, GetNumGroupMembers() do
+            local token = "raid" .. i
+            if UnitIsConnected(token) then Add(UnitName(token)) end
+        end
     elseif IsInGroup and IsInGroup() then
-        for i = 1, 4 do Add(UnitName("party"..i)) end
+        for i = 1, 4 do
+            local token = "party" .. i
+            if UnitIsConnected(token) then Add(UnitName(token)) end
+        end
     end
 
     table.sort(members)

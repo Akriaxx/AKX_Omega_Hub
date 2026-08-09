@@ -37,6 +37,9 @@ local function UnitNameShort(unit)
     return name and name:match("^([^%-]+)") or name
 end
 
+-- Ne liste que les membres présents : un membre du groupe déconnecté n'a
+-- aucune chance d'envoyer ses données, sa ligne resterait bloquée sur
+-- "Profil en attente" indéfiniment et prendrait de la place pour rien.
 local function GetVisibleMembers()
     local members, seen = {}, {}
     local function Add(name)
@@ -47,12 +50,17 @@ local function GetVisibleMembers()
     end
 
     Add(MyName())
-    for name in pairs(C.groupData or {}) do Add(name) end
 
     if IsInRaid and IsInRaid() then
-        for i = 1, GetNumGroupMembers() do Add(UnitNameShort("raid" .. i)) end
+        for i = 1, GetNumGroupMembers() do
+            local token = "raid" .. i
+            if UnitIsConnected(token) then Add(UnitNameShort(token)) end
+        end
     elseif IsInGroup and IsInGroup() then
-        for i = 1, 4 do Add(UnitNameShort("party" .. i)) end
+        for i = 1, 4 do
+            local token = "party" .. i
+            if UnitIsConnected(token) then Add(UnitNameShort(token)) end
+        end
     end
 
     table.sort(members)
