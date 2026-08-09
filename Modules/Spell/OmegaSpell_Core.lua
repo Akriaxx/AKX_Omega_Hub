@@ -682,6 +682,8 @@ function OS:Enable()
     OS.DB_Init()
     SLASH_OMEGASPELL1 = "/omsp"
     SlashCmdList["OMEGASPELL"] = function(msg) OS.Run(msg) end
+    if OS.Bar and OS.Bar.RestoreAllVisual then OS.Bar.RestoreAllVisual() end
+    if OS.Launcher then OS.Launcher:Show() end
     OmegaHub:SetModuleLoaded("Omega_Spell", true)
     if not OmegaHub._startingUp then
         OmegaHub.Print("Omega Spell active.  |cffAAAAAA/omsp cast [sort]  -  /omsp macro [sort]  -  /omsp ui|r")
@@ -692,6 +694,11 @@ function OS:Disable()
     SLASH_OMEGASPELL1 = nil
     SlashCmdList["OMEGASPELL"] = nil
     if OmegaSpell.UI then OmegaSpell.UI.Close() end
+    -- Masque les barres d'action Omega : sinon elles restent affichées et
+    -- pleinement cliquables (sorts/macros lançables) après désactivation.
+    if OS.Bar and OS.Bar.HideAllVisual then OS.Bar.HideAllVisual() end
+    if OmegaSpellBarManager then OmegaSpellBarManager:Hide() end
+    if OS.Launcher then OS.Launcher:Hide() end
     OmegaHub:SetModuleLoaded("Omega_Spell", false)
     OmegaHub.Print("Omega Spell désactivé.")
 end

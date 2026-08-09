@@ -409,8 +409,9 @@ local function EnsureDB()
     OS2DB.unlocked = OS2DB.unlocked or {}
     OS2DB.unlocked.models = OS2DB.unlocked.models or {}
     OS2DB.unlocked.crystals = OS2DB.unlocked.crystals or {}
-    OS2DB.lantern = OS2DB.lantern or {}
-    OS2DB.torch   = OS2DB.torch   or {}
+    OS2DB.lantern     = OS2DB.lantern     or {}
+    OS2DB.torch       = OS2DB.torch       or {}
+    OS2DB.hydratation = OS2DB.hydratation or {}
     local sharedDb = EnsureSharedDB()
     local characterProfileName = GetCharacterProfileName()
     local activeProfileName = NormalizeProfileName(OS2DB.activeProfile) or characterProfileName
@@ -808,6 +809,10 @@ end
 
 function OS2.GetTorchDB()
     return EnsureDB().torch
+end
+
+function OS2.GetHydrationDB()
+    return EnsureDB().hydratation
 end
 
 function OS2.GetToggleableModules()

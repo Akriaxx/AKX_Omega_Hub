@@ -23,6 +23,9 @@ btn:SetMovable(true)
 btn:EnableMouse(true)
 btn:RegisterForDrag("LeftButton")
 btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+-- Masqué par défaut : affiché uniquement par OS:Enable() (voir OmegaSpell_Core.lua),
+-- sinon il reste visible/cliquable même quand le module est désactivé.
+btn:Hide()
 
 -- Fond sombre circulaire
 local bgMask = btn:CreateMaskTexture()

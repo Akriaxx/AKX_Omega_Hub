@@ -4,8 +4,10 @@ OS2.DB = OS2.DB or {}
 
 -- ── Stockage ───────────────────────────────────────────────────────────
 local function GetSystemList(typeKey)
-    OS2.Core         = OS2.Core         or {}
-    OS2.Core.Systems = OS2.Core.Systems or {}
+    OS2DB = OS2DB or {}
+    OS2DB.systems = OS2DB.systems or {}
+    OS2.Core = OS2.Core or {}
+    OS2.Core.Systems = OS2DB.systems
     OS2.Core.Systems[typeKey] = OS2.Core.Systems[typeKey] or {}
     return OS2.Core.Systems[typeKey]
 end

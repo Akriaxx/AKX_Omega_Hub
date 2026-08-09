@@ -1000,6 +1000,25 @@ function Bar.Open(barIndex)
     frame:Show()
 end
 
+-- Masque toutes les barres actuellement affichées sans toucher `cfg.shown` :
+-- l'état persistant est préservé pour une restauration correcte via
+-- RestoreAllVisual (utilisé par OS:Disable() / OS:Enable() dans Core.lua,
+-- pour que la désactivation du module masque vraiment les barres à l'écran).
+function Bar.HideAllVisual()
+    for _, frame in pairs(frames) do
+        if frame then frame:Hide() end
+    end
+end
+
+function Bar.RestoreAllVisual()
+    local bars = OS.GetBars and OS.GetBars() or {}
+    for i, cfg in ipairs(bars) do
+        if cfg.shown then
+            Bar.Open(i)
+        end
+    end
+end
+
 function Bar.Hide(barIndex)
     barIndex = barIndex or 1
     local frame = GetFrame(barIndex)

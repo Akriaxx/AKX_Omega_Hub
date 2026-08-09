@@ -56,6 +56,13 @@ Hub:RegisterModule({
     version = "1.0",
 })
 
+Hub:RegisterModule({
+    name    = "Tech",
+    title   = "Omega Tech",
+    desc    = "Tablette RP : notes, inventaire, store et communications",
+    version = "1.0.0",
+})
+
 -- Omega_Weather est commenté dans le TOC (usage privé, non chargé)
 -- Hub:RegisterModule({ name = "Omega_Weather", ... })
 

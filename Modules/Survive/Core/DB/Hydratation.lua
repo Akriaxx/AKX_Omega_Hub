@@ -4,8 +4,10 @@ OS2.DB = OS2.DB or {}
 
 -- ── Stockage ───────────────────────────────────────────────────────────
 local function GetSystemList(typeKey)
-    OS2.Core         = OS2.Core         or {}
-    OS2.Core.Systems = OS2.Core.Systems or {}
+    OS2DB = OS2DB or {}
+    OS2DB.systems = OS2DB.systems or {}
+    OS2.Core = OS2.Core or {}
+    OS2.Core.Systems = OS2DB.systems
     OS2.Core.Systems[typeKey] = OS2.Core.Systems[typeKey] or {}
     return OS2.Core.Systems[typeKey]
 end
@@ -26,998 +28,1626 @@ local function GenerateKey(prefix, list)
     until false
 end
 
--- ── Panel secondaire : création d'un sous-item (Nom + Description) ────
-local subPanel = nil
-
-local function GetOrCreateSubPanel()
-    if subPanel then return subPanel end
-    local UI   = OS2.UI or {}
-    local SP_W = 280
-
-    local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(SP_W, 170)
-    p:SetFrameStrata("TOOLTIP")
-    p:SetFrameLevel(110)
-    p:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
-    p:Hide()
-
-    local bg = p:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.98)
-    OS2.RegisterWindowFrame(p, bg)
-
-    local titleStr = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleStr:SetPoint("TOP", p, "TOP", 0, -13)
-    UI.ApplyTitle(titleStr)
-
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK")
-        UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, -36)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -36)
-    end
-
-    UI.CreateCloseButton(p, function() p:Hide() end)
-
-    do
-        local drag = CreateFrame("Frame", nil, p)
-        drag:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, 0)
-        drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
-        drag:SetHeight(36)
-        OS2.MakeDraggable(p, drag)
-    end
-
-    local lblNom = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblNom:SetPoint("TOPLEFT", p, "TOPLEFT", 14, -46)
-    lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
-
-    local nomEB = UI.CreateStyledEditBox(p, SP_W - 28, 22)
-    nomEB:SetPoint("TOPLEFT", p, "TOPLEFT", 14, -62)
-
-    local lblDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblDesc:SetPoint("TOPLEFT", p, "TOPLEFT", 14, -96)
-    lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
-
-    local descBox = CreateFrame("Frame", nil, p)
-    descBox:SetSize(SP_W - 28, 36)
-    descBox:SetPoint("TOPLEFT", p, "TOPLEFT", 14, -112)
-    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints()
-    descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
-    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
-    descBorder:SetPoint("BOTTOMLEFT",  descBox, "BOTTOMLEFT",  2, 1)
-    descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
-    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
-    local descEB = CreateFrame("EditBox", nil, descBox)
-    descEB:SetPoint("TOPLEFT",     descBox, "TOPLEFT",      6, -4)
-    descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6,  4)
-    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
-    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
-    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
-    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    local validBtn = UI.CreatePanelButton(p, SP_W - 28, 22, "Valider")
-    validBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", 14, 14)
-
-    local _cb = nil
-    validBtn:SetScript("OnClick", function()
-        local nom  = (nomEB:GetText()  or ""):match("^%s*(.-)%s*$")
-        local desc = (descEB:GetText() or ""):match("^%s*(.-)%s*$")
-        if nom == "" then return end
-        if _cb then _cb({ label = nom, desc = desc }) end
-        p:Hide()
+-- ── EditBox numérique (SetNumeric() natif bloque le signe "-") ─────────
+-- allowDecimal accepte aussi bien "." que "," (convention FR) comme séparateur.
+local function SetupNumericEditBox(eb, allowNegative, allowDecimal)
+    eb:SetNumeric(false)
+    local sign = allowNegative and "%-?" or ""
+    local pattern = allowDecimal and ("^" .. sign .. "%d*[.,]?%d*$") or ("^" .. sign .. "%d*$")
+    eb._lastValidText = eb:GetText() or ""
+    eb:SetScript("OnTextChanged", function(self, isUserInput)
+        if not isUserInput then return end
+        local text = self:GetText()
+        if text:match(pattern) then
+            self._lastValidText = text
+        else
+            self:SetText(self._lastValidText or "")
+        end
     end)
-
-    p.titleStr = titleStr
-    p.nomEB    = nomEB
-    p.descEB   = descEB
-    p._open = function(title, item, cb)
-        _cb = cb
-        titleStr:SetText(title)
-        nomEB:SetText(item  and item.label or "")
-        descEB:SetText(item and item.desc  or "")
-        p:Show(); nomEB:SetFocus()
-    end
-
-    subPanel = p
-    return p
 end
 
-local function OpenSubPanel(title, item, cb)
-    GetOrCreateSubPanel()._open(title, item, cb)
+-- ── Parse un nombre saisi avec "," ou "." comme séparateur décimal ─────
+local function ParseDecimal(text)
+    return tonumber(((text or ""):gsub(",", ".")))
 end
 
--- ── Panel Gourde : Nom + Contenance + Description + options ──────────
-local gourdeSubPanel = nil
-
-local function GetOrCreateGourdeSubPanel()
-    if gourdeSubPanel then return gourdeSubPanel end
-    local UI = OS2.UI or {}
-    local GW = 300
-    local GH = 380
-    local PAD = 14
-    local IW  = GW - PAD * 2   -- 272 px
-
-    local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(GW, GH)
-    p:SetFrameStrata("TOOLTIP"); p:SetFrameLevel(111)
-    p:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-    p:Hide()
-
-    local bg = p:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.98); OS2.RegisterWindowFrame(p, bg)
-
-    local titleStr = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleStr:SetPoint("TOP", p, "TOP", 0, -13); UI.ApplyTitle(titleStr)
-
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, -36)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -36)
-    end
-
-    UI.CreateCloseButton(p, function() p:Hide() end)
-    do
-        local drag = CreateFrame("Frame", nil, p)
-        drag:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, 0)
-        drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
-        drag:SetHeight(36); OS2.MakeDraggable(p, drag)
-    end
-
-    -- Nom
-    local lblNom = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblNom:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -46)
-    lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
-
-    local nomEB = UI.CreateStyledEditBox(p, IW, 22)
-    nomEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -62)
-
-    -- Contenance  (bottom nomEB = -84)
-    local lblCont = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblCont:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -94)
-    lblCont:SetText("Contenance"); UI.ApplyLabel(lblCont)
-
-    local contEB = UI.CreateStyledEditBox(p, IW, 22)
-    contEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -110)
-
-    -- Description  (bottom contEB = -132)
-    local lblDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblDesc:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -142)
-    lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
-
-    local descBox = CreateFrame("Frame", nil, p)
-    descBox:SetSize(IW, 50)
-    descBox:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -158)
-    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints()
-    descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
-    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
-    descBorder:SetPoint("BOTTOMLEFT",  descBox, "BOTTOMLEFT",  2, 1)
-    descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
-    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
-    local descEB = CreateFrame("EditBox", nil, descBox)
-    descEB:SetPoint("TOPLEFT",     descBox, "TOPLEFT",      6, -4)
-    descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6,  4)
-    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
-    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
-    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
-    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    -- Séparateur  (descBox bottom = -208)
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -218)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -218)
-    end
-
-    -- Recharge automatique : texte d'abord, coche ensuite
-    local txtRecharge = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    txtRecharge:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -228)
-    txtRecharge:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -228)
-    txtRecharge:SetText("Si la gourde est capable de se recharger toute seule dans la nature.")
-    txtRecharge:SetTextColor(0.65, 0.62, 0.55, 1); txtRecharge:SetJustifyH("LEFT")
-
-    -- checkbox à ~-262 (texte ~32 px de haut)
-    local chkRecharge, lblRecharge = UI.CreateStyledCheckbox(p, "Recharge automatique ?")
-    chkRecharge:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -263)
-    lblRecharge:SetPoint("LEFT", chkRecharge, "RIGHT", 6, 0)
-
-    -- Filtre : texte d'abord, coche ensuite  (coche recharge bottom ≈ -281)
-    local txtFiltre = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    txtFiltre:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -291)
-    txtFiltre:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -291)
-    txtFiltre:SetText("Si la gourde est capable de filtrer des eaux non potable.")
-    txtFiltre:SetTextColor(0.65, 0.62, 0.55, 1); txtFiltre:SetJustifyH("LEFT")
-
-    -- checkbox à ~-318 (texte ~26 px de haut)
-    local chkFiltre, lblFiltre = UI.CreateStyledCheckbox(p, "Filtre ?")
-    chkFiltre:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -320)
-    lblFiltre:SetPoint("LEFT", chkFiltre, "RIGHT", 6, 0)
-
-    -- Valider
-    local validBtn = UI.CreatePanelButton(p, IW, 22, "Valider")
-    validBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", PAD, 14)
-
-    local _cb = nil
-    validBtn:SetScript("OnClick", function()
-        local nom  = (nomEB:GetText()  or ""):match("^%s*(.-)%s*$")
-        local cont = (contEB:GetText() or ""):match("^%s*(.-)%s*$")
-        local desc = (descEB:GetText() or ""):match("^%s*(.-)%s*$")
-        if nom == "" then return end
-        if _cb then _cb({
-            label        = nom,
-            contenance   = cont,
-            desc         = desc,
-            rechargeAuto = chkRecharge:GetChecked() and true or false,
-            filtre       = chkFiltre:GetChecked()   and true or false,
-        }) end
-        p:Hide()
-    end)
-
-    p._open = function(title, item, cb)
-        _cb = cb
-        titleStr:SetText(title)
-        nomEB:SetText(item and item.label       or "")
-        contEB:SetText(item and item.contenance or "")
-        descEB:SetText(item and item.desc       or "")
-        chkRecharge:SetChecked(item and item.rechargeAuto or false)
-        chkFiltre:SetChecked(item and item.filtre         or false)
-        p:Show(); nomEB:SetFocus()
-    end
-
-    gourdeSubPanel = p
-    return p
-end
-
-local function OpenGourdeSubPanel(title, item, cb)
-    GetOrCreateGourdeSubPanel()._open(title, item, cb)
-end
-
--- ── Conditions d'aura disponibles ────────────────────────────────────
-local AURA_CONDS = {
-    { key = "always",     label = "Toujours (dès que bue)"          },
-    { key = "unfiltered", label = "Si non filtrée"                  },
-    { key = "unpurified", label = "Si non purifiée"                 },
-    { key = "parasite",   label = "Si contient des parasites"       },
-    { key = "salee",      label = "Si salée"                        },
+-- ── Opérande : valeur flexible (Brut / Clé / Expression) ───────────────
+-- { type = "fixed", value = number, unit = "brut"|"pourcent" }
+-- { type = "cle",   cleKey = string }
+-- { type = "expr",  op = "addition"|"soustraction"|"multiplication"|"division", left = Opérande, right = Opérande }
+local OPERATION_SYMBOLS = {
+    addition       = "+",
+    soustraction   = "−",
+    multiplication = "×",
+    division       = "÷",
 }
 
--- ── Panel Aura tout-en-un (condition ◄► + aura + liste) ──────────────
-local auraPanel = nil
+local OPERATION_LABELS = {
+    addition       = "Addition",
+    soustraction   = "Soustraction",
+    multiplication = "Multiplication",
+    division       = "Division",
+    si             = "Si",
+}
 
-local function GetOrCreateAuraPanel()
-    if auraPanel then return auraPanel end
-    local UI    = OS2.UI or {}
-    local GW    = 300
-    local GH    = 360
-    local PAD   = 14
-    local IW    = GW - PAD * 2          -- 272
-    local SB_W2 = 8
-    local SF_W2 = IW - SB_W2 - 2
-    local ROW_H2  = 24
-    local DEL_SZ2 = 16
-    local LIST_H2 = GH - 36 - 110 - 14 - 22 - 14   -- ≈ 164
+local COMPARATEUR_LABELS = {
+    [">"]  = ">",
+    [">="] = "≥",
+    ["<"]  = "<",
+    ["<="] = "≤",
+    ["="]  = "=",
+    ["~="] = "≠",
+}
 
-    local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(GW, GH)
-    p:SetFrameStrata("TOOLTIP"); p:SetFrameLevel(120)
-    p:Hide()
-
-    local bg = p:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.98); OS2.RegisterWindowFrame(p, bg)
-
-    do local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-       sep:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -36); sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -36) end
-
-    local titleStr = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleStr:SetPoint("TOP", p, "TOP", 0, -13); UI.ApplyTitle(titleStr)
-
-    UI.CreateCloseButton(p, function() p:Hide() end)
-    do local drag = CreateFrame("Frame", nil, p)
-       drag:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0); drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
-       drag:SetHeight(36); OS2.MakeDraggable(p, drag) end
-
-    -- ── Section ajout ────────────────────────────────────────────────
-    -- Sélecteur de condition avec ◄ ►
-    local condIdx = 1
-
-    local btnPrev = CreateFrame("Button", nil, p); btnPrev:SetSize(22, 22)
-    btnPrev:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -46)
-    local bpBg = btnPrev:CreateTexture(nil, "BACKGROUND"); bpBg:SetAllPoints(); bpBg:SetColorTexture(0.12, 0.10, 0.06, 1)
-    local bpHl = btnPrev:CreateTexture(nil, "HIGHLIGHT"); bpHl:SetAllPoints(); bpHl:SetColorTexture(0.85, 0.75, 0.40, 0.15)
-    local bpLbl = btnPrev:CreateFontString(nil, "OVERLAY", "GameFontNormal"); bpLbl:SetAllPoints()
-    bpLbl:SetText("◄"); bpLbl:SetTextColor(0.88, 0.78, 0.40, 1)
-
-    local btnNext = CreateFrame("Button", nil, p); btnNext:SetSize(22, 22)
-    btnNext:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -46)
-    local bnBg = btnNext:CreateTexture(nil, "BACKGROUND"); bnBg:SetAllPoints(); bnBg:SetColorTexture(0.12, 0.10, 0.06, 1)
-    local bnHl = btnNext:CreateTexture(nil, "HIGHLIGHT"); bnHl:SetAllPoints(); bnHl:SetColorTexture(0.85, 0.75, 0.40, 0.15)
-    local bnLbl = btnNext:CreateFontString(nil, "OVERLAY", "GameFontNormal"); bnLbl:SetAllPoints()
-    bnLbl:SetText("►"); bnLbl:SetTextColor(0.88, 0.78, 0.40, 1)
-
-    local condLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    condLbl:SetPoint("LEFT",  btnPrev, "RIGHT",  4, 0)
-    condLbl:SetPoint("RIGHT", btnNext, "LEFT",  -4, 0)
-    condLbl:SetJustifyH("CENTER"); condLbl:SetTextColor(0.88, 0.82, 0.65, 1)
-
-    local function RefreshCond()
-        local c = AURA_CONDS[condIdx] or AURA_CONDS[1]
-        condLbl:SetText(c.label)
+local function CleLabelByKey(cles, cleKey)
+    for _, c in ipairs(cles or {}) do
+        if c.key == cleKey then return c.label end
     end
+    return "?"
+end
 
-    btnPrev:SetScript("OnClick", function()
-        condIdx = condIdx > 1 and condIdx - 1 or #AURA_CONDS; RefreshCond()
+local function DescribeOperand(op, cles)
+    if not op then return "0" end
+    if op.type == "cle" then
+        return CleLabelByKey(cles, op.cleKey)
+    elseif op.type == "expr" then
+        return string.format("(%s %s %s)",
+            DescribeOperand(op.left, cles),
+            OPERATION_SYMBOLS[op.op] or "?",
+            DescribeOperand(op.right, cles))
+    else
+        local v = tostring(op.value or 0)
+        return (op.unit == "pourcent") and (v .. "%") or v
+    end
+end
+
+local function EvaluateOperand(op, ctx)
+    if not op then return 0 end
+    if op.type == "cle" then
+        local def = 0
+        for _, c in ipairs(ctx.cles or {}) do
+            if c.key == op.cleKey then def = c.valeurDefaut or 0; break end
+        end
+        if OS2.DB.GetHydrationLiveValue then
+            return OS2.DB.GetHydrationLiveValue(ctx.systemKey, op.cleKey, def) or 0
+        end
+        return def
+    elseif op.type == "expr" then
+        local l = EvaluateOperand(op.left,  ctx)
+        local r = EvaluateOperand(op.right, ctx)
+        if     op.op == "addition"       then return l + r
+        elseif op.op == "soustraction"   then return l - r
+        elseif op.op == "multiplication" then return l * r
+        elseif op.op == "division"       then return (r ~= 0) and (l / r) or 0
+        end
+        return 0
+    else
+        local v = op.value or 0
+        if op.unit == "pourcent" then
+            return (v / 100) * (ctx.capaciteTotale or 0)
+        end
+        return v
+    end
+end
+
+-- ── Condition : Base [Opération] Valeur, ou Si (branches Alors/Sinon) ──
+-- { key, label, base = Opérande, operation = "addition".."division"|"si",
+--   valeur = Opérande,                                  -- opérations arithmétiques
+--   comparateur = ">" etc., valeurSi = Opérande,         -- si
+--   alors = { actions = { Action, ... } }, sinon = { actions = { Action, ... } } }
+--
+-- Action :
+-- { type = "formule", formule = Condition }             -- imbriqué, récursif
+-- { type = "aura",    spellId = number, mode = "apply"|"remove" }
+-- { type = "message", text = string }
+local EvaluateCondition, ExecuteConditionActions, DescribeCondition, DescribeAction
+
+function ExecuteConditionActions(actions, ctx)
+    local total = 0
+    for _, action in ipairs(actions or {}) do
+        if action.type == "formule" then
+            total = total + (EvaluateCondition(action.formule, ctx) or 0)
+        elseif action.type == "aura" then
+            if action.spellId and OS2.ModuleRules and OS2.ModuleRules.ExecuteServerCommand then
+                local mode = (action.mode == "remove") and "remove" or "apply"
+                OS2.ModuleRules.ExecuteServerCommand(tostring(action.spellId), mode)
+            end
+        elseif action.type == "message" then
+            if UIErrorsFrame and action.text and action.text ~= "" then
+                UIErrorsFrame:AddMessage(action.text, 1.0, 0.82, 0.0)
+            end
+        end
+    end
+    return total
+end
+
+function EvaluateCondition(cond, ctx)
+    if not cond then return 0 end
+    local baseVal = EvaluateOperand(cond.base, ctx)
+    if cond.operation == "si" then
+        local seuil = EvaluateOperand(cond.valeurSi, ctx)
+        local cmp = cond.comparateur or ">"
+        local ok
+        if     cmp == ">"  then ok = baseVal >  seuil
+        elseif cmp == ">=" then ok = baseVal >= seuil
+        elseif cmp == "<"  then ok = baseVal <  seuil
+        elseif cmp == "<=" then ok = baseVal <= seuil
+        elseif cmp == "="  then ok = baseVal == seuil
+        elseif cmp == "~=" then ok = baseVal ~= seuil
+        else ok = false end
+        local branch = ok and cond.alors or cond.sinon
+        return ExecuteConditionActions(branch and branch.actions, ctx)
+    else
+        local valeur = EvaluateOperand(cond.valeur, ctx)
+        if     cond.operation == "addition"       then return baseVal + valeur
+        elseif cond.operation == "soustraction"    then return baseVal - valeur
+        elseif cond.operation == "multiplication"  then return baseVal * valeur
+        elseif cond.operation == "division"        then return (valeur ~= 0) and (baseVal / valeur) or 0
+        end
+        return baseVal
+    end
+end
+
+function DescribeAction(action, cles)
+    if not action then return "?" end
+    if action.type == "formule" then
+        return "Formule : " .. DescribeCondition(action.formule, cles)
+    elseif action.type == "aura" then
+        local verbe = (action.mode == "remove") and "Retirer" or "Appliquer"
+        return string.format("Aura : %s %s", verbe, tostring(action.spellId or "?"))
+    elseif action.type == "message" then
+        return "Message : \"" .. (action.text or "") .. "\""
+    end
+    return "?"
+end
+
+function DescribeCondition(cond, cles)
+    if not cond then return "?" end
+    if cond.operation == "si" then
+        return string.format("Si %s %s %s",
+            DescribeOperand(cond.base, cles),
+            COMPARATEUR_LABELS[cond.comparateur] or "?",
+            DescribeOperand(cond.valeurSi, cles))
+    end
+    return string.format("%s %s %s",
+        DescribeOperand(cond.base, cles),
+        OPERATION_SYMBOLS[cond.operation] or "?",
+        DescribeOperand(cond.valeur, cles))
+end
+
+-- ══════════════════════════════════════════════════════════════════════
+-- Widgets partagés
+-- ══════════════════════════════════════════════════════════════════════
+
+-- ── Bouton à cycle : clic = valeur suivante ────────────────────────────
+local function CreateCycleToggle(parent, w, h, options, labelFn, onChange)
+    local tidx = 1
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(w, h)
+    local tBg = btn:CreateTexture(nil, "BACKGROUND"); tBg:SetAllPoints(); tBg:SetColorTexture(0.12, 0.10, 0.05, 1)
+    local tBd = btn:CreateTexture(nil, "ARTWORK"); tBd:SetHeight(1)
+    tBd:SetPoint("BOTTOMLEFT",  btn, "BOTTOMLEFT",  2, 1)
+    tBd:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
+    tBd:SetColorTexture(0.70, 0.60, 0.25, 0.80)
+    local tHl = btn:CreateTexture(nil, "HIGHLIGHT"); tHl:SetAllPoints(); tHl:SetColorTexture(0.8, 0.7, 0.3, 0.12)
+    local tLbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); tLbl:SetAllPoints()
+    tLbl:SetTextColor(0.92, 0.84, 0.50, 1)
+    local function Refresh()
+        tLbl:SetText((labelFn and labelFn(options[tidx])) or tostring(options[tidx]))
+    end
+    btn:SetScript("OnClick", function()
+        tidx = (tidx < #options) and (tidx + 1) or 1
+        Refresh()
+        if onChange then onChange(options[tidx]) end
     end)
-    btnNext:SetScript("OnClick", function()
-        condIdx = condIdx < #AURA_CONDS and condIdx + 1 or 1; RefreshCond()
-    end)
+    Refresh()
+    return {
+        button = btn,
+        GetValue = function() return options[tidx] end,
+        SetValue = function(v)
+            for i, o in ipairs(options) do if o == v then tidx = i; break end end
+            Refresh()
+        end,
+    }
+end
 
-    -- Champ aura
-    local lblAura = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblAura:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -76)
-    lblAura:SetText("Aura à appliquer"); UI.ApplyLabel(lblAura)
+-- ── Accordéon générique : liste dont chaque ligne s'étend en place ─────
+local function NewAccordion(parent)
+    local SB_W = 8
+    local sf = CreateFrame("ScrollFrame", nil, parent)
+    sf:EnableMouseWheel(true)
 
-    local auraEB = UI.CreateStyledEditBox(p, IW, 22)
-    auraEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -92)
-
-    -- Bouton Ajouter
-    local addBtn = UI.CreatePanelButton(p, IW, 22, "+ Ajouter la règle")
-    addBtn:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -122)
-
-    -- Séparateur
-    do local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-       sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -152)
-       sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -152) end
-
-    -- ── Liste des règles ─────────────────────────────────────────────
-    local sf = CreateFrame("ScrollFrame", nil, p)
-    sf:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -160)
-    sf:SetSize(SF_W2, LIST_H2); sf:EnableMouseWheel(true)
-
-    local sbTrack = p:CreateTexture(nil, "BACKGROUND")
-    sbTrack:SetColorTexture(0.07, 0.07, 0.07, 1); sbTrack:SetWidth(SB_W2)
-    sbTrack:SetPoint("TOPLEFT",    sf, "TOPRIGHT", 2, 0)
-    sbTrack:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
-
-    local sb = CreateFrame("Slider", nil, p)
-    sb:SetPoint("TOPLEFT",    sf, "TOPRIGHT", 2, 0)
-    sb:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
-    sb:SetWidth(SB_W2); sb:SetOrientation("VERTICAL"); sb:SetMinMaxValues(0, 0); sb:SetValue(0)
-    local thumb = sb:CreateTexture(nil, "THUMB"); thumb:SetSize(SB_W2-2, 24)
-    thumb:SetColorTexture(0.5, 0.42, 0.22, 0.85); sb:SetThumbTexture(thumb)
+    local sb = CreateFrame("Slider", nil, parent)
+    sb:SetWidth(SB_W); sb:SetOrientation("VERTICAL"); sb:SetMinMaxValues(0, 0); sb:SetValue(0)
+    local sbt = sb:CreateTexture(nil, "THUMB"); sbt:SetSize(SB_W - 2, 24); sbt:SetColorTexture(0.5, 0.42, 0.22, 0.85); sb:SetThumbTexture(sbt)
     sf:SetScript("OnMouseWheel", function(_, d)
-        sb:SetValue(math.max(0, math.min(select(2, sb:GetMinMaxValues()), sb:GetValue() - d*ROW_H2*3)))
+        sb:SetValue(math.max(0, math.min(select(2, sb:GetMinMaxValues()), sb:GetValue() - d * 40)))
     end)
     sb:SetScript("OnValueChanged", function(_, v) sf:SetVerticalScroll(v) end)
 
-    local fermerBtn = UI.CreatePanelButton(p, IW, 22, "Fermer")
-    fermerBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", PAD, 14)
-    fermerBtn:SetScript("OnClick", function() p:Hide() end)
+    local acc = { sf = sf, sb = sb, expanded = nil }
 
-    local _rules = nil
-
-    local function RebuildRules()
+    function acc.Render(items, opts)
+        local listH = sf:GetHeight()
         if sf._content then sf._content:Hide() end
+        local cW = math.max(1, math.floor(sf:GetWidth()))
         local c = CreateFrame("Frame", nil, sf)
-        c:SetSize(SF_W2, 1); sf:SetScrollChild(c); sf:SetVerticalScroll(0); sf._content = c
+        c:SetSize(cW, 1); sf:SetScrollChild(c); sf:SetVerticalScroll(0); sf._content = c
 
+        local ROW_H = 26
         local y = 0
-        for i, rule in ipairs(_rules or {}) do
-            local condLabel = rule.condition or "?"
-            for _, cd in ipairs(AURA_CONDS) do
-                if cd.key == rule.condition then condLabel = cd.label; break end
+        for i, item in ipairs(items) do
+            local isOpen = (acc.expanded == i)
+            local extraH = isOpen and (opts.formHeight and opts.formHeight(item) or 0) or 0
+            local rowH = ROW_H + extraH
+
+            local row = CreateFrame("Frame", nil, c)
+            row:SetSize(cW, rowH)
+            row:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y)
+
+            local rowBg = row:CreateTexture(nil, "BACKGROUND"); rowBg:SetAllPoints()
+            if isOpen then
+                rowBg:SetColorTexture(0.13, 0.11, 0.06, 1)
+            else
+                local even = (i % 2 == 0)
+                local shade = even and 0.09 or 0.06
+                rowBg:SetColorTexture(shade, shade, shade, 1)
             end
-            local even = (i % 2 == 0)
-            local rowBg = c:CreateTexture(nil, "BACKGROUND"); rowBg:SetHeight(ROW_H2)
-            rowBg:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); rowBg:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
-            rowBg:SetColorTexture(even and 0.09 or 0.06, even and 0.09 or 0.06, even and 0.09 or 0.06, 1)
 
-            local txt = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            txt:SetPoint("TOPLEFT",  c, "TOPLEFT",  6, -(y+5))
-            txt:SetPoint("TOPRIGHT", c, "TOPRIGHT", -(4+DEL_SZ2+4), -(y+5))
-            txt:SetJustifyH("LEFT")
-            txt:SetText(condLabel .. "  →  " .. (rule.aura or "?"))
-            txt:SetTextColor(0.85, 0.80, 0.65, 1)
+            local hdrBtn = CreateFrame("Button", nil, row)
+            hdrBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+            hdrBtn:SetPoint("TOPRIGHT", row, "TOPRIGHT", -26, 0)
+            hdrBtn:SetHeight(ROW_H)
+            local hl = hdrBtn:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetColorTexture(0.85, 0.75, 0.40, 0.08)
 
-            local delBtn = CreateFrame("Button", nil, c); delBtn:SetSize(DEL_SZ2, DEL_SZ2)
-            delBtn:SetPoint("TOPRIGHT", c, "TOPRIGHT", -4, -(y + math.floor((ROW_H2-DEL_SZ2)/2)))
+            local arrow = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            arrow:SetPoint("LEFT", row, "TOPLEFT", 6, -(ROW_H / 2))
+            arrow:SetText(isOpen and "▾" or "▸"); arrow:SetTextColor(0.80, 0.70, 0.40, 1)
+
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+            lbl:SetPoint("RIGHT", hdrBtn, "RIGHT", -4, 0)
+            lbl:SetJustifyH("LEFT"); lbl:SetText(opts.summary(item)); lbl:SetTextColor(0.85, 0.80, 0.65, 1)
+
+            local delBtn = CreateFrame("Button", nil, row); delBtn:SetSize(16, 16)
+            delBtn:SetPoint("RIGHT", row, "TOPRIGHT", -6, -(ROW_H / 2))
             local dBg = delBtn:CreateTexture(nil, "BACKGROUND"); dBg:SetAllPoints(); dBg:SetColorTexture(0.20, 0.07, 0.07, 1)
             local dLbl = delBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal"); dLbl:SetAllPoints()
             dLbl:SetText("−"); dLbl:SetTextColor(0.80, 0.30, 0.30, 1)
             local dHl = delBtn:CreateTexture(nil, "HIGHLIGHT"); dHl:SetAllPoints(); dHl:SetColorTexture(0.75, 0.2, 0.2, 0.4)
-            local di = i; delBtn:SetScript("OnClick", function() table.remove(_rules, di); RebuildRules() end)
+            local di = i
+            delBtn:SetScript("OnClick", function()
+                if opts.onDelete then opts.onDelete(di) end
+            end)
 
-            y = y + ROW_H2
+            local ci = i
+            hdrBtn:SetScript("OnClick", function()
+                if isOpen then
+                    acc.expanded = nil
+                else
+                    acc.expanded = ci
+                end
+                acc.Render(items, opts)
+            end)
+
+            if isOpen then
+                local formFrame = CreateFrame("Frame", nil, row)
+                formFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 20, -ROW_H)
+                formFrame:SetPoint("TOPRIGHT", row, "TOPRIGHT", -10, -ROW_H)
+                formFrame:SetHeight(math.max(1, extraH))
+                if opts.buildForm then
+                    opts.buildForm(formFrame, item, i, function() acc.Render(items, opts) end)
+                end
+            end
+
+            y = y + rowH
         end
         c:SetHeight(math.max(1, y))
-        local maxS = math.max(0, y - LIST_H2)
+        local maxS = math.max(0, y - listH)
         sb:SetMinMaxValues(0, maxS); sb:SetAlpha(maxS > 0 and 1 or 0.2)
     end
 
-    addBtn:SetScript("OnClick", function()
-        local aura = (auraEB:GetText() or ""):match("^%s*(.-)%s*$")
-        if aura == "" then return end
-        local cond = AURA_CONDS[condIdx] or AURA_CONDS[1]
-        _rules[#_rules + 1] = { condition = cond.key, aura = aura }
-        auraEB:SetText("")
-        RebuildRules()
-    end)
-
-    p._open = function(title, rules, srcFrame)
-        titleStr:SetText(title)
-        _rules  = rules
-        condIdx = 1; RefreshCond()
-        auraEB:SetText("")
-        RebuildRules()
-        -- Ancrer à droite du panel source, même hauteur
-        p:ClearAllPoints()
-        if srcFrame and srcFrame:IsShown() then
-            p:SetPoint("TOPLEFT", srcFrame, "TOPRIGHT", 8, 0)
-        else
-            p:SetPoint("CENTER", UIParent, "CENTER", 160, 0)
-        end
-        p:Show()
-    end
-
-    auraPanel = p
-    return p
+    return acc
 end
 
-local function OpenAuraPanel(title, rules, srcFrame)
-    GetOrCreateAuraPanel()._open(title, rules, srcFrame)
-end
-
--- ── Panel Source d'eau ────────────────────────────────────────────────
-local sourceSubPanel = nil
-
-local function GetOrCreateSourceSubPanel()
-    if sourceSubPanel then return sourceSubPanel end
-    local UI  = OS2.UI or {}
-    local GW  = 300
-    local GH  = 500
-    local PAD = 14
-    local IW  = GW - PAD * 2   -- 272 px
-
-    local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(GW, GH)
-    p:SetFrameStrata("TOOLTIP"); p:SetFrameLevel(111)
-    p:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-    p:Hide()
-
-    local bg = p:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.98); OS2.RegisterWindowFrame(p, bg)
-
-    local titleStr = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleStr:SetPoint("TOP", p, "TOP", 0, -13); UI.ApplyTitle(titleStr)
-
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, -36)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -36)
-    end
-
-    UI.CreateCloseButton(p, function() p:Hide() end)
-    do
-        local drag = CreateFrame("Frame", nil, p)
-        drag:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, 0)
-        drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
-        drag:SetHeight(36); OS2.MakeDraggable(p, drag)
-    end
-
-    -- Nom
-    local lblNom = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblNom:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -46)
-    lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
-
-    local nomEB = UI.CreateStyledEditBox(p, IW, 22)
-    nomEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -62)
-
-    -- Description  (bottom nomEB = -84)
-    local lblDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblDesc:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -94)
-    lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
-
-    local descBox = CreateFrame("Frame", nil, p)
-    descBox:SetSize(IW, 40)
-    descBox:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -110)
-    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints()
-    descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
-    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
-    descBorder:SetPoint("BOTTOMLEFT",  descBox, "BOTTOMLEFT",  2, 1)
-    descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
-    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
-    local descEB = CreateFrame("EditBox", nil, descBox)
-    descEB:SetPoint("TOPLEFT",     descBox, "TOPLEFT",      6, -4)
-    descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6,  4)
-    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
-    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
-    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
-    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    -- Propreté  (descBox bottom = -150)
-    local lblProp = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblProp:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -160)
-    lblProp:SetText("Propreté de l'eau  (0 – 100)"); UI.ApplyLabel(lblProp)
-
-    local propEB = UI.CreateStyledEditBox(p, 80, 22)
-    propEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -176)
-    propEB:SetNumeric(true); propEB:SetMaxLetters(3)
-    propEB:SetScript("OnEditFocusLost", function(self)
-        local v = tonumber(self:GetText()) or 0
-        self:SetText(tostring(math.max(0, math.min(100, v))))
-    end)
-
-    -- Séparateur  (bottom propEB = -198)
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -208)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -208)
-    end
-
-    -- Parasite (texte → coche)
-    local txtParasite = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    txtParasite:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -218)
-    txtParasite:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -218)
-    txtParasite:SetText("L'eau contient des parasites pouvant infecter le consommateur.")
-    txtParasite:SetTextColor(0.65, 0.62, 0.55, 1); txtParasite:SetJustifyH("LEFT")
-
-    local chkParasite, lblParasite = UI.CreateStyledCheckbox(p, "Parasite ?")
-    chkParasite:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -250)
-    lblParasite:SetPoint("LEFT", chkParasite, "RIGHT", 6, 0)
-
-    -- Peut rendre malade (texte → coche)  (bottom chkParasite ≈ -268)
-    local txtMalade = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    txtMalade:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -276)
-    txtMalade:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -276)
-    txtMalade:SetText("La consommation de cette eau peut rendre malade.")
-    txtMalade:SetTextColor(0.65, 0.62, 0.55, 1); txtMalade:SetJustifyH("LEFT")
-
-    local chkMalade, lblMalade = UI.CreateStyledCheckbox(p, "Peut rendre malade ?")
-    chkMalade:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -300)
-    lblMalade:SetPoint("LEFT", chkMalade, "RIGHT", 6, 0)
-
-    -- Séparateur  (bottom chkMalade ≈ -318)
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -326)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -326)
-    end
-
-    -- Options simples (coches sans texte descriptif)
-    local chkSalee, lblSalee = UI.CreateStyledCheckbox(p, "Salée ?")
-    chkSalee:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -336)
-    lblSalee:SetPoint("LEFT", chkSalee, "RIGHT", 6, 0)
-
-    local chkFiltrage, lblFiltrage = UI.CreateStyledCheckbox(p, "Nécessite filtrage ?")
-    chkFiltrage:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -358)
-    lblFiltrage:SetPoint("LEFT", chkFiltrage, "RIGHT", 6, 0)
-
-    -- Séparateur Aura  (chkFiltrage bottom ≈ -376)
-    do local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-       sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -384)
-       sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -384) end
-
-    local chkAura, lblAura = UI.CreateStyledCheckbox(p, "Aura ?")
-    chkAura:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -394)
-    lblAura:SetPoint("LEFT", chkAura, "RIGHT", 6, 0)
-
-    -- Bouton "Configurer les auras →" (visible seulement si chkAura coché)
-    local cfgAuraBtn = UI.CreatePanelButton(p, IW, 22, "Configurer les auras  →")
-    cfgAuraBtn:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -418)
-    cfgAuraBtn:Hide()
-
-    chkAura:SetScript("OnClick", function(self)
-        cfgAuraBtn:SetShown(self:GetChecked() and true or false)
-    end)
-
-    -- Valider
-    local validBtn = UI.CreatePanelButton(p, IW, 22, "Valider")
-    validBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", PAD, 14)
-
-    local _cb        = nil
-    local _auraRules = {}
-
-    cfgAuraBtn:SetScript("OnClick", function()
-        OpenAuraPanel("Règles d'Aura", _auraRules, p)
-    end)
-
-    validBtn:SetScript("OnClick", function()
-        local nom  = (nomEB:GetText()  or ""):match("^%s*(.-)%s*$")
-        if nom == "" then return end
-        local prop = math.max(0, math.min(100, tonumber(propEB:GetText()) or 0))
-        local desc = (descEB:GetText() or ""):match("^%s*(.-)%s*$")
-        if _cb then _cb({
-            label       = nom,
-            desc        = desc,
-            proprete    = prop,
-            parasite    = chkParasite:GetChecked() and true or false,
-            malade      = chkMalade:GetChecked()   and true or false,
-            salee       = chkSalee:GetChecked()    and true or false,
-            filtrage    = chkFiltrage:GetChecked() and true or false,
-            auraEnabled = chkAura:GetChecked()     and true or false,
-            auraRules   = _auraRules,
-        }) end
-        p:Hide()
-    end)
-
-    p._open = function(title, item, cb)
-        _cb = cb
-        -- Copie des règles d'aura pour ne pas modifier l'original tant que Valider n'est pas cliqué
-        _auraRules = {}
-        for _, r in ipairs(item and item.auraRules or {}) do
-            _auraRules[#_auraRules + 1] = { condition = r.condition, aura = r.aura }
-        end
-        titleStr:SetText(title)
-        nomEB:SetText(item and item.label or "")
-        descEB:SetText(item and item.desc  or "")
-        propEB:SetText(tostring(item and item.proprete or 100))
-        chkParasite:SetChecked(item and item.parasite    or false)
-        chkMalade:SetChecked(item   and item.malade      or false)
-        chkSalee:SetChecked(item    and item.salee       or false)
-        chkFiltrage:SetChecked(item and item.filtrage    or false)
-        local auraOn = item and item.auraEnabled or false
-        chkAura:SetChecked(auraOn)
-        cfgAuraBtn:SetShown(auraOn)
-        p:Show(); nomEB:SetFocus()
-    end
-
-    sourceSubPanel = p
-    return p
-end
-
-local function OpenSourceSubPanel(title, item, cb)
-    GetOrCreateSourceSubPanel()._open(title, item, cb)
-end
-
--- ── Helper : scroll-list avec [Éditer] et [−] ─────────────────────────
-local ROW_H_SUB = 22
-local DEL_SZ    = 16
-local LINK_W    = 36
-local LABEL_RSV = 4 + DEL_SZ + 4 + LINK_W + 4
-
-local function BuildSubList(sf, sb, listH, list, onEdit, onDelete, editBtnPool, showEdit)
+-- ── Liste plate avec Éditer/Supprimer toujours visibles ────────────────
+local function BuildFlatList(sf, sb, listH, list, onEdit, onDelete)
     if sf._content then sf._content:Hide() end
-    local cW = math.max(math.floor(sf:GetWidth()), 10)
-    local c  = CreateFrame("Frame", nil, sf)
+    local cW = math.max(1, math.floor(sf:GetWidth()))
+    local c = CreateFrame("Frame", nil, sf)
     c:SetSize(cW, 1); sf:SetScrollChild(c); sf:SetVerticalScroll(0); sf._content = c
 
+    local ROW_H = 24
+    local DEL_SZ = 16
+    local LINK_W = 44
     local y = 0
     for i, entry in ipairs(list) do
-        local even = (math.floor(y / ROW_H_SUB) % 2 == 0)
-        local rowBg = c:CreateTexture(nil, "BACKGROUND"); rowBg:SetHeight(ROW_H_SUB)
-        rowBg:SetPoint("TOPLEFT",  c, "TOPLEFT",  0, -y)
-        rowBg:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
-        rowBg:SetColorTexture(even and 0.09 or 0.06, even and 0.09 or 0.06, even and 0.09 or 0.06, 1)
+        local even = (i % 2 == 0)
+        local shade = even and 0.09 or 0.06
+        local rowBg = c:CreateTexture(nil, "BACKGROUND"); rowBg:SetHeight(ROW_H)
+        rowBg:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); rowBg:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
+        rowBg:SetColorTexture(shade, shade, shade, 1)
 
         local lbl = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOPLEFT",  c, "TOPLEFT",  6,          -(y + 4))
-        lbl:SetPoint("TOPRIGHT", c, "TOPRIGHT", -LABEL_RSV, -(y + 4))
+        lbl:SetPoint("TOPLEFT",  c, "TOPLEFT",  6, -(y + 5))
+        lbl:SetPoint("TOPRIGHT", c, "TOPRIGHT", -(4 + DEL_SZ + 4 + LINK_W + 4), -(y + 5))
         lbl:SetJustifyH("LEFT"); lbl:SetText(entry.label); lbl:SetTextColor(0.85, 0.80, 0.65, 1)
 
-        local btnY = y + math.floor((ROW_H_SUB - DEL_SZ) / 2)
+        local btnY = y + math.floor((ROW_H - DEL_SZ) / 2)
 
-        local modBtn = CreateFrame("Button", nil, c)
-        modBtn:SetSize(LINK_W, DEL_SZ)
-        modBtn:SetPoint("TOPRIGHT", c, "TOPRIGHT", -(4 + DEL_SZ + 4), -btnY)
-        local mBg = modBtn:CreateTexture(nil, "BACKGROUND"); mBg:SetAllPoints(); mBg:SetColorTexture(0.18, 0.14, 0.04, 1)
-        local mLbl = modBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); mLbl:SetAllPoints()
-        mLbl:SetText("Éditer"); mLbl:SetTextColor(0.95, 0.80, 0.20, 1)
-        local mHl = modBtn:CreateTexture(nil, "HIGHLIGHT"); mHl:SetAllPoints(); mHl:SetColorTexture(1, 0.85, 0.2, 0.2)
-        local ci = i; modBtn:SetScript("OnClick", function() onEdit(ci) end)
-        modBtn:SetShown(showEdit and true or false)
-        if editBtnPool then editBtnPool[#editBtnPool + 1] = modBtn end
+        local editBtn = CreateFrame("Button", nil, c); editBtn:SetSize(LINK_W, DEL_SZ)
+        editBtn:SetPoint("TOPRIGHT", c, "TOPRIGHT", -(4 + DEL_SZ + 4), -btnY)
+        local eBg = editBtn:CreateTexture(nil, "BACKGROUND"); eBg:SetAllPoints(); eBg:SetColorTexture(0.18, 0.14, 0.04, 1)
+        local eLbl = editBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); eLbl:SetAllPoints()
+        eLbl:SetText("Éditer"); eLbl:SetTextColor(0.95, 0.80, 0.20, 1)
+        local eHl = editBtn:CreateTexture(nil, "HIGHLIGHT"); eHl:SetAllPoints(); eHl:SetColorTexture(1, 0.85, 0.2, 0.2)
+        local ei = i; editBtn:SetScript("OnClick", function() onEdit(ei) end)
 
-        local delBtn = CreateFrame("Button", nil, c)
-        delBtn:SetSize(DEL_SZ, DEL_SZ)
+        local delBtn = CreateFrame("Button", nil, c); delBtn:SetSize(DEL_SZ, DEL_SZ)
         delBtn:SetPoint("TOPRIGHT", c, "TOPRIGHT", -4, -btnY)
         local dBg = delBtn:CreateTexture(nil, "BACKGROUND"); dBg:SetAllPoints(); dBg:SetColorTexture(0.20, 0.07, 0.07, 1)
         local dLbl = delBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal"); dLbl:SetAllPoints()
         dLbl:SetText("−"); dLbl:SetTextColor(0.80, 0.30, 0.30, 1)
         local dHl = delBtn:CreateTexture(nil, "HIGHLIGHT"); dHl:SetAllPoints(); dHl:SetColorTexture(0.75, 0.2, 0.2, 0.4)
-        delBtn:SetShown(showEdit and true or false)
-        if editBtnPool then editBtnPool[#editBtnPool + 1] = delBtn end
         local di = i; delBtn:SetScript("OnClick", function() onDelete(di) end)
 
-        y = y + ROW_H_SUB
+        y = y + ROW_H
     end
-
     c:SetHeight(math.max(1, y))
     local maxS = math.max(0, y - listH)
     sb:SetMinMaxValues(0, maxS); sb:SetAlpha(maxS > 0 and 1 or 0.2)
 end
 
--- ── Panel Fonctionnement / Règles (Hydratation) ──────────────────────
-local reglesPanel = nil
+local function CreateFlatScrollList(parent)
+    local SB_W = 8
+    local sf = CreateFrame("ScrollFrame", nil, parent)
+    sf:EnableMouseWheel(true)
+    local sb = CreateFrame("Slider", nil, parent)
+    sb:SetWidth(SB_W); sb:SetOrientation("VERTICAL"); sb:SetMinMaxValues(0, 0); sb:SetValue(0)
+    local sbt = sb:CreateTexture(nil, "THUMB"); sbt:SetSize(SB_W - 2, 24); sbt:SetColorTexture(0.5, 0.42, 0.22, 0.85); sb:SetThumbTexture(sbt)
+    sf:SetScript("OnMouseWheel", function(_, d)
+        sb:SetValue(math.max(0, math.min(select(2, sb:GetMinMaxValues()), sb:GetValue() - d * 44)))
+    end)
+    sb:SetScript("OnValueChanged", function(_, v) sf:SetVerticalScroll(v) end)
+    return sf, sb
+end
 
-local function GetOrCreateReglesPanel()
-    if reglesPanel then return reglesPanel end
-    local UI  = OS2.UI or {}
-    local GW  = 360
-    local GH  = 530
-    local PAD = 14
-    local IW  = GW - PAD * 2        -- 332
-    local ROW = 26                   -- hauteur d'une ligne
+-- ══════════════════════════════════════════════════════════════════════
+-- Sections
+-- ══════════════════════════════════════════════════════════════════════
 
-    local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(GW, GH)
-    p:SetFrameStrata("TOOLTIP"); p:SetFrameLevel(115)
-    p:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    p:Hide()
+-- ── Général ─────────────────────────────────────────────────────────────
+local function RenderGeneralSection(container, data)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
 
-    local bg = p:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.98); OS2.RegisterWindowFrame(p, bg)
+    local lblNom = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblNom:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+    lblNom:SetText("Nom du système"); UI.ApplyLabel(lblNom)
+    local nomEB = UI.CreateStyledEditBox(container, W, 24)
+    nomEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -18)
+    nomEB:SetText(data.label or "")
+    nomEB:SetScript("OnTextChanged", function(self) data.label = self:GetText() end)
 
-    local titleStr = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    titleStr:SetPoint("TOP", p, "TOP", 0, -13); UI.ApplyTitle(titleStr)
+    local lblDesc = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblDesc:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -56)
+    lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
 
-    do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, -36)
-        sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -36)
-    end
+    local descBox = CreateFrame("Frame", nil, container)
+    descBox:SetSize(W, 130)
+    descBox:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -72)
+    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
+    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
+    descBorder:SetPoint("BOTTOMLEFT",  descBox, "BOTTOMLEFT",  2, 1)
+    descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
+    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
+    local descEB = CreateFrame("EditBox", nil, descBox)
+    descEB:SetPoint("TOPLEFT",     descBox, "TOPLEFT",      6, -4)
+    descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6,  4)
+    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
+    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(512)
+    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
+    descEB:SetText(data.desc or "")
+    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    descEB:SetScript("OnTextChanged", function(self) data.desc = self:GetText() end)
 
-    UI.CreateCloseButton(p, function() p:Hide() end)
-    do
-        local drag = CreateFrame("Frame", nil, p)
-        drag:SetPoint("TOPLEFT",  p, "TOPLEFT",  0, 0)
-        drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
-        drag:SetHeight(36); OS2.MakeDraggable(p, drag)
-    end
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -216)
+    hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -216)
+    hint:SetJustifyH("LEFT"); hint:SetWordWrap(true); UI.ApplySoftText(hint)
+    hint:SetText("Utilise la barre de gauche pour configurer les Clés, États, Filtres, Sources, Gourdes, Conditions et le Fonctionnement de ce système.")
+end
 
-    -- ── Helper : bouton toggle (%/Brut, etc.) ───────────────────────────
-    local function MakeToggle(x, y, w, h, options)
-        local tidx = 1
-        local btn  = CreateFrame("Button", nil, p)
-        btn:SetSize(w, h)
-        btn:SetPoint("TOPLEFT", p, "TOPLEFT", x, -y)
-        local tBg = btn:CreateTexture(nil,"BACKGROUND"); tBg:SetAllPoints(); tBg:SetColorTexture(0.12,0.10,0.05,1)
-        local tBd = btn:CreateTexture(nil,"ARTWORK"); tBd:SetHeight(1)
-        tBd:SetPoint("BOTTOMLEFT",  btn,"BOTTOMLEFT",  2, 1)
-        tBd:SetPoint("BOTTOMRIGHT", btn,"BOTTOMRIGHT", -2, 1)
-        tBd:SetColorTexture(0.70,0.60,0.25,0.80)
-        local tHl = btn:CreateTexture(nil,"HIGHLIGHT"); tHl:SetAllPoints(); tHl:SetColorTexture(0.8,0.7,0.3,0.12)
-        local tLbl = btn:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tLbl:SetAllPoints()
-        tLbl:SetTextColor(0.92,0.84,0.50,1)
-        local function Refresh() tLbl:SetText(options[tidx] or "?") end
-        btn:SetScript("OnClick", function() tidx = tidx < #options and tidx+1 or 1; Refresh() end)
+-- ── Gourdes ─────────────────────────────────────────────────────────────
+local function BuildGourdeForm(form, item, filtres, Refresh)
+    local UI = OS2.UI or {}
+    local W = form:GetWidth()
+    local y = 0
+
+    local lblNom = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblNom:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
+    local nomEB = UI.CreateStyledEditBox(form, W, 22)
+    nomEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    nomEB:SetText(item.label or "")
+    nomEB:SetScript("OnTextChanged", function(self) item.label = self:GetText() end)
+    y = y + 44
+
+    local lblCont = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblCont:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblCont:SetText("Contenance"); UI.ApplyLabel(lblCont)
+    local contEB = UI.CreateStyledEditBox(form, W, 22)
+    contEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    contEB:SetText(item.contenance or "")
+    contEB:SetScript("OnTextChanged", function(self) item.contenance = self:GetText() end)
+    y = y + 44
+
+    local lblDesc = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblDesc:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
+    local descBox = CreateFrame("Frame", nil, form)
+    descBox:SetSize(W, 46)
+    descBox:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
+    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
+    descBorder:SetPoint("BOTTOMLEFT", descBox, "BOTTOMLEFT", 2, 1); descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
+    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
+    local descEB = CreateFrame("EditBox", nil, descBox)
+    descEB:SetPoint("TOPLEFT", descBox, "TOPLEFT", 6, -4); descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6, 4)
+    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
+    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
+    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
+    descEB:SetText(item.desc or "")
+    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    descEB:SetScript("OnTextChanged", function(self) item.desc = self:GetText() end)
+    y = y + 62
+
+    local chkRecharge, lblRecharge = UI.CreateStyledCheckbox(form, "Recharge automatique ?")
+    chkRecharge:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblRecharge:SetPoint("LEFT", chkRecharge, "RIGHT", 6, 0)
+    chkRecharge:SetChecked(item.rechargeAuto or false)
+    chkRecharge:SetScript("OnClick", function(self) item.rechargeAuto = self:GetChecked() and true or false end)
+    y = y + 26
+
+    if item.filtreActif == nil then item.filtreActif = item.filtre or false end
+    local chkFiltre, lblFiltre = UI.CreateStyledCheckbox(form, "Accepte les filtres ?")
+    chkFiltre:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblFiltre:SetPoint("LEFT", chkFiltre, "RIGHT", 6, 0)
+    chkFiltre:SetChecked(item.filtreActif or false)
+    chkFiltre:SetScript("OnClick", function(self)
+        item.filtreActif = self:GetChecked() and true or false
         Refresh()
-        return {
-            GetValue = function() return options[tidx] end,
-            SetValue = function(v)
-                for i, o in ipairs(options) do if o == v then tidx = i; break end end
-                Refresh()
-            end,
+    end)
+    y = y + 26
+
+    if item.filtreActif then
+        item.filtresCompatibles = item.filtresCompatibles or {}
+        local selected = {}
+        for _, k in ipairs(item.filtresCompatibles) do selected[k] = true end
+
+        local lblComp = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblComp:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblComp:SetText("Filtres compatibles"); UI.ApplyLabel(lblComp)
+        y = y + 18
+
+        if #filtres == 0 then
+            local none = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            none:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); UI.ApplySoftText(none)
+            none:SetText("Aucun filtre défini (section Filtres).")
+            y = y + 22
+        else
+            for _, filtre in ipairs(filtres) do
+                local chk, lbl = UI.CreateStyledCheckbox(form, filtre.label or "?")
+                chk:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lbl:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+                chk:SetChecked(selected[filtre.key] and true or false)
+                local key = filtre.key
+                chk:SetScript("OnClick", function(self)
+                    selected[key] = self:GetChecked() and true or nil
+                    local keys = {}
+                    for _, f in ipairs(filtres) do if selected[f.key] then keys[#keys + 1] = f.key end end
+                    item.filtresCompatibles = keys
+                    if item.filtreEquipe and not selected[item.filtreEquipe] then item.filtreEquipe = nil end
+                    Refresh()
+                end)
+                y = y + 22
+            end
+        end
+
+        local lblEq = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblEq:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblEq:SetText("Filtre équipé"); UI.ApplyLabel(lblEq)
+        y = y + 16
+        local dropdown = CreateFrame("Frame", nil, form, "UIDropDownMenuTemplate")
+        dropdown:SetPoint("TOPLEFT", form, "TOPLEFT", -16, -y)
+        UIDropDownMenu_SetWidth(dropdown, W - 12)
+        UI.StyleDropdown(dropdown)
+        local function RefreshDD()
+            local lblTxt = "Aucun"
+            for _, f in ipairs(filtres) do if f.key == item.filtreEquipe then lblTxt = f.label; break end end
+            UIDropDownMenu_SetText(dropdown, lblTxt)
+        end
+        UIDropDownMenu_Initialize(dropdown, function(self, level)
+            local infoNone = UIDropDownMenu_CreateInfo()
+            infoNone.text = (item.filtreEquipe == nil) and "|cffd7b35f>  Aucun|r" or "    Aucun"
+            infoNone.notCheckable = true
+            infoNone.func = function() item.filtreEquipe = nil; RefreshDD() end
+            UIDropDownMenu_AddButton(infoNone, level)
+            for _, f in ipairs(filtres) do
+                local isCompatible = false
+                for _, k in ipairs(item.filtresCompatibles) do if k == f.key then isCompatible = true; break end end
+                if isCompatible then
+                    local info = UIDropDownMenu_CreateInfo()
+                    local isSel = (item.filtreEquipe == f.key)
+                    info.text = isSel and ("|cffd7b35f>  " .. f.label .. "|r") or ("    " .. f.label)
+                    info.notCheckable = true
+                    info.func = function() item.filtreEquipe = f.key; RefreshDD() end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+        end)
+        RefreshDD()
+        y = y + 40
+
+        local chkMod, lblMod = UI.CreateStyledCheckbox(form, "Modifiable (échangeable en jeu) ?")
+        chkMod:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblMod:SetPoint("LEFT", chkMod, "RIGHT", 6, 0)
+        chkMod:SetChecked(item.filtreModifiable or false)
+        chkMod:SetScript("OnClick", function(self) item.filtreModifiable = self:GetChecked() and true or false end)
+        y = y + 26
+    end
+end
+
+local function RenderGourdesSection(container, data)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
+
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+    hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("Les récipients pouvant contenir de l'eau.")
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
+
+    local acc = NewAccordion(container)
+    acc.sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    acc.sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    acc.sb:SetPoint("TOPLEFT", acc.sf, "TOPRIGHT", 2, 0)
+    acc.sb:SetPoint("BOTTOMLEFT", acc.sf, "BOTTOMRIGHT", 2, 0)
+
+    local opts = {
+        summary = function(item)
+            local extra = (item.contenance and item.contenance ~= "") and ("  —  " .. item.contenance) or ""
+            return (item.label or "?") .. extra
+        end,
+        formHeight = function(item)
+            local h = 202
+            if item.filtreActif then
+                h = h + 18 + 40 + 26 + math.max(1, #data.filtres) * 22
+            end
+            return h
+        end,
+        buildForm = function(form, item, index, Refresh) BuildGourdeForm(form, item, data.filtres, Refresh) end,
+        onDelete = function(index)
+            table.remove(data.gourdes, index)
+            if acc.expanded == index then acc.expanded = nil end
+            acc.Render(data.gourdes, opts)
+        end,
+    }
+    addBtn:SetScript("OnClick", function()
+        data.gourdes[#data.gourdes + 1] = {
+            key = GenerateKey("GOUR", data.gourdes), label = "Nouvelle gourde",
+            contenance = "", desc = "", rechargeAuto = false,
+            filtreActif = false, filtresCompatibles = {}, filtreModifiable = false, filtreEquipe = nil,
         }
-    end
+        acc.expanded = #data.gourdes
+        acc.Render(data.gourdes, opts)
+    end)
+    acc.Render(data.gourdes, opts)
+end
 
-    -- ── Helper : separateur ──────────────────────────────────────────────
-    local function Sep(y)
-        local s = p:CreateTexture(nil,"ARTWORK"); UI.ApplySeparator(s); s:SetHeight(1)
-        s:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -(y+4))
-        s:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -(y+4))
-    end
+-- ── Effet d'un État : Aura (appliquer/retirer) ou Message ──────────────
+local function RenderEtatActionView(container, action, nav)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
 
-    -- ── Layout ───────────────────────────────────────────────────────────
+    local typeOptions = { "aura", "message" }
+    local typeLabels = { aura = "Aura", message = "Message" }
+
+    local lblType = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblType:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); lblType:SetText("Type d'effet"); UI.ApplyLabel(lblType)
+    local typeTgl = CreateCycleToggle(container, W, 22, typeOptions, function(k) return typeLabels[k] end, function(k)
+        action.type = k
+        nav.Refresh()
+    end)
+    typeTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -16)
+    typeTgl.SetValue(action.type or "message")
+
     local y = 46
 
-    -- § Déclencheurs de consommation ─────────────────────────────────────
-    local lblDec = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblDec:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblDec:SetText("Consommation : Gourde."); UI.ApplyStrongLabel(lblDec)
-    y = y + 20
+    if action.type == "aura" then
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Aura (Spell ID)"); UI.ApplyLabel(lbl)
+        local spellEB = UI.CreateStyledEditBox(container, W, 22)
+        spellEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        spellEB:SetText(tostring(action.spellId or ""))
+        SetupNumericEditBox(spellEB, false)
+        spellEB:HookScript("OnTextChanged", function(self) action.spellId = tonumber(self:GetText()) end)
+        y = y + 44
 
-    -- Temps écoulé  [valeur] [% | Brut]  / toutes les [freq] min
-    local TX_VAL  = 196   -- x : editbox valeur
-    local TX_TGL  = 234   -- x : toggle %/Brut
-    local TX_FREQ = 292   -- x : editbox fréquence
-    local TX_MIN  = 330   -- x : label "min"
+        local lblM = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblM:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblM:SetText("Mode"); UI.ApplyLabel(lblM)
+        local modeTgl = CreateCycleToggle(container, W, 22, { "apply", "remove" },
+            function(k) return (k == "remove") and "Retirer" or "Appliquer" end,
+            function(k) action.mode = k end)
+        modeTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        modeTgl.SetValue(action.mode or "apply")
+    else
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Message (bandeau écran)"); UI.ApplyLabel(lbl)
+        local msgEB = UI.CreateStyledEditBox(container, W, 22)
+        msgEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        msgEB:SetText(action.text or "")
+        msgEB:SetMaxLetters(120)
+        msgEB:SetScript("OnTextChanged", function(self) action.text = self:GetText() end)
+    end
+end
 
-    local chkTemps, lblTemps = UI.CreateStyledCheckbox(p, "Temps écoulé")
-    chkTemps:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblTemps:SetPoint("LEFT", chkTemps, "RIGHT", 6, 0)
-    local tempsEB = UI.CreateStyledEditBox(p, 34, 18)
-    tempsEB:SetPoint("TOPLEFT", p, "TOPLEFT", TX_VAL, -(y+1))
-    tempsEB:SetNumeric(true); tempsEB:SetMaxLetters(4)
-    local tempsTypeTgl = MakeToggle(TX_TGL, y+1, 54, 18, {"%", "Brut"})
-    local tempsFreqEB  = UI.CreateStyledEditBox(p, 34, 18)
-    tempsFreqEB:SetPoint("TOPLEFT", p, "TOPLEFT", TX_FREQ, -(y+1))
-    tempsFreqEB:SetNumeric(true); tempsFreqEB:SetMaxLetters(3)
-    local tempsMinLbl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    tempsMinLbl:SetPoint("TOPLEFT", p, "TOPLEFT", TX_MIN, -(y-2))
-    tempsMinLbl:SetText("min"); tempsMinLbl:SetTextColor(0.50,0.48,0.40,1)
-    y = y + ROW
+-- ── États (bibliothèque commune, utilisée par Filtres et Sources) ──────
+local function RenderEtatsSection(container, data, nav)
+    local UI = OS2.UI or {}
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("États d'une eau (ex : Parasite, Salée...). Une Source peut en avoir, un Filtre peut les neutraliser.")
 
-    -- Par action  [valeur] [% | Brut]
-    local chkAction, lblAction = UI.CreateStyledCheckbox(p, "Par action")
-    chkAction:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblAction:SetPoint("LEFT", chkAction, "RIGHT", 6, 0)
-    local actionEB = UI.CreateStyledEditBox(p, 34, 18)
-    actionEB:SetPoint("TOPLEFT", p, "TOPLEFT", TX_VAL, -(y+1))
-    actionEB:SetNumeric(true); actionEB:SetMaxLetters(4)
-    local actionTypeTgl = MakeToggle(TX_TGL, y+1, 54, 18, {"%", "Brut"})
-    y = y + ROW
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
 
-    -- Température (simple coche)
-    local chkTmp, lblTmp = UI.CreateStyledCheckbox(p, "Température")
-    chkTmp:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblTmp:SetPoint("LEFT", chkTmp, "RIGHT", 6, 0)
-    y = y + ROW
+    local acc = NewAccordion(container)
+    acc.sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    acc.sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    acc.sb:SetPoint("TOPLEFT", acc.sf, "TOPRIGHT", 2, 0)
+    acc.sb:SetPoint("BOTTOMLEFT", acc.sf, "BOTTOMRIGHT", 2, 0)
 
-    -- Statistique (simple coche)
-    local chkConsti, lblConsti = UI.CreateStyledCheckbox(p, "Statistique")
-    chkConsti:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblConsti:SetPoint("LEFT", chkConsti, "RIGHT", 6, 0)
-    y = y + ROW
+    local ACTION_LIST_H = 84
 
-    Sep(y); y = y + 16
+    local opts = {
+        summary = function(item) return string.format("%s  —  %d effet(s)", item.label or "?", #(item.actions or {})) end,
+        formHeight = function() return 44 + 56 + 62 + 20 + ACTION_LIST_H + 16 end,
+        buildForm = function(form, item)
+            local W = form:GetWidth()
+            local y = 0
 
-    -- § Capacité d'hydratation ────────────────────────────────────────────
-    local lblCap = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblCap:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblCap:SetText("Capacité d'hydratation"); UI.ApplyStrongLabel(lblCap)
-    y = y + 20
+            local lblNom = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblNom:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
+            local nomEB = UI.CreateStyledEditBox(form, W, 22)
+            nomEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            nomEB:SetText(item.label or "")
+            nomEB:SetScript("OnTextChanged", function(self) item.label = self:GetText() end)
+            y = y + 44
 
-    -- Valeur brute de base (activable)
-    local chkCapBase, lblCapBase = UI.CreateStyledCheckbox(p, "Valeur de base")
-    chkCapBase:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblCapBase:SetPoint("LEFT", chkCapBase, "RIGHT", 6, 0)
+            local lblIcon = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblIcon:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblIcon:SetText("Icône"); UI.ApplyLabel(lblIcon)
+            y = y + 16
 
-    local capEB = UI.CreateStyledEditBox(p, 60, 18)
-    capEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD+104, -(y+1))
-    capEB:SetNumeric(true); capEB:SetMaxLetters(6)
+            local iconBtn = CreateFrame("Button", nil, form)
+            iconBtn:SetSize(32, 32)
+            iconBtn:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y)
+            local iconTex = iconBtn:CreateTexture(nil, "ARTWORK")
+            iconTex:SetAllPoints(); iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            iconTex:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            local iconHl = iconBtn:CreateTexture(nil, "HIGHLIGHT"); iconHl:SetAllPoints(); iconHl:SetColorTexture(0.85, 0.75, 0.40, 0.15)
 
-    local capUnit = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    capUnit:SetPoint("TOPLEFT", p, "TOPLEFT", PAD+168, -(y-2))
-    capUnit:SetText("ml"); capUnit:SetTextColor(0.50,0.48,0.40,1)
+            local iconPickBtn = UI.CreatePanelButton(form, W - 32 - 8, 22, "Choisir une icône")
+            iconPickBtn:SetPoint("LEFT", iconBtn, "RIGHT", 8, 0)
+            iconPickBtn:SetScript("OnClick", function()
+                if OmegaSpell and OmegaSpell.IconBrowser and OmegaSpell.IconBrowser.Open then
+                    OmegaSpell.IconBrowser.Open(function(iconPath)
+                        item.icon = iconPath
+                        iconTex:SetTexture(iconPath)
+                    end)
+                else
+                    OS2.Notify("Banque d'icônes indisponible (module Omega Spell / SpellCreator requis).", 1, 0.6, 0.2)
+                end
+            end)
+            y = y + 40
 
-    local capHint = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    capHint:SetPoint("TOPLEFT", p, "TOPLEFT", PAD+186, -(y-2))
-    capHint:SetText("≈ 2,5 L / jour"); capHint:SetTextColor(0.42,0.40,0.32,1)
-    y = y + 26
+            local lblDesc = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblDesc:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
+            local descBox = CreateFrame("Frame", nil, form)
+            descBox:SetSize(W, 46)
+            descBox:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
+            local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
+            descBorder:SetPoint("BOTTOMLEFT", descBox, "BOTTOMLEFT", 2, 1); descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
+            descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
+            local descEB = CreateFrame("EditBox", nil, descBox)
+            descEB:SetPoint("TOPLEFT", descBox, "TOPLEFT", 6, -4); descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6, 4)
+            descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
+            descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
+            descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
+            descEB:SetText(item.desc or "")
+            descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+            descEB:SetScript("OnTextChanged", function(self) item.desc = self:GetText() end)
+            y = y + 62
 
-    -- Coche : dépend d'une statistique ?
-    local chkStatDep, lblStatDep = UI.CreateStyledCheckbox(p, "Modifiée par une statistique ?")
-    chkStatDep:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblStatDep:SetPoint("LEFT", chkStatDep, "RIGHT", 6, 0)
-    y = y + 26
+            item.actions = item.actions or {}
 
-    -- Groupe formule (label + zone + hint) — affiché/masqué selon coche
-    local lblFormule = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblFormule:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblFormule:SetText("Formule de modification"); UI.ApplyLabel(lblFormule)
-    y = y + 16
+            local lblFx = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblFx:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblFx:SetText("Effet (quand cet état n'est pas filtré)"); UI.ApplyStrongLabel(lblFx)
+            local addFxBtn = UI.CreateAddButton(form, function() end)
+            addFxBtn:SetPoint("TOPRIGHT", form, "TOPRIGHT", 0, -(y - 2))
+            y = y + 20
 
-    local formBox = CreateFrame("Frame", nil, p)
-    formBox:SetSize(IW, 46)
-    formBox:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    local fmBg = formBox:CreateTexture(nil,"BACKGROUND"); fmBg:SetAllPoints()
-    fmBg:SetColorTexture(unpack(UI.colors.editBoxBg))
-    local fmBd = formBox:CreateTexture(nil,"ARTWORK"); fmBd:SetHeight(1)
-    fmBd:SetPoint("BOTTOMLEFT",  formBox,"BOTTOMLEFT",  2, 1)
-    fmBd:SetPoint("BOTTOMRIGHT", formBox,"BOTTOMRIGHT", -2, 1)
-    fmBd:SetColorTexture(unpack(UI.colors.editBoxAccent))
-    local formEB = CreateFrame("EditBox", nil, formBox)
-    formEB:SetPoint("TOPLEFT",     formBox,"TOPLEFT",      6, -4)
-    formEB:SetPoint("BOTTOMRIGHT", formBox,"BOTTOMRIGHT", -6,  4)
-    formEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(formEB)
-    formEB:SetAutoFocus(false); formEB:SetMultiLine(true); formEB:SetMaxLetters(256)
-    formEB:SetJustifyH("LEFT"); formEB:SetJustifyV("TOP")
-    formEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    y = y + 52
+            local sf, sb = CreateFlatScrollList(form)
+            sf:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y)
+            sf:SetSize(W - 12, ACTION_LIST_H)
+            sb:SetPoint("TOPLEFT", sf, "TOPRIGHT", 2, 0); sb:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
 
-    local hintLbl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    hintLbl:SetPoint("TOPLEFT",  p, "TOPLEFT",  PAD,  -y)
-    hintLbl:SetPoint("TOPRIGHT", p, "TOPRIGHT", -PAD, -y)
-    hintLbl:SetText("ex. : { Force + Constitution = (VALUE × 4) }")
-    hintLbl:SetTextColor(0.45, 0.43, 0.35, 1); hintLbl:SetJustifyH("LEFT")
+            local function RebuildFx()
+                local rows = {}
+                for i, a in ipairs(item.actions) do rows[i] = { label = DescribeAction(a, nil) } end
+                BuildFlatList(sf, sb, ACTION_LIST_H, rows,
+                    function(i) nav.Push(item.label or "État", function(c) RenderEtatActionView(c, item.actions[i], nav) end) end,
+                    function(i) table.remove(item.actions, i); RebuildFx() end)
+            end
+            addFxBtn:SetScript("OnClick", function()
+                item.actions[#item.actions + 1] = { type = "message", text = "" }
+                RebuildFx()
+                nav.Push(item.label or "État", function(c) RenderEtatActionView(c, item.actions[#item.actions], nav) end)
+            end)
+            RebuildFx()
+        end,
+        onDelete = function(index)
+            table.remove(data.etats, index)
+            if acc.expanded == index then acc.expanded = nil end
+            acc.Render(data.etats, opts)
+        end,
+    }
+    addBtn:SetScript("OnClick", function()
+        data.etats[#data.etats + 1] = { key = GenerateKey("ETATLIB", data.etats), label = "Nouvel état", desc = "", icon = "Interface\\Icons\\INV_Misc_QuestionMark", actions = {} }
+        acc.expanded = #data.etats
+        acc.Render(data.etats, opts)
+    end)
+    acc.Render(data.etats, opts)
+end
+
+-- ── Filtres (bibliothèque, équipables sur les Gourdes) ─────────────────
+local function RenderFiltresSection(container, data)
+    local UI = OS2.UI or {}
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("Filtres pouvant être équipés sur les Gourdes qui les acceptent.")
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
+
+    local acc = NewAccordion(container)
+    acc.sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    acc.sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    acc.sb:SetPoint("TOPLEFT", acc.sf, "TOPRIGHT", 2, 0)
+    acc.sb:SetPoint("BOTTOMLEFT", acc.sf, "BOTTOMRIGHT", 2, 0)
+
+    local opts = {
+        summary = function(item) return item.label or "?" end,
+        formHeight = function() return 106 + 18 + math.max(1, #data.etats) * 22 end,
+        buildForm = function(form, item)
+            local W = form:GetWidth()
+            local y = 0
+
+            local lblNom = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblNom:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
+            local nomEB = UI.CreateStyledEditBox(form, W, 22)
+            nomEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            nomEB:SetText(item.label or "")
+            nomEB:SetScript("OnTextChanged", function(self) item.label = self:GetText() end)
+            y = y + 44
+
+            local lblDesc = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblDesc:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblDesc:SetText("À quoi il sert"); UI.ApplyLabel(lblDesc)
+            local descBox = CreateFrame("Frame", nil, form)
+            descBox:SetSize(W, 46)
+            descBox:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
+            local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
+            descBorder:SetPoint("BOTTOMLEFT", descBox, "BOTTOMLEFT", 2, 1); descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
+            descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
+            local descEB = CreateFrame("EditBox", nil, descBox)
+            descEB:SetPoint("TOPLEFT", descBox, "TOPLEFT", 6, -4); descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6, 4)
+            descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
+            descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
+            descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
+            descEB:SetText(item.effet or "")
+            descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+            descEB:SetScript("OnTextChanged", function(self) item.effet = self:GetText() end)
+            y = y + 62
+
+            item.etatsFiltres = item.etatsFiltres or {}
+            local selected = {}
+            for _, k in ipairs(item.etatsFiltres) do selected[k] = true end
+
+            local lblEtats = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblEtats:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblEtats:SetText("États neutralisés"); UI.ApplyLabel(lblEtats)
+            y = y + 18
+
+            if #data.etats == 0 then
+                local none = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                none:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); UI.ApplySoftText(none)
+                none:SetText("Aucun état défini (section États).")
+                y = y + 22
+            else
+                for _, etat in ipairs(data.etats) do
+                    local chk, lbl = UI.CreateStyledCheckbox(form, etat.label or "?")
+                    chk:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lbl:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+                    chk:SetChecked(selected[etat.key] and true or false)
+                    local key = etat.key
+                    chk:SetScript("OnClick", function(self)
+                        selected[key] = self:GetChecked() and true or nil
+                        local keys = {}
+                        for _, e in ipairs(data.etats) do if selected[e.key] then keys[#keys + 1] = e.key end end
+                        item.etatsFiltres = keys
+                    end)
+                    y = y + 22
+                end
+            end
+        end,
+        onDelete = function(index)
+            table.remove(data.filtres, index)
+            if acc.expanded == index then acc.expanded = nil end
+            acc.Render(data.filtres, opts)
+        end,
+    }
+    addBtn:SetScript("OnClick", function()
+        data.filtres[#data.filtres + 1] = { key = GenerateKey("FILT", data.filtres), label = "Nouveau filtre", effet = "", etatsFiltres = {} }
+        acc.expanded = #data.filtres
+        acc.Render(data.filtres, opts)
+    end)
+    acc.Render(data.filtres, opts)
+end
+
+-- ── Sources (Types d'eau) ───────────────────────────────────────────────
+local function BuildSourceForm(form, item, Refresh, nav, etats)
+    local UI = OS2.UI or {}
+    local W = form:GetWidth()
+    local y = 0
+
+    local lblNom = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblNom:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
+    local nomEB = UI.CreateStyledEditBox(form, W, 22)
+    nomEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    nomEB:SetText(item.label or "")
+    nomEB:SetScript("OnTextChanged", function(self) item.label = self:GetText() end)
+    y = y + 44
+
+    local lblDesc = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblDesc:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
+    local descBox = CreateFrame("Frame", nil, form)
+    descBox:SetSize(W, 40); descBox:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
+    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
+    descBorder:SetPoint("BOTTOMLEFT", descBox, "BOTTOMLEFT", 2, 1); descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
+    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
+    local descEB = CreateFrame("EditBox", nil, descBox)
+    descEB:SetPoint("TOPLEFT", descBox, "TOPLEFT", 6, -4); descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6, 4)
+    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
+    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(256)
+    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
+    descEB:SetText(item.desc or "")
+    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    descEB:SetScript("OnTextChanged", function(self) item.desc = self:GetText() end)
+    y = y + 56
+
+    local lblProp = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblProp:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblProp:SetText("Propreté (0-100)"); UI.ApplyLabel(lblProp)
+    local propEB = UI.CreateStyledEditBox(form, 80, 22)
+    propEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+    propEB:SetNumeric(true); propEB:SetMaxLetters(3)
+    propEB:SetText(tostring(item.proprete or 100))
+    propEB:SetScript("OnTextChanged", function(self) item.proprete = tonumber(self:GetText()) or 0 end)
+    propEB:SetScript("OnEditFocusLost", function(self)
+        local v = math.max(0, math.min(100, tonumber(self:GetText()) or 0))
+        self:SetText(tostring(v)); item.proprete = v
+    end)
+    y = y + 44
+
+    item.etats = item.etats or {}
+    local selected = {}
+    for _, k in ipairs(item.etats) do selected[k] = true end
+
+    local lblEtats = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblEtats:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblEtats:SetText("États de cette eau"); UI.ApplyLabel(lblEtats)
     y = y + 18
 
-    -- Afficher/masquer le groupe formule selon la coche
-    local formulaGroup = { lblFormule, formBox, hintLbl }
-    local function RefreshStatDep()
-        local on = chkStatDep:GetChecked() and true or false
-        for _, w in ipairs(formulaGroup) do w:SetShown(on) end
+    if #etats == 0 then
+        local none = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        none:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); UI.ApplySoftText(none)
+        none:SetText("Aucun état défini (section États).")
+        y = y + 22
+    else
+        for _, etat in ipairs(etats) do
+            local chk, lbl = UI.CreateStyledCheckbox(form, etat.label or "?")
+            chk:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lbl:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+            chk:SetChecked(selected[etat.key] and true or false)
+            local key = etat.key
+            chk:SetScript("OnClick", function(self)
+                selected[key] = self:GetChecked() and true or nil
+                local keys = {}
+                for _, e in ipairs(etats) do if selected[e.key] then keys[#keys + 1] = e.key end end
+                item.etats = keys
+            end)
+            y = y + 22
+        end
     end
-    chkStatDep:SetScript("OnClick", RefreshStatDep)
 
-    Sep(y); y = y + 16
+end
 
-    -- § Comportement à vide ───────────────────────────────────────────────
-    local lblComp = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblComp:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    lblComp:SetText("Comportement à vide"); UI.ApplyStrongLabel(lblComp)
+local function RenderSourcesSection(container, data, nav)
+    local UI = OS2.UI or {}
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("Les types d'eau que le joueur peut consommer.")
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
+
+    local acc = NewAccordion(container)
+    acc.sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    acc.sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    acc.sb:SetPoint("TOPLEFT", acc.sf, "TOPRIGHT", 2, 0)
+    acc.sb:SetPoint("BOTTOMLEFT", acc.sf, "BOTTOMRIGHT", 2, 0)
+
+    local opts = {
+        summary = function(item) return string.format("%s  —  propreté %d%%", item.label or "?", item.proprete or 0) end,
+        formHeight = function(item) return 144 + 18 + math.max(1, #data.etats) * 22 end,
+        buildForm = function(form, item, index, Refresh) BuildSourceForm(form, item, Refresh, nav, data.etats) end,
+        onDelete = function(index)
+            table.remove(data.sources, index)
+            if acc.expanded == index then acc.expanded = nil end
+            acc.Render(data.sources, opts)
+        end,
+    }
+    addBtn:SetScript("OnClick", function()
+        data.sources[#data.sources + 1] = {
+            key = GenerateKey("SRCE", data.sources), label = "Nouveau type d'eau", desc = "",
+            proprete = 100, etats = {},
+        }
+        acc.expanded = #data.sources
+        acc.Render(data.sources, opts)
+    end)
+    acc.Render(data.sources, opts)
+end
+
+-- ── Clés ────────────────────────────────────────────────────────────────
+local function RenderClesSection(container, data)
+    local UI = OS2.UI or {}
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("Valeurs nommées réutilisables dans les Conditions et le Fonctionnement.")
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
+
+    local acc = NewAccordion(container)
+    acc.sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    acc.sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    acc.sb:SetPoint("TOPLEFT", acc.sf, "TOPRIGHT", 2, 0)
+    acc.sb:SetPoint("BOTTOMLEFT", acc.sf, "BOTTOMRIGHT", 2, 0)
+
+    local opts = {
+        summary = function(item)
+            return string.format("%s  —  %s · %s", item.label or "?", item.saisiePar or "MJ", tostring(item.valeurDefaut or 0))
+        end,
+        formHeight = function(item) return 132 end,
+        buildForm = function(form, item, index, Refresh)
+            local W = form:GetWidth()
+            local y = 0
+
+            local lblNom = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblNom:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
+            local nomEB = UI.CreateStyledEditBox(form, W, 22)
+            nomEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            nomEB:SetText(item.label or "")
+            nomEB:SetScript("OnTextChanged", function(self) item.label = self:GetText() end)
+            y = y + 44
+
+            local lblSaisie = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblSaisie:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblSaisie:SetText("Saisie par"); UI.ApplyLabel(lblSaisie)
+            local saisieTgl = CreateCycleToggle(form, W, 22, { "MJ", "Joueur" }, nil, function(v)
+                item.saisiePar = v
+                Refresh()
+            end)
+            saisieTgl.button:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            saisieTgl.SetValue(item.saisiePar or "MJ")
+            y = y + 44
+
+            local lblVal = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lblVal:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -y); lblVal:SetText("Valeur par défaut"); UI.ApplyLabel(lblVal)
+            local valEB = UI.CreateStyledEditBox(form, W, 22)
+            valEB:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(y + 16))
+            valEB:SetText(tostring(item.valeurDefaut or 0))
+            SetupNumericEditBox(valEB, true, true)
+            valEB:HookScript("OnTextChanged", function(self) item.valeurDefaut = ParseDecimal(self:GetText()) or 0 end)
+            y = y + 44
+        end,
+        onDelete = function(index)
+            table.remove(data.cles, index)
+            if acc.expanded == index then acc.expanded = nil end
+            acc.Render(data.cles, opts)
+        end,
+    }
+    addBtn:SetScript("OnClick", function()
+        data.cles[#data.cles + 1] = { key = GenerateKey("CLE", data.cles), label = "Nouvelle clé", saisiePar = "MJ", valeurDefaut = 0 }
+        acc.expanded = #data.cles
+        acc.Render(data.cles, opts)
+    end)
+    acc.Render(data.cles, opts)
+end
+
+-- ── Conditions : Opérande / Action / Condition (navigation en pile) ────
+local RenderOperandView, RenderActionView, RenderConditionView, BuildActionBranch
+
+RenderOperandView = function(container, op, cles, nav)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
+
+    local typeOptions = { "fixed", "cle", "expr" }
+    local typeLabels  = { fixed = "Brut", cle = "Clé", expr = "Expression" }
+
+    local lblType = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblType:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); lblType:SetText("Type"); UI.ApplyLabel(lblType)
+    local typeTgl = CreateCycleToggle(container, W, 22, typeOptions, function(k) return typeLabels[k] end, function(k)
+        op.type = k
+        nav.Refresh()
+    end)
+    typeTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -16)
+    typeTgl.SetValue(op.type or "fixed")
+
+    local y = 46
+
+    if op.type == "cle" then
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Clé"); UI.ApplyLabel(lbl)
+
+        local dropdown = CreateFrame("Frame", nil, container, "UIDropDownMenuTemplate")
+        dropdown:SetPoint("TOPLEFT", container, "TOPLEFT", -16, -(y + 12))
+        UIDropDownMenu_SetWidth(dropdown, W - 12)
+        UI.StyleDropdown(dropdown)
+        local function RefreshDD()
+            local lblTxt = "Aucune clé"
+            for _, c in ipairs(cles) do if c.key == op.cleKey then lblTxt = c.label; break end end
+            UIDropDownMenu_SetText(dropdown, lblTxt)
+        end
+        UIDropDownMenu_Initialize(dropdown, function(self, level)
+            for _, c in ipairs(cles) do
+                local info = UIDropDownMenu_CreateInfo()
+                local isSel = (op.cleKey == c.key)
+                info.text = isSel and ("|cffd7b35f>  " .. c.label .. "|r") or ("    " .. c.label)
+                info.value = c.key
+                info.notCheckable = true
+                info.func = function() op.cleKey = c.key; RefreshDD() end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+        RefreshDD()
+        y = y + 40
+
+        local newCleBtn = UI.CreatePanelButton(container, W, 22, "+ Nouvelle clé")
+        newCleBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+        newCleBtn:SetScript("OnClick", function()
+            local newCle = { key = GenerateKey("CLE", cles), label = "Nouvelle clé", saisiePar = "MJ", valeurDefaut = 0 }
+            cles[#cles + 1] = newCle
+            op.cleKey = newCle.key
+            nav.Refresh()
+        end)
+
+    elseif op.type == "expr" then
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Opération"); UI.ApplyLabel(lbl)
+        local opTgl = CreateCycleToggle(container, W, 22,
+            { "addition", "soustraction", "multiplication", "division" },
+            function(k) return OPERATION_LABELS[k] .. "  (" .. OPERATION_SYMBOLS[k] .. ")" end,
+            function(k) op.op = k end)
+        opTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        opTgl.SetValue(op.op or "addition")
+        y = y + 46
+
+        op.left  = op.left  or { type = "fixed", value = 0, unit = "brut" }
+        op.right = op.right or { type = "fixed", value = 0, unit = "brut" }
+
+        local leftBtn = UI.CreatePanelButton(container, W, 22, "Opérande gauche")
+        leftBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+        leftBtn:SetScript("OnClick", function()
+            nav.Push("Opérande gauche", function(c) RenderOperandView(c, op.left, cles, nav) end)
+        end)
+        y = y + 26
+        local leftPrev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        leftPrev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); UI.ApplySoftText(leftPrev)
+        leftPrev:SetText(DescribeOperand(op.left, cles))
+        y = y + 26
+
+        local rightBtn = UI.CreatePanelButton(container, W, 22, "Opérande droite")
+        rightBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+        rightBtn:SetScript("OnClick", function()
+            nav.Push("Opérande droite", function(c) RenderOperandView(c, op.right, cles, nav) end)
+        end)
+        y = y + 26
+        local rightPrev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        rightPrev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); UI.ApplySoftText(rightPrev)
+        rightPrev:SetText(DescribeOperand(op.right, cles))
+
+    else -- fixed
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Valeur"); UI.ApplyLabel(lbl)
+        local valEB = UI.CreateStyledEditBox(container, W, 22)
+        valEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        valEB:SetText(tostring(op.value or 0))
+        SetupNumericEditBox(valEB, true, true)
+        valEB:HookScript("OnTextChanged", function(self) op.value = ParseDecimal(self:GetText()) or 0 end)
+        y = y + 44
+
+        local lblU = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblU:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblU:SetText("Unité"); UI.ApplyLabel(lblU)
+        local uTgl = CreateCycleToggle(container, W, 22, { "brut", "pourcent" },
+            function(k) return (k == "pourcent") and "Pourcentage (% Capacité)" or "Brut" end,
+            function(k) op.unit = k end)
+        uTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        uTgl.SetValue(op.unit or "brut")
+    end
+end
+
+RenderActionView = function(container, action, cles, nav)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
+
+    local typeOptions = { "formule", "aura", "message" }
+    local typeLabels = { formule = "Formule", aura = "Aura", message = "Message" }
+
+    local lblType = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblType:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); lblType:SetText("Type d'action"); UI.ApplyLabel(lblType)
+    local typeTgl = CreateCycleToggle(container, W, 22, typeOptions, function(k) return typeLabels[k] end, function(k)
+        action.type = k
+        nav.Refresh()
+    end)
+    typeTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -16)
+    typeTgl.SetValue(action.type or "message")
+
+    local y = 46
+
+    if action.type == "formule" then
+        action.formule = action.formule or { operation = "addition" }
+        local cfgBtn = UI.CreatePanelButton(container, W, 22, "Configurer la formule")
+        cfgBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+        cfgBtn:SetScript("OnClick", function()
+            nav.Push("Formule", function(c) RenderConditionView(c, action.formule, cles, nav, false) end)
+        end)
+        y = y + 26
+        local prev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        prev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+        prev:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -y)
+        prev:SetWordWrap(true); prev:SetJustifyH("LEFT"); UI.ApplySoftText(prev)
+        prev:SetText(DescribeCondition(action.formule, cles))
+
+    elseif action.type == "aura" then
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Aura (Spell ID)"); UI.ApplyLabel(lbl)
+        local spellEB = UI.CreateStyledEditBox(container, W, 22)
+        spellEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        spellEB:SetText(tostring(action.spellId or ""))
+        SetupNumericEditBox(spellEB, false)
+        spellEB:HookScript("OnTextChanged", function(self) action.spellId = tonumber(self:GetText()) end)
+        y = y + 44
+
+        local lblM = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblM:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblM:SetText("Mode"); UI.ApplyLabel(lblM)
+        local modeTgl = CreateCycleToggle(container, W, 22, { "apply", "remove" },
+            function(k) return (k == "remove") and "Retirer" or "Appliquer" end,
+            function(k) action.mode = k end)
+        modeTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        modeTgl.SetValue(action.mode or "apply")
+
+    else -- message
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Message (bandeau écran)"); UI.ApplyLabel(lbl)
+        local msgEB = UI.CreateStyledEditBox(container, W, 22)
+        msgEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        msgEB:SetText(action.text or "")
+        msgEB:SetMaxLetters(120)
+        msgEB:SetScript("OnTextChanged", function(self) action.text = self:GetText() end)
+    end
+end
+
+BuildActionBranch = function(container, y, W, title, actions, cles, nav)
+    local UI = OS2.UI or {}
+    local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText(title); UI.ApplyStrongLabel(lbl)
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -(y - 2))
     y = y + 20
 
-    local lblMsg = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblMsg:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y); lblMsg:SetText("Message"); UI.ApplyLabel(lblMsg)
-    y = y + 16
-    local msgEB = UI.CreateStyledEditBox(p, IW, 18)
-    msgEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y); y = y + 28
+    local LIST_H = 84
+    local sf, sb = CreateFlatScrollList(container)
+    sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+    sf:SetSize(W - 12, LIST_H)
+    sb:SetPoint("TOPLEFT", sf, "TOPRIGHT", 2, 0); sb:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
 
-    local lblDb = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    lblDb:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y); lblDb:SetText("Debuff (sort / ID)"); UI.ApplyLabel(lblDb)
-    y = y + 16
-    local debuffEB = UI.CreateStyledEditBox(p, IW, 18)
-    debuffEB:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-
-    -- ── Valider ──────────────────────────────────────────────────────────
-    local _cb = nil
-    local validBtn = UI.CreatePanelButton(p, IW, 22, "Valider")
-    validBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", PAD, 14)
-    validBtn:SetScript("OnClick", function()
-        if _cb then _cb({
-            tempsEcoule  = { enabled  = chkTemps:GetChecked()  and true or false,
-                             valeur   = tonumber(tempsEB:GetText())     or 1,
-                             type     = tempsTypeTgl.GetValue(),
-                             frequence= tonumber(tempsFreqEB:GetText()) or 30 },
-            parAction    = { enabled  = chkAction:GetChecked() and true or false,
-                             valeur   = tonumber(actionEB:GetText())    or 1,
-                             type     = actionTypeTgl.GetValue() },
-            temperature  = { enabled  = chkTmp:GetChecked()    and true or false },
-            statistique  = { enabled  = chkConsti:GetChecked() and true or false },
-            capacite     = { baseEnabled = chkCapBase:GetChecked() and true or false,
-                             base        = tonumber(capEB:GetText()) or 2500,
-                             statDep     = chkStatDep:GetChecked() and true or false,
-                             formule     = (formEB:GetText() or ""):match("^%s*(.-)%s*$") },
-            messageVide  = (msgEB:GetText()    or ""):match("^%s*(.-)%s*$"),
-            debuffVide   = (debuffEB:GetText() or ""):match("^%s*(.-)%s*$"),
-        }) end
-        p:Hide()
+    local function Rebuild()
+        local rows = {}
+        for i, a in ipairs(actions) do rows[i] = { label = DescribeAction(a, cles) } end
+        BuildFlatList(sf, sb, LIST_H, rows,
+            function(i) nav.Push(title, function(c) RenderActionView(c, actions[i], cles, nav) end) end,
+            function(i) table.remove(actions, i); Rebuild() end)
+    end
+    addBtn:SetScript("OnClick", function()
+        actions[#actions + 1] = { type = "message", text = "" }
+        Rebuild()
+        nav.Push(title, function(c) RenderActionView(c, actions[#actions], cles, nav) end)
     end)
+    Rebuild()
 
-    p._open = function(title, fonct, cb)
-        _cb = cb
-        titleStr:SetText(title or "Fonctionnement")
-        local f  = fonct or {}
-        local ft = f.tempsEcoule or {}
-        local fa = f.parAction   or {}
-        local ftp= f.temperature or {}
-        local fco= f.statistique or {}
-        local fc = f.capacite    or {}
-        chkTemps:SetChecked(ft.enabled   or false)
-        tempsEB:SetText(tostring(ft.valeur    or 1))
-        tempsTypeTgl.SetValue(ft.type         or "%")
-        tempsFreqEB:SetText(tostring(ft.frequence or 30))
-        chkAction:SetChecked(fa.enabled  or false)
-        actionEB:SetText(tostring(fa.valeur or 1))
-        actionTypeTgl.SetValue(fa.type    or "%")
-        chkTmp:SetChecked(ftp.enabled    or false)
-        chkConsti:SetChecked(fco.enabled or false)
-        chkCapBase:SetChecked(fc.baseEnabled or false)
-        capEB:SetText(tostring(fc.base or 2500))
-        chkStatDep:SetChecked(fc.statDep or false)
-        formEB:SetText(fc.formule or "")
-        RefreshStatDep()
-        msgEB:SetText(f.messageVide  or "")
-        debuffEB:SetText(f.debuffVide or "")
-        p:Show()
+    y = y + LIST_H + 16
+    return y
+end
+
+RenderConditionView = function(container, cond, cles, nav, showLabel)
+    local UI = OS2.UI or {}
+    local W = container:GetWidth()
+    local y = 0
+
+    if showLabel then
+        local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText("Nom"); UI.ApplyLabel(lbl)
+        local nomEB = UI.CreateStyledEditBox(container, W, 22)
+        nomEB:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        nomEB:SetText(cond.label or "")
+        nomEB:SetScript("OnTextChanged", function(self) cond.label = self:GetText() end)
+        y = y + 44
     end
 
-    reglesPanel = p
-    return p
+    local lblBase = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblBase:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblBase:SetText("Base"); UI.ApplyLabel(lblBase)
+    local baseBtn = UI.CreatePanelButton(container, W, 22, "Définir la Base")
+    baseBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+    baseBtn:SetScript("OnClick", function()
+        cond.base = cond.base or { type = "fixed", value = 0, unit = "brut" }
+        nav.Push("Base", function(c) RenderOperandView(c, cond.base, cles, nav) end)
+    end)
+    y = y + 42
+    local basePrev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    basePrev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); UI.ApplySoftText(basePrev)
+    basePrev:SetText(DescribeOperand(cond.base, cles))
+    y = y + 30
+
+    local lblOp = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblOp:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblOp:SetText("Opération"); UI.ApplyLabel(lblOp)
+    local opTgl = CreateCycleToggle(container, W, 22,
+        { "addition", "soustraction", "multiplication", "division", "si" },
+        function(k) return OPERATION_LABELS[k] end,
+        function(k) cond.operation = k; nav.Refresh() end)
+    opTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+    opTgl.SetValue(cond.operation or "addition")
+    y = y + 46
+
+    if cond.operation == "si" then
+        local lblCmp = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblCmp:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblCmp:SetText("Comparateur"); UI.ApplyLabel(lblCmp)
+        local cmpTgl = CreateCycleToggle(container, W, 22, { ">", ">=", "<", "<=", "=", "~=" },
+            function(k) return COMPARATEUR_LABELS[k] end,
+            function(k) cond.comparateur = k end)
+        cmpTgl.button:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        cmpTgl.SetValue(cond.comparateur or ">")
+        y = y + 46
+
+        local lblVSi = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblVSi:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblVSi:SetText("Valeur seuil"); UI.ApplyLabel(lblVSi)
+        local vSiBtn = UI.CreatePanelButton(container, W, 22, "Définir le seuil")
+        vSiBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        vSiBtn:SetScript("OnClick", function()
+            cond.valeurSi = cond.valeurSi or { type = "fixed", value = 0, unit = "brut" }
+            nav.Push("Valeur seuil", function(c) RenderOperandView(c, cond.valeurSi, cles, nav) end)
+        end)
+        y = y + 42
+        local vSiPrev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        vSiPrev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); UI.ApplySoftText(vSiPrev)
+        vSiPrev:SetText(DescribeOperand(cond.valeurSi, cles))
+        y = y + 30
+
+        cond.alors = cond.alors or { actions = {} }
+        cond.sinon = cond.sinon or { actions = {} }
+        cond.alors.actions = cond.alors.actions or {}
+        cond.sinon.actions = cond.sinon.actions or {}
+
+        y = BuildActionBranch(container, y, W, "Alors", cond.alors.actions, cles, nav)
+        y = BuildActionBranch(container, y, W, "Sinon", cond.sinon.actions, cles, nav)
+    else
+        local lblV = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblV:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lblV:SetText("Valeur"); UI.ApplyLabel(lblV)
+        local vBtn = UI.CreatePanelButton(container, W, 22, "Définir la Valeur")
+        vBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -(y + 16))
+        vBtn:SetScript("OnClick", function()
+            cond.valeur = cond.valeur or { type = "fixed", value = 0, unit = "brut" }
+            nav.Push("Valeur", function(c) RenderOperandView(c, cond.valeur, cles, nav) end)
+        end)
+        y = y + 42
+        local vPrev = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        vPrev:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); UI.ApplySoftText(vPrev)
+        vPrev:SetText(DescribeOperand(cond.valeur, cles))
+    end
 end
 
-local function OpenReglesPanel(title, fonct, cb)
-    GetOrCreateReglesPanel()._open(title, fonct, cb)
+local function RenderConditionsSection(container, data, nav)
+    local UI = OS2.UI or {}
+    local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
+    hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
+    hint:SetText("Formules réutilisables dans le Fonctionnement (Capacité / Vitesse).")
+
+    local addBtn = UI.CreateAddButton(container, function() end)
+    addBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 2)
+
+    local W = container:GetWidth()
+    local sf, sb = CreateFlatScrollList(container)
+    sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -12, 0)
+    sb:SetPoint("TOPLEFT", sf, "TOPRIGHT", 2, 0); sb:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
+
+    local function Rebuild()
+        local rows = {}
+        for i, cond in ipairs(data.conditions) do
+            rows[i] = { label = string.format("%s  —  %s", cond.label or "?", DescribeCondition(cond, data.cles)) }
+        end
+        BuildFlatList(sf, sb, sf:GetHeight(), rows,
+            function(i)
+                nav.Push(data.conditions[i].label or "Condition", function(c) RenderConditionView(c, data.conditions[i], data.cles, nav, true) end)
+            end,
+            function(i) table.remove(data.conditions, i); Rebuild() end)
+    end
+    addBtn:SetScript("OnClick", function()
+        local newCond = { key = GenerateKey("COND", data.conditions), label = "Nouvelle condition", operation = "addition" }
+        data.conditions[#data.conditions + 1] = newCond
+        Rebuild()
+        nav.Push(newCond.label, function(c) RenderConditionView(c, newCond, data.cles, nav, true) end)
+    end)
+    Rebuild()
 end
 
--- ── Panel principal Hydratation ───────────────────────────────────────
-local hydratationPanel = nil
+-- ── Fonctionnement : Base + Conditions (Capacité / Vitesse) + Paliers ──
+local function RenderFonctionnementSection(container, data)
+    local UI = OS2.UI or {}
+    data.fonctionnement = data.fonctionnement or {}
+    local fonct = data.fonctionnement
+    fonct.capacite = fonct.capacite or {}
+    fonct.vitesse  = fonct.vitesse  or {}
+    fonct.paliers  = fonct.paliers  or {}
 
-local function GetOrCreateHydratationPanel()
-    if hydratationPanel then return hydratationPanel end
+    local SB_W = 8
+    local sf = CreateFrame("ScrollFrame", nil, container)
+    sf:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -SB_W - 6, 0)
+    sf:EnableMouseWheel(true)
+    local sb = CreateFrame("Slider", nil, container)
+    sb:SetPoint("TOPLEFT", sf, "TOPRIGHT", 2, 0); sb:SetPoint("BOTTOMLEFT", sf, "BOTTOMRIGHT", 2, 0)
+    sb:SetWidth(SB_W); sb:SetOrientation("VERTICAL"); sb:SetMinMaxValues(0, 0); sb:SetValue(0)
+    local sbt = sb:CreateTexture(nil, "THUMB"); sbt:SetSize(SB_W - 2, 24); sbt:SetColorTexture(0.5, 0.42, 0.22, 0.85); sb:SetThumbTexture(sbt)
+    sf:SetScript("OnMouseWheel", function(_, d) sb:SetValue(math.max(0, math.min(select(2, sb:GetMinMaxValues()), sb:GetValue() - d * 44))) end)
+    sb:SetScript("OnValueChanged", function(_, v) sf:SetVerticalScroll(v) end)
 
-    local UI     = OS2.UI or {}
-    local TOT_W  = 490
-    local LEFT_W = 210
-    local RIGHT_W= 240
-    local LEFT_X = 14
-    local RIGHT_X= LEFT_X + LEFT_W + 12
-    local TOT_H  = 420
-    local HDR_H  = 36
-    local SEC_H  = math.floor((TOT_H - HDR_H - 14) / 2)
-    local SB_W   = 8
+    local cW = math.max(1, math.floor(sf:GetWidth()))
+    local c = CreateFrame("Frame", nil, sf)
+    c:SetSize(cW, 1); sf:SetScrollChild(c)
+
+    local y = 0
+
+    local function BuildBaseBlock(title, section)
+        section.base = section.base or {}
+        section.conditionKeys = section.conditionKeys or {}
+        local base = section.base
+
+        local lblTitle = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblTitle:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblTitle:SetText(title); UI.ApplyStrongLabel(lblTitle)
+        y = y + 22
+
+        local lblCle = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblCle:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblCle:SetText("Base : Clé  ×  Coefficient"); UI.ApplyLabel(lblCle)
+        y = y + 16
+
+        local dropdown = CreateFrame("Frame", nil, c, "UIDropDownMenuTemplate")
+        dropdown:SetPoint("TOPLEFT", c, "TOPLEFT", -16, -y)
+        UIDropDownMenu_SetWidth(dropdown, cW - 130)
+        UI.StyleDropdown(dropdown)
+        local function RefreshDD()
+            local lblTxt = "Aucune clé"
+            for _, cl in ipairs(data.cles) do if cl.key == base.cleKey then lblTxt = cl.label; break end end
+            UIDropDownMenu_SetText(dropdown, lblTxt)
+        end
+        UIDropDownMenu_Initialize(dropdown, function(self, level)
+            for _, cl in ipairs(data.cles) do
+                local info = UIDropDownMenu_CreateInfo()
+                local isSel = (base.cleKey == cl.key)
+                info.text = isSel and ("|cffd7b35f>  " .. cl.label .. "|r") or ("    " .. cl.label)
+                info.value = cl.key
+                info.notCheckable = true
+                info.func = function() base.cleKey = cl.key; RefreshDD() end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+        RefreshDD()
+
+        local coefEB = UI.CreateStyledEditBox(c, 90, 22)
+        coefEB:SetPoint("TOPLEFT", c, "TOPLEFT", cW - 90, -y)
+        SetupNumericEditBox(coefEB, true, true)
+        coefEB:SetText(tostring(base.coef or 1))
+        coefEB:HookScript("OnTextChanged", function(self) base.coef = ParseDecimal(self:GetText()) or 1 end)
+        y = y + 30
+
+        local lblConds = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblConds:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblConds:SetText("Conditions supplémentaires"); UI.ApplyLabel(lblConds)
+        y = y + 18
+
+        local selected = {}
+        for _, k in ipairs(section.conditionKeys) do selected[k] = true end
+
+        if #data.conditions == 0 then
+            local none = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            none:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); UI.ApplySoftText(none)
+            none:SetText("Aucune Condition définie.")
+            y = y + 22
+        else
+            for _, cond in ipairs(data.conditions) do
+                local chk, lbl = UI.CreateStyledCheckbox(c, string.format("%s  (%s)", cond.label or "?", DescribeCondition(cond, data.cles)))
+                chk:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lbl:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+                chk:SetChecked(selected[cond.key] and true or false)
+                local key = cond.key
+                chk:SetScript("OnClick", function(self)
+                    selected[key] = self:GetChecked() and true or nil
+                    local keys = {}
+                    for _, cc in ipairs(data.conditions) do
+                        if selected[cc.key] then keys[#keys + 1] = cc.key end
+                    end
+                    section.conditionKeys = keys
+                end)
+                y = y + 22
+            end
+        end
+        y = y + 14
+    end
+
+    BuildBaseBlock("Capacité (unités totales)", fonct.capacite)
+    do
+        local sep = c:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
+        sep:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); sep:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
+        y = y + 14
+    end
+    BuildBaseBlock("Vitesse de descente", fonct.vitesse)
+    do
+        local sep = c:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
+        sep:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); sep:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
+        y = y + 14
+    end
+
+    -- Gorgée : règle globale de consommation (le litrage reste défini par Gourde)
+    do
+        fonct.gorgee = fonct.gorgee or {}
+        local gorgee = fonct.gorgee
+
+        local lblTitle = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblTitle:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblTitle:SetText("Gorgée"); UI.ApplyStrongLabel(lblTitle)
+        y = y + 22
+
+        local lblMl = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblMl:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblMl:SetText("Volume par gorgée (mL)"); UI.ApplyLabel(lblMl)
+        y = y + 16
+        local mlEB = UI.CreateStyledEditBox(c, cW, 22)
+        mlEB:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y)
+        SetupNumericEditBox(mlEB, false)
+        mlEB:SetText(tostring(gorgee.ml or 0))
+        mlEB:HookScript("OnTextChanged", function(self) gorgee.ml = tonumber(self:GetText()) or 0 end)
+        y = y + 30
+
+        local lblPts = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lblPts:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblPts:SetText("Points d'hydratation rendus par gorgée"); UI.ApplyLabel(lblPts)
+        y = y + 16
+        local ptsEB = UI.CreateStyledEditBox(c, cW, 22)
+        ptsEB:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y)
+        SetupNumericEditBox(ptsEB, false)
+        ptsEB:SetText(tostring(gorgee.points or 0))
+        ptsEB:HookScript("OnTextChanged", function(self) gorgee.points = tonumber(self:GetText()) or 0 end)
+        y = y + 30
+
+        local hint = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        hint:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); hint:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
+        hint:SetJustifyH("LEFT"); hint:SetWordWrap(true); UI.ApplySoftText(hint)
+        hint:SetText("Le litrage total (contenance) se définit par Gourde ; cette règle est commune à toutes les gourdes du système.")
+        y = y + 34
+    end
+    do
+        local sep = c:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
+        sep:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); sep:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -y)
+        y = y + 14
+    end
+
+    local lblPal = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lblPal:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y); lblPal:SetText("Paliers d'état"); UI.ApplyStrongLabel(lblPal)
+    local addPalBtn = UI.CreateAddButton(c, function() end)
+    addPalBtn:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, -(y - 2))
+    y = y + 24
+
+    local PAL_LIST_H = 200
+    local palAcc = NewAccordion(c)
+    palAcc.sf:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -y)
+    palAcc.sf:SetSize(cW - SB_W - 4, PAL_LIST_H)
+    palAcc.sb:SetPoint("TOPLEFT", palAcc.sf, "TOPRIGHT", 2, 0)
+    palAcc.sb:SetPoint("BOTTOMLEFT", palAcc.sf, "BOTTOMRIGHT", 2, 0)
+
+    local palOpts = {
+        summary = function(pal) return string.format("%d%%  —  %s", pal.seuil or 0, pal.label or "") end,
+        formHeight = function() return 176 end,
+        buildForm = function(form, item)
+            local W2 = form:GetWidth()
+            local yy = 0
+            local function Field(labelText, initial, onChange, numeric)
+                local l = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                l:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -yy); l:SetText(labelText); UI.ApplyLabel(l)
+                local eb = UI.CreateStyledEditBox(form, W2, 22)
+                eb:SetPoint("TOPLEFT", form, "TOPLEFT", 0, -(yy + 16))
+                eb:SetText(initial or "")
+                if numeric then
+                    SetupNumericEditBox(eb, false)
+                    eb:HookScript("OnTextChanged", function(self) onChange(tonumber(self:GetText()) or 0) end)
+                else
+                    eb:SetScript("OnTextChanged", function(self) onChange(self:GetText()) end)
+                end
+                yy = yy + 44
+            end
+            Field("Seuil (%)", tostring(item.seuil or 50), function(v) item.seuil = v end, true)
+            Field("État", item.label or "", function(v) item.label = v end)
+            Field("Message", item.message or "", function(v) item.message = v end)
+            Field("Debuff (sort / ID)", item.debuff or "", function(v) item.debuff = v end)
+        end,
+        onDelete = function(index)
+            table.remove(fonct.paliers, index)
+            if palAcc.expanded == index then palAcc.expanded = nil end
+            palAcc.Render(fonct.paliers, palOpts)
+        end,
+    }
+    addPalBtn:SetScript("OnClick", function()
+        fonct.paliers[#fonct.paliers + 1] = { key = GenerateKey("ETAT", fonct.paliers), seuil = 50, label = "", message = "", debuff = "" }
+        palAcc.expanded = #fonct.paliers
+        palAcc.Render(fonct.paliers, palOpts)
+    end)
+    palAcc.Render(fonct.paliers, palOpts)
+
+    y = y + PAL_LIST_H + 20
+    c:SetHeight(math.max(1, y))
+    local maxS = math.max(0, y - sf:GetHeight())
+    sb:SetMinMaxValues(0, maxS); sb:SetAlpha(maxS > 0 and 1 or 0.2)
+end
+
+-- ══════════════════════════════════════════════════════════════════════
+-- Fenêtre unique : sidebar + fil d'Ariane + zone de contenu
+-- ══════════════════════════════════════════════════════════════════════
+local SECTION_ORDER = {
+    { key = "general",        label = "Général",        render = RenderGeneralSection },
+    { key = "cles",           label = "Clés",           render = RenderClesSection },
+    { key = "etats",          label = "États",          render = RenderEtatsSection },
+    { key = "filtres",        label = "Filtres",        render = RenderFiltresSection },
+    { key = "sources",        label = "Sources",        render = RenderSourcesSection },
+    { key = "gourdes",        label = "Gourdes",        render = RenderGourdesSection },
+    { key = "conditions",     label = "Conditions",     render = RenderConditionsSection },
+    { key = "fonctionnement", label = "Fonctionnement", render = RenderFonctionnementSection },
+}
+
+local builderWindow = nil
+
+local function GetOrCreateHydratationBuilder()
+    if builderWindow then return builderWindow end
+    local UI       = OS2.UI or {}
+    local WW, WH   = 700, 580
+    local PAD      = 14
+    local HDR_H    = 36
+    local SIDE_W   = 130
+    local FOOTER_H = 46
+    local CRUMB_H  = 26
 
     local p = CreateFrame("Frame", nil, UIParent)
-    p:SetSize(TOT_W, TOT_H)
+    p:SetSize(WW, WH)
     p:SetFrameStrata("TOOLTIP"); p:SetFrameLevel(100)
     p:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     p:Hide()
@@ -1032,264 +1662,176 @@ local function GetOrCreateHydratationPanel()
         local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
         sep:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -HDR_H); sep:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, -HDR_H)
     end
-
     UI.CreateCloseButton(p, function() p:Hide() end)
-
     do
         local drag = CreateFrame("Frame", nil, p)
         drag:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0); drag:SetPoint("TOPRIGHT", p, "TOPRIGHT", 0, 0)
         drag:SetHeight(HDR_H); OS2.MakeDraggable(p, drag)
     end
 
+    -- Barre latérale
+    local sideButtons = {}
+    local sy = -(HDR_H + 10)
+    for _, sec in ipairs(SECTION_ORDER) do
+        local btn = CreateFrame("Button", nil, p)
+        btn:SetSize(SIDE_W, 26)
+        btn:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, sy)
+        local sBg = btn:CreateTexture(nil, "BACKGROUND"); sBg:SetAllPoints(); sBg:SetColorTexture(0.10, 0.10, 0.10, 1)
+        local sLine = btn:CreateTexture(nil, "ARTWORK"); sLine:SetWidth(2)
+        sLine:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0); sLine:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, 0)
+        sLine:SetColorTexture(0.80, 0.70, 0.40, 1); sLine:Hide()
+        local sHl = btn:CreateTexture(nil, "HIGHLIGHT"); sHl:SetAllPoints(); sHl:SetColorTexture(0.85, 0.75, 0.40, 0.10)
+        local sLbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sLbl:SetPoint("LEFT", btn, "LEFT", 10, 0); sLbl:SetText(sec.label)
+        sLbl:SetTextColor(0.80, 0.76, 0.65, 1)
+        sideButtons[sec.key] = { btn = btn, bg = sBg, line = sLine, lbl = sLbl }
+        sy = sy - 30
+    end
+
     local vSep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(vSep, true); vSep:SetWidth(1)
-    vSep:SetPoint("TOP",    p, "TOPLEFT", LEFT_X + LEFT_W + 6, -HDR_H)
-    vSep:SetPoint("BOTTOM", p, "BOTTOMLEFT", LEFT_X + LEFT_W + 6, 14)
+    vSep:SetPoint("TOP",    p, "TOPLEFT",    PAD + SIDE_W + 10, -HDR_H)
+    vSep:SetPoint("BOTTOM", p, "BOTTOMLEFT", PAD + SIDE_W + 10, FOOTER_H)
 
-    -- ── SECTION GAUCHE HAUTE : Gourdes ────────────────────────────────
-    local SEC_TOP_Y  = -(HDR_H + 6)
-    local LIST_H_SUB = SEC_H - 26
+    local CONTENT_X = PAD + SIDE_W + 24
+    local CONTENT_R = -PAD
 
-    local lblGourdes = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblGourdes:SetPoint("TOPLEFT", p, "TOPLEFT", LEFT_X, SEC_TOP_Y)
-    lblGourdes:SetText("Gourdes"); UI.ApplyStrongLabel(lblGourdes)
+    -- Fil d'Ariane
+    local crumbBar = CreateFrame("Frame", nil, p)
+    crumbBar:SetPoint("TOPLEFT",  p, "TOPLEFT",  CONTENT_X, -(HDR_H + 8))
+    crumbBar:SetPoint("TOPRIGHT", p, "TOPRIGHT", CONTENT_R, -(HDR_H + 8))
+    crumbBar:SetHeight(CRUMB_H)
+    crumbBar:Hide()
 
-    local addGourdeBtn = UI.CreateAddButton(p, function() end)
-    addGourdeBtn:SetPoint("TOPRIGHT", p, "TOPLEFT", LEFT_X + LEFT_W, SEC_TOP_Y + 2)
-    addGourdeBtn:Hide()
+    local backBtn = CreateFrame("Button", nil, crumbBar); backBtn:SetSize(76, 20)
+    backBtn:SetPoint("LEFT", crumbBar, "LEFT", 0, 0)
+    local bBg = backBtn:CreateTexture(nil, "BACKGROUND"); bBg:SetAllPoints(); bBg:SetColorTexture(0.14, 0.12, 0.06, 1)
+    local bHl = backBtn:CreateTexture(nil, "HIGHLIGHT"); bHl:SetAllPoints(); bHl:SetColorTexture(0.85, 0.75, 0.40, 0.15)
+    local bLbl = backBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); bLbl:SetAllPoints()
+    bLbl:SetText("← Retour"); bLbl:SetTextColor(0.88, 0.78, 0.40, 1)
 
-    local gourdesSF = CreateFrame("ScrollFrame", nil, p)
-    gourdesSF:SetPoint("TOPLEFT", p, "TOPLEFT", LEFT_X, SEC_TOP_Y - 18)
-    gourdesSF:SetSize(LEFT_W - SB_W - 4, LIST_H_SUB)
-    gourdesSF:EnableMouseWheel(true)
+    local crumbTxt = crumbBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    crumbTxt:SetPoint("LEFT", backBtn, "RIGHT", 10, 0)
+    crumbTxt:SetPoint("RIGHT", crumbBar, "RIGHT", 0, 0)
+    crumbTxt:SetJustifyH("LEFT"); crumbTxt:SetTextColor(0.65, 0.62, 0.55, 1)
 
-    local gourdesSB = CreateFrame("Slider", nil, p)
-    gourdesSB:SetPoint("TOPLEFT",    gourdesSF, "TOPRIGHT",    2, 0)
-    gourdesSB:SetPoint("BOTTOMLEFT", gourdesSF, "BOTTOMRIGHT", 2, 0)
-    gourdesSB:SetWidth(SB_W); gourdesSB:SetOrientation("VERTICAL")
-    gourdesSB:SetMinMaxValues(0, 0); gourdesSB:SetValue(0)
-    local gt = gourdesSB:CreateTexture(nil, "THUMB"); gt:SetSize(SB_W - 2, 24); gt:SetColorTexture(0.5, 0.42, 0.22, 0.85); gourdesSB:SetThumbTexture(gt)
-    gourdesSF:SetScript("OnMouseWheel", function(_, d) gourdesSB:SetValue(math.max(0, math.min(select(2, gourdesSB:GetMinMaxValues()), gourdesSB:GetValue() - d * ROW_H_SUB * 2))) end)
-    gourdesSB:SetScript("OnValueChanged", function(_, v) gourdesSF:SetVerticalScroll(v) end)
-
-    -- ── Séparateur horizontal ──────────────────────────────────────────
-    local hSep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(hSep, true); hSep:SetHeight(1)
-    local hSepY = SEC_TOP_Y - SEC_H
-    hSep:SetPoint("TOPLEFT",  p, "TOPLEFT", LEFT_X,          hSepY)
-    hSep:SetPoint("TOPRIGHT", p, "TOPLEFT", LEFT_X + LEFT_W, hSepY)
-
-    -- ── SECTION GAUCHE BASSE : Types d'eau ────────────────────────────
-    local SEC_BOT_Y = hSepY - 8
-
-    local lblSources = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblSources:SetPoint("TOPLEFT", p, "TOPLEFT", LEFT_X, SEC_BOT_Y)
-    lblSources:SetText("Types d'eau"); UI.ApplyStrongLabel(lblSources)
-
-    local addSourceBtn = UI.CreateAddButton(p, function() end)
-    addSourceBtn:SetPoint("TOPRIGHT", p, "TOPLEFT", LEFT_X + LEFT_W, SEC_BOT_Y + 2)
-    addSourceBtn:Hide()
-
-    local sourcesSF = CreateFrame("ScrollFrame", nil, p)
-    sourcesSF:SetPoint("TOPLEFT", p, "TOPLEFT", LEFT_X, SEC_BOT_Y - 18)
-    sourcesSF:SetSize(LEFT_W - SB_W - 4, LIST_H_SUB)
-    sourcesSF:EnableMouseWheel(true)
-
-    local sourcesSB = CreateFrame("Slider", nil, p)
-    sourcesSB:SetPoint("TOPLEFT",    sourcesSF, "TOPRIGHT",    2, 0)
-    sourcesSB:SetPoint("BOTTOMLEFT", sourcesSF, "BOTTOMRIGHT", 2, 0)
-    sourcesSB:SetWidth(SB_W); sourcesSB:SetOrientation("VERTICAL")
-    sourcesSB:SetMinMaxValues(0, 0); sourcesSB:SetValue(0)
-    local st = sourcesSB:CreateTexture(nil, "THUMB"); st:SetSize(SB_W - 2, 24); st:SetColorTexture(0.5, 0.42, 0.22, 0.85); sourcesSB:SetThumbTexture(st)
-    sourcesSF:SetScript("OnMouseWheel", function(_, d) sourcesSB:SetValue(math.max(0, math.min(select(2, sourcesSB:GetMinMaxValues()), sourcesSB:GetValue() - d * ROW_H_SUB * 2))) end)
-    sourcesSB:SetScript("OnValueChanged", function(_, v) sourcesSF:SetVerticalScroll(v) end)
-
-    -- ── Bouton Édition ────────────────────────────────────────────────
-    local editMode   = false
-    local allEditBtns = {}
-
-    local editionBtn = CreateFrame("Button", nil, p)
-    editionBtn:SetSize(LEFT_W, 22)
-    editionBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", LEFT_X, 14)
-
-    local eBg = editionBtn:CreateTexture(nil, "BACKGROUND"); eBg:SetAllPoints(); eBg:SetColorTexture(0.10, 0.10, 0.10, 1)
-    local eLine = editionBtn:CreateTexture(nil, "ARTWORK"); eLine:SetHeight(2)
-    eLine:SetPoint("BOTTOMLEFT",  editionBtn, "BOTTOMLEFT",  2, 1)
-    eLine:SetPoint("BOTTOMRIGHT", editionBtn, "BOTTOMRIGHT", -2, 1)
-    eLine:SetColorTexture(0.80, 0.70, 0.40, 1); eLine:Hide()
-    local eHl = editionBtn:CreateTexture(nil, "HIGHLIGHT"); eHl:SetAllPoints(); eHl:SetColorTexture(0.85, 0.75, 0.40, 0.10)
-    local eLbl = editionBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    eLbl:SetAllPoints(); eLbl:SetTextColor(0.88, 0.82, 0.65, 1); eLbl:SetText("Édition")
-
-    local function SetEditMode(active)
-        editMode = active
-        eLine:SetShown(active)
-        eBg:SetColorTexture(active and 0.18 or 0.10, active and 0.15 or 0.10, active and 0.08 or 0.10, 1)
-        addGourdeBtn:SetShown(active)
-        addSourceBtn:SetShown(active)
-        for _, b in ipairs(allEditBtns) do b:SetShown(active) end
-    end
-
-    editionBtn:SetScript("OnClick", function() SetEditMode(not editMode) end)
-    p:HookScript("OnHide", function() SetEditMode(false) end)
-
-    -- ── COLONNE DROITE : Nom + Description + Fonctionnement ──────────
-    local lblNom = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblNom:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y)
-    lblNom:SetText("Nom"); UI.ApplyLabel(lblNom)
-
-    local nomEB = UI.CreateStyledEditBox(p, RIGHT_W, 22)
-    nomEB:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y - 16)
-
-    local lblDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblDesc:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y - 50)
-    lblDesc:SetText("Description"); UI.ApplyLabel(lblDesc)
-
-    local descBox = CreateFrame("Frame", nil, p)
-    descBox:SetSize(RIGHT_W, 80)
-    descBox:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y - 66)
-    local descBg = descBox:CreateTexture(nil, "BACKGROUND"); descBg:SetAllPoints(); descBg:SetColorTexture(unpack(UI.colors.editBoxBg))
-    local descBorder = descBox:CreateTexture(nil, "ARTWORK"); descBorder:SetHeight(1)
-    descBorder:SetPoint("BOTTOMLEFT",  descBox, "BOTTOMLEFT",  2, 1)
-    descBorder:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -2, 1)
-    descBorder:SetColorTexture(unpack(UI.colors.editBoxAccent))
-    local descEB = CreateFrame("EditBox", nil, descBox)
-    descEB:SetPoint("TOPLEFT",     descBox, "TOPLEFT",      6, -4)
-    descEB:SetPoint("BOTTOMRIGHT", descBox, "BOTTOMRIGHT", -6,  4)
-    descEB:SetFontObject("GameFontNormalSmall"); UI.ApplyBodyText(descEB)
-    descEB:SetAutoFocus(false); descEB:SetMultiLine(true); descEB:SetMaxLetters(512)
-    descEB:SetJustifyH("LEFT"); descEB:SetJustifyV("TOP")
-    descEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    -- descBox bottom = SEC_TOP_Y - 146
     do
-        local sep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT",  p, "TOPLEFT", RIGHT_X,           SEC_TOP_Y - 156)
-        sep:SetPoint("TOPRIGHT", p, "TOPLEFT", RIGHT_X + RIGHT_W, SEC_TOP_Y - 156)
+        local sep = crumbBar:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(sep); sep:SetHeight(1)
+        sep:SetPoint("BOTTOMLEFT",  crumbBar, "BOTTOMLEFT",  0, -6)
+        sep:SetPoint("BOTTOMRIGHT", crumbBar, "BOTTOMRIGHT", 0, -6)
     end
 
-    local lblFonct = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblFonct:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y - 168)
-    lblFonct:SetText("Fonctionnement"); UI.ApplyStrongLabel(lblFonct)
+    local contentTop = CreateFrame("Frame", nil, p)
 
-    local reglesBtn = UI.CreatePanelButton(p, RIGHT_W, 22, "Fonctionnement  →")
-    reglesBtn:SetPoint("TOPLEFT", p, "TOPLEFT", RIGHT_X, SEC_TOP_Y - 192)
+    local footerSep = p:CreateTexture(nil, "ARTWORK"); UI.ApplySeparator(footerSep); footerSep:SetHeight(1)
+    footerSep:SetPoint("BOTTOMLEFT",  p, "BOTTOMLEFT",  0, FOOTER_H)
+    footerSep:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, FOOTER_H)
 
-    local validBtn = UI.CreatePanelButton(p, RIGHT_W, 22, "Valider")
-    validBtn:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", RIGHT_X, 14)
+    local validBtn = UI.CreatePanelButton(p, 150, 24, "Valider")
+    validBtn:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -PAD, 12)
 
-    -- ── State & callbacks ─────────────────────────────────────────────
-    local _cb             = nil
-    local _gourdes        = nil
-    local _sources        = nil
-    local _fonctionnement = {}
+    -- ── State ────────────────────────────────────────────────────────
+    local _cb, _data = nil, nil
+    local navStack = {}
 
-    local function RebuildAll()
-        wipe(allEditBtns)
-        if _gourdes then
-            BuildSubList(gourdesSF, gourdesSB, LIST_H_SUB, _gourdes,
-                function(i)
-                    OpenGourdeSubPanel("Modifier la gourde", _gourdes[i], function(pl)
-                        local g = _gourdes[i]
-                        g.label = pl.label; g.contenance = pl.contenance
-                        g.desc  = pl.desc;  g.rechargeAuto = pl.rechargeAuto; g.filtre = pl.filtre
-                        RebuildAll()
-                    end)
-                end,
-                function(i) table.remove(_gourdes, i); RebuildAll() end,
-                allEditBtns, editMode)
+    local function NewContentChild()
+        if contentTop._child then contentTop._child:Hide() end
+        local child = CreateFrame("Frame", nil, contentTop)
+        child:SetAllPoints(contentTop)
+        contentTop._child = child
+        return child
+    end
+
+    local RenderCurrentView
+    local function PushView(label, renderFn)
+        navStack[#navStack + 1] = { label = label, render = renderFn }
+        RenderCurrentView()
+    end
+    local function PopView()
+        if #navStack > 1 then table.remove(navStack) end
+        RenderCurrentView()
+    end
+    local function ResetNav(label, renderFn)
+        navStack = { { label = label, render = renderFn } }
+        RenderCurrentView()
+    end
+
+    RenderCurrentView = function()
+        contentTop:ClearAllPoints()
+        if #navStack > 1 then
+            crumbBar:Show()
+            contentTop:SetPoint("TOPLEFT", p, "TOPLEFT", CONTENT_X, -(HDR_H + 8 + CRUMB_H + 8))
+        else
+            crumbBar:Hide()
+            contentTop:SetPoint("TOPLEFT", p, "TOPLEFT", CONTENT_X, -(HDR_H + 8))
         end
-        if _sources then
-            BuildSubList(sourcesSF, sourcesSB, LIST_H_SUB, _sources,
-                function(i)
-                    OpenSourceSubPanel("Modifier le type d'eau", _sources[i], function(pl)
-                        local s = _sources[i]
-                        s.label    = pl.label;    s.desc     = pl.desc
-                        s.proprete = pl.proprete; s.parasite = pl.parasite
-                        s.malade      = pl.malade;      s.salee       = pl.salee
-                        s.filtrage    = pl.filtrage;    s.auraEnabled = pl.auraEnabled
-                        s.auraRules   = pl.auraRules
-                        RebuildAll()
-                    end)
-                end,
-                function(i) table.remove(_sources, i); RebuildAll() end,
-                allEditBtns, editMode)
+        contentTop:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", CONTENT_R, FOOTER_H + 10)
+
+        local path = {}
+        for _, v in ipairs(navStack) do path[#path + 1] = v.label end
+        crumbTxt:SetText(table.concat(path, "   ›   "))
+
+        local top = navStack[#navStack]
+        local child = NewContentChild()
+        if top then top.render(child) end
+    end
+    backBtn:SetScript("OnClick", PopView)
+
+    local nav = { Push = PushView, Pop = PopView, Refresh = function() RenderCurrentView() end }
+
+    local function SelectSection(key)
+        for k, sb2 in pairs(sideButtons) do
+            local active = (k == key)
+            sb2.line:SetShown(active)
+            sb2.bg:SetColorTexture(active and 0.16 or 0.10, active and 0.13 or 0.10, active and 0.06 or 0.10, 1)
+            local c1 = active and 0.95 or 0.80
+            local c2 = active and 0.85 or 0.76
+            local c3 = active and 0.55 or 0.65
+            sb2.lbl:SetTextColor(c1, c2, c3, 1)
+        end
+        for _, sec in ipairs(SECTION_ORDER) do
+            if sec.key == key then
+                ResetNav(sec.label, function(c) sec.render(c, _data, nav) end)
+                break
+            end
         end
     end
 
-    addGourdeBtn:SetScript("OnClick", function()
-        OpenGourdeSubPanel("Nouvelle Gourde", nil, function(pl)
-            _gourdes[#_gourdes + 1] = {
-                key          = GenerateKey("GOUR", _gourdes),
-                label        = pl.label,
-                contenance   = pl.contenance,
-                desc         = pl.desc,
-                rechargeAuto = pl.rechargeAuto,
-                filtre       = pl.filtre,
-            }
-            RebuildAll()
-        end)
-    end)
-
-    addSourceBtn:SetScript("OnClick", function()
-        OpenSourceSubPanel("Nouveau Type d'eau", nil, function(pl)
-            _sources[#_sources + 1] = {
-                key      = GenerateKey("SRCE", _sources),
-                label    = pl.label,
-                desc     = pl.desc,
-                proprete = pl.proprete,
-                parasite = pl.parasite,
-                malade   = pl.malade,
-                salee       = pl.salee,
-                filtrage    = pl.filtrage,
-                auraEnabled = pl.auraEnabled,
-                auraRules   = pl.auraRules,
-            }
-            RebuildAll()
-        end)
-    end)
-
-    reglesBtn:SetScript("OnClick", function()
-        OpenReglesPanel("Fonctionnement — Hydratation", _fonctionnement, function(f)
-            _fonctionnement = f
-        end)
-    end)
+    for _, sec in ipairs(SECTION_ORDER) do
+        sideButtons[sec.key].btn:SetScript("OnClick", function() SelectSection(sec.key) end)
+    end
 
     validBtn:SetScript("OnClick", function()
-        local nom  = (nomEB:GetText()  or ""):match("^%s*(.-)%s*$")
-        local desc = (descEB:GetText() or ""):match("^%s*(.-)%s*$")
-        if nom == "" then return end
-        if _cb then _cb({
-            label           = nom,
-            desc            = desc,
-            gourdes         = _gourdes,
-            sources         = _sources,
-            fonctionnement  = _fonctionnement,
-        }) end
+        local nom = (_data.label or ""):match("^%s*(.-)%s*$")
+        if nom == "" then SelectSection("general"); return end
+        if _cb then _cb(_data) end
         p:Hide()
     end)
 
     p._open = function(mode, item, cb)
-        _cb             = cb
-        _gourdes        = (item and item.gourdes) and { unpack(item.gourdes) } or {}
-        _sources        = (item and item.sources) and { unpack(item.sources) } or {}
-        _fonctionnement = (item and item.fonctionnement) or {}
-        if mode == "create" then
-            titleStr:SetText("Nouveau Système : Hydratation")
-            nomEB:SetText(""); descEB:SetText("")
-        else
-            titleStr:SetText("Modifier : " .. (item and item.label or ""))
-            nomEB:SetText(item and item.label or "")
-            descEB:SetText(item and item.desc  or "")
-        end
-        RebuildAll()
-        p:Show(); nomEB:SetFocus()
+        _cb = cb
+        _data = {
+            key            = item and item.key or nil,
+            label          = item and item.label or "",
+            desc           = item and item.desc or "",
+            gourdes        = (item and item.gourdes) and { unpack(item.gourdes) } or {},
+            etats          = (item and item.etats) and { unpack(item.etats) } or {},
+            filtres        = (item and item.filtres) and { unpack(item.filtres) } or {},
+            sources        = (item and item.sources) and { unpack(item.sources) } or {},
+            cles           = (item and item.cles) and { unpack(item.cles) } or {},
+            conditions     = (item and item.conditions) and { unpack(item.conditions) } or {},
+            fonctionnement = (item and item.fonctionnement) or {},
+        }
+        titleStr:SetText(mode == "create" and "Nouveau Système : Hydratation" or ("Modifier — " .. ((item and item.label ~= "" and item.label) or "Hydratation")))
+        SelectSection("general")
+        p:Show()
     end
 
-    hydratationPanel = p
+    builderWindow = p
     return p
 end
 
 local function OpenHydratationPanel(mode, item, cb)
-    GetOrCreateHydratationPanel()._open(mode, item, cb)
+    GetOrCreateHydratationBuilder()._open(mode, item, cb)
 end
 
 -- ── Section Hydratation dans l'onglet Survie ──────────────────────────
@@ -1375,6 +1917,10 @@ function OS2.DB.BuildHydratationSection(ctx, offsetY, SEC_LIST_H)
                     item.label          = pl.label;   item.desc    = pl.desc
                     item.gourdes        = pl.gourdes;  item.sources = pl.sources
                     item.fonctionnement = pl.fonctionnement
+                    item.cles           = pl.cles
+                    item.conditions     = pl.conditions
+                    item.filtres        = pl.filtres
+                    item.etats          = pl.etats
                     RebuildList()
                 end)
             end)
@@ -1413,8 +1959,12 @@ function OS2.DB.BuildHydratationSection(ctx, offsetY, SEC_LIST_H)
                 label          = pl.label,
                 desc           = pl.desc or "",
                 gourdes        = pl.gourdes or {},
+                filtres        = pl.filtres or {},
+                etats          = pl.etats or {},
                 sources        = pl.sources or {},
                 fonctionnement = pl.fonctionnement or {},
+                cles           = pl.cles or {},
+                conditions     = pl.conditions or {},
             }
             RebuildList()
         end)
@@ -1426,3 +1976,240 @@ function OS2.DB.BuildHydratationSection(ctx, offsetY, SEC_LIST_H)
 
     RebuildList()
 end
+
+-- ── Diffusion réseau : valeurs des Clés "Saisie par MJ" ────────────────
+-- Communication discrète via message d'addon, sur le même principe que
+-- Character/Core.lua (SendAddonMessage, invisible dans le chat).
+local COMM_PREFIX        = "OS2Hydra"
+local commRegistered     = false
+local liveValues         = {} -- [systemKey.."/"..cleKey] = valeur courante
+local liveValueListeners = {}
+
+local function LiveKey(systemKey, cleKey)
+    return tostring(systemKey) .. "/" .. tostring(cleKey)
+end
+
+function OS2.DB.GetHydrationLiveValue(systemKey, cleKey, fallback)
+    local v = liveValues[LiveKey(systemKey, cleKey)]
+    if v == nil then return fallback end
+    return v
+end
+
+function OS2.DB.OnHydrationLiveValueChanged(fn)
+    liveValueListeners[#liveValueListeners + 1] = fn
+end
+
+local function NotifyLiveValueChanged(systemKey, cleKey, value)
+    for _, fn in ipairs(liveValueListeners) do
+        pcall(fn, systemKey, cleKey, value)
+    end
+end
+
+local function ApplyIncomingLiveValue(systemKey, cleKey, value)
+    liveValues[LiveKey(systemKey, cleKey)] = value
+    NotifyLiveValueChanged(systemKey, cleKey, value)
+end
+
+function OS2.DB.BroadcastHydrationLiveValue(systemKey, cleKey, value)
+    if not systemKey or not cleKey or value == nil then return end
+    ApplyIncomingLiveValue(systemKey, cleKey, value)
+
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+    local payload = table.concat({ "V", systemKey, cleKey, tostring(value) }, ":")
+
+    local channels = {}
+    if IsInRaid and IsInRaid() then
+        channels[#channels + 1] = "RAID"
+    elseif IsInGroup and IsInGroup() then
+        channels[#channels + 1] = "PARTY"
+    end
+    channels[#channels + 1] = "GUILD"
+
+    for _, channel in ipairs(channels) do
+        pcall(C_ChatInfo.SendAddonMessage, COMM_PREFIX, payload, channel)
+    end
+end
+
+local function HandleCommMessage(payload)
+    local kind, systemKey, cleKey, valueStr = strsplit(":", payload or "")
+    if kind ~= "V" or not systemKey or systemKey == "" or not cleKey or cleKey == "" then return end
+    local value = tonumber(valueStr)
+    if value == nil then return end
+    ApplyIncomingLiveValue(systemKey, cleKey, value)
+end
+
+local function EnsureCommRegistered()
+    if commRegistered then return end
+    commRegistered = true
+
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        C_ChatInfo.RegisterAddonMessagePrefix(COMM_PREFIX)
+    end
+
+    local frame = CreateFrame("Frame")
+    frame:RegisterEvent("CHAT_MSG_ADDON")
+    frame:SetScript("OnEvent", function(_, _, prefix, message, _, sender)
+        if prefix ~= COMM_PREFIX then return end
+        HandleCommMessage(message)
+    end)
+end
+
+-- ── Évaluation runtime : Capacité / Vitesse + déclenchement des Actions ─
+local function FindConditionByKey(conditions, key)
+    for _, c in ipairs(conditions or {}) do
+        if c.key == key then return c end
+    end
+    return nil
+end
+
+local function EvaluateBaseOperand(base, ctx)
+    if not base or not base.cleKey then return 0 end
+    local def = 0
+    for _, c in ipairs(ctx.cles or {}) do
+        if c.key == base.cleKey then def = c.valeurDefaut or 0; break end
+    end
+    local v = OS2.DB.GetHydrationLiveValue(ctx.systemKey, base.cleKey, def) or def
+    return v * (base.coef or 1)
+end
+
+-- Recalcule Capacité/Vitesse et déclenche au passage les Actions (aura/message)
+-- des Conditions "Si" référencées par ce système.
+function OS2.DB.EvaluateHydrationSystem(systemKey)
+    local item = nil
+    for _, it in ipairs(GetSystemList("hydratation")) do
+        if it.key == systemKey then item = it; break end
+    end
+    if not item then return nil end
+
+    local fonct      = item.fonctionnement or {}
+    local cles       = item.cles or {}
+    local conditions = item.conditions or {}
+    local ctx = { systemKey = systemKey, cles = cles, capaciteTotale = 0 }
+
+    local capacite = EvaluateBaseOperand(fonct.capacite and fonct.capacite.base, ctx)
+    ctx.capaciteTotale = capacite
+    for _, key in ipairs((fonct.capacite and fonct.capacite.conditionKeys) or {}) do
+        local cond = FindConditionByKey(conditions, key)
+        if cond then capacite = capacite + (EvaluateCondition(cond, ctx) or 0) end
+    end
+
+    ctx.capaciteTotale = capacite
+    local vitesse = EvaluateBaseOperand(fonct.vitesse and fonct.vitesse.base, ctx)
+    for _, key in ipairs((fonct.vitesse and fonct.vitesse.conditionKeys) or {}) do
+        local cond = FindConditionByKey(conditions, key)
+        if cond then vitesse = vitesse + (EvaluateCondition(cond, ctx) or 0) end
+    end
+
+    return { capacite = capacite, vitesse = vitesse }
+end
+
+-- ── Suivi visuel des États actifs : icône près de la minimap ───────────
+local function FindEtatDef(systemKey, etatKey)
+    for _, it in ipairs(GetSystemList("hydratation")) do
+        if it.key == systemKey then
+            for _, e in ipairs(it.etats or {}) do
+                if e.key == etatKey then return e end
+            end
+            return nil
+        end
+    end
+    return nil
+end
+
+local activeEtatsList  = {}
+local activeEtatsIndex = {}
+local etatIconFrames   = {}
+local etatTrackerBar   = nil
+
+local function RebuildActiveEtatsIndex()
+    activeEtatsIndex = {}
+    for i, e in ipairs(activeEtatsList) do activeEtatsIndex[e.key] = i end
+end
+
+local function GetOrCreateEtatTrackerBar()
+    if etatTrackerBar then return etatTrackerBar end
+    local bar = CreateFrame("Frame", "OS2_EtatTrackerBar", UIParent)
+    bar:SetFrameStrata("HIGH")
+    bar:SetSize(1, 26)
+    bar:SetPoint("TOP", UIParent, "TOP", 0, -40)
+    etatTrackerBar = bar
+    return bar
+end
+
+local function RefreshEtatTrackerBar()
+    local bar = GetOrCreateEtatTrackerBar()
+    for _, f in ipairs(etatIconFrames) do f:Hide() end
+
+    local totalW = 0
+    for i, info in ipairs(activeEtatsList) do
+        local f = etatIconFrames[i]
+        if not f then
+            f = CreateFrame("Button", nil, bar)
+            f:SetSize(24, 24)
+            local tex = f:CreateTexture(nil, "ARTWORK")
+            tex:SetAllPoints(); tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            f.tex = tex
+            local border = f:CreateTexture(nil, "BACKGROUND")
+            border:SetPoint("TOPLEFT", f, "TOPLEFT", -1, 1); border:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
+            border:SetColorTexture(0.05, 0.05, 0.05, 1)
+            f:SetFrameLevel(bar:GetFrameLevel() + 1)
+            f:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                GameTooltip:SetText(self._label or "État", 1, 1, 1)
+                if self._desc and self._desc ~= "" then
+                    GameTooltip:AddLine(self._desc, 0.9, 0.9, 0.9, true)
+                end
+                GameTooltip:Show()
+            end)
+            f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            etatIconFrames[i] = f
+        end
+        f.tex:SetTexture(info.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+        f._label = info.label
+        f._desc  = info.desc
+        f:ClearAllPoints()
+        f:SetPoint("RIGHT", bar, "RIGHT", -totalW, 0)
+        f:Show()
+        totalW = totalW + 28
+    end
+    bar:SetWidth(math.max(1, totalW))
+end
+
+-- Appelable par un futur mécanisme « boire » : applique/retire visuellement
+-- et fonctionnellement un État sur le joueur (icône minimap + message
+-- + Actions configurées sur cet État — aura/message).
+function OS2.DB.ApplyEtatToPlayer(systemKey, etatKey)
+    local etat = FindEtatDef(systemKey, etatKey)
+    if not etat then return end
+    local key = LiveKey(systemKey, etatKey)
+    if activeEtatsIndex[key] then return end
+
+    activeEtatsList[#activeEtatsList + 1] = { key = key, icon = etat.icon, label = etat.label, desc = etat.desc }
+    RebuildActiveEtatsIndex()
+    RefreshEtatTrackerBar()
+
+    OS2.Notify("Vous ressentez : " .. (etat.label or "un état inconnu"), 1, 0.7, 0.3)
+    ExecuteConditionActions(etat.actions, {})
+end
+
+function OS2.DB.RemoveEtatFromPlayer(systemKey, etatKey)
+    local key = LiveKey(systemKey, etatKey)
+    local idx = activeEtatsIndex[key]
+    if not idx then return end
+    local etat = activeEtatsList[idx]
+    table.remove(activeEtatsList, idx)
+    RebuildActiveEtatsIndex()
+    RefreshEtatTrackerBar()
+
+    OS2.Notify("Vous n'avez plus : " .. (etat and etat.label or "cet état"), 0.6, 0.9, 0.5)
+end
+
+function OS2.DB.IsEtatActiveOnPlayer(systemKey, etatKey)
+    return activeEtatsIndex[LiveKey(systemKey, etatKey)] ~= nil
+end
+
+OS2.DB.OnHydrationLiveValueChanged(function(systemKey)
+    OS2.DB.EvaluateHydrationSystem(systemKey)
+end)
+
+EnsureCommRegistered()
