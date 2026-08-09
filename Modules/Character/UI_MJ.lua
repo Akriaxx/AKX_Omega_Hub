@@ -12,12 +12,14 @@ local COL_MP  = { fg = UI.colors.statMana.fg,  dim = UI.colors.statMana.bg  }
 local COL_END = { fg = UI.colors.statEnd.fg,   dim = UI.colors.statEnd.bg   }
 
 local rows = {}
-local selectedPlayers = {}
+local pnjRows = {}  -- défini ici (pas plus bas) : SendImpact/UpdateAllSelections y accèdent avant sa section
+local selectedPlayers = {}  -- clés = nom de joueur OU id de PNJ, indifféremment
 local impactState = { stat = "hp", mode = "damage" }
 local impactPanel, impactValueEB, impactMultiCB, impactStatus
 local ApplyImpactToPlayer, SelectPlayerForImpact, UpdateAllSelections
 local UpdateScrollRange
 local ShowImpactStatus
+local RefreshTurnHighlights  -- défini plus bas (Vue MJ — PNJ), appelé dès que le tour change
 
 -- ── Barre de titre draggable ──────────────────────────────────────────────────
 
@@ -101,6 +103,30 @@ local function MiniStatRow(parent, col)
     return row
 end
 
+-- ── Surbrillance "tour en cours" (cadre cyan, partagé joueurs/PNJ) ────────────
+
+local function AddTurnBorder(frame)
+    local function Line(p1, p1x, p1y, p2, p2x, p2y, isVert)
+        local t = frame:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(unpack(UI.colors.turnHighlight))
+        t:SetPoint(p1, frame, p1, p1x, p1y)
+        t:SetPoint(p2, frame, p2, p2x, p2y)
+        if isVert then t:SetWidth(2) else t:SetHeight(2) end
+        t:Hide()
+        return t
+    end
+    return {
+        Line("TOPLEFT",     0,  0, "TOPRIGHT",    0,  0, false),
+        Line("BOTTOMLEFT",  0,  0, "BOTTOMRIGHT", 0,  0, false),
+        Line("TOPLEFT",     0,  0, "BOTTOMLEFT",  0,  0, true),
+        Line("TOPRIGHT",    0,  0, "BOTTOMRIGHT", 0,  0, true),
+    }
+end
+
+local function SetTurnBorderShown(lines, shown)
+    for _, line in ipairs(lines) do line:SetShown(shown) end
+end
+
 -- ── Ligne de joueur ───────────────────────────────────────────────────────────
 
 local ROW_H = 86
@@ -144,6 +170,9 @@ local function PlayerRow(parent, playerName)
     selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
     selectedTex:Hide()
     row.selectedTex = selectedTex
+
+    local turnBorder = AddTurnBorder(row)
+    function row:SetTurn(isCurrent) SetTurnBorderShown(turnBorder, isCurrent) end
 
     -- Séparateur bas
     local sep = row:CreateTexture(nil, "ARTWORK")
@@ -373,6 +402,140 @@ ShowImpactStatus = function(text)
 end
 impactStatus:Hide()
 
+-- ── Contrôles Initiative (en dessous du Gestionnaire de ressources) ──────────
+-- Bascule combat, "Joueur suivant" puis "Rajouter un NPC", dans cet ordre.
+-- Enfants d'impactPanel : ils apparaissent/disparaissent avec lui automatiquement.
+
+local combatToggleBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Début de combat")
+combatToggleBtn:SetPoint("TOPLEFT", impactPanel, "BOTTOMLEFT", 10, -4)
+combatToggleBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+combatToggleBtn:SetScript("OnClick", function()
+    if C.initiative.active then C:EndCombat() else C:StartCombat() end
+end)
+
+local nextTurnBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Joueur suivant")
+nextTurnBtn:SetPoint("TOPLEFT", combatToggleBtn, "BOTTOMLEFT", 0, -4)
+nextTurnBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+nextTurnBtn:SetScript("OnClick", function()
+    C:NextTurn()
+end)
+
+local addNpcBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Rajouter un NPC")
+addNpcBtn:SetPoint("TOPLEFT", nextTurnBtn, "BOTTOMLEFT", 0, -4)
+addNpcBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+
+-- Popup d'ajout de PNJ (nom, initiative, HP/MP/End.), affichée au centre de
+-- l'écran : ancrée près du bouton elle recouvrait le reste du panneau MJ.
+-- Une fois validée, le PNJ apparaît dans la Vue MJ — PNJ.
+local npcPopup = CreateFrame("Frame", nil, impactPanel)
+npcPopup:SetSize(220, 172)
+npcPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+npcPopup:SetFrameStrata("DIALOG")
+npcPopup:SetMovable(true)
+npcPopup:SetClampedToScreen(true)
+npcPopup:EnableMouse(true)
+npcPopup:Hide()
+
+local npcPopupBg = npcPopup:CreateTexture(nil, "BACKGROUND")
+npcPopupBg:SetAllPoints()
+UI.ApplyWindowBackground(npcPopupBg, 0.95)
+UI.ApplyBorder(npcPopup)
+
+local npcPopupTitleBar = MakeTitleBar(npcPopup, "Rajouter un NPC")
+npcPopupTitleBar:SetFrameLevel(npcPopup:GetFrameLevel() + 1)
+
+local npcNameLbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+npcNameLbl:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -32)
+npcNameLbl:SetText("Nom")
+UI.ApplyLabel(npcNameLbl)
+
+local npcNameEB = UI.CreateStyledEditBox(npcPopup, 200, 22)
+npcNameEB:SetPoint("TOPLEFT", npcNameLbl, "BOTTOMLEFT", 0, -4)
+npcNameEB:SetMaxLetters(32)
+
+-- Rangée compacte : Initiative / HP / MP / End., 4 petits champs numériques.
+local NPC_FIELD_W, NPC_FIELD_GAP = 44, 6
+local npcStatFields = {}
+
+local npcFieldsLbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+npcFieldsLbl:SetPoint("TOPLEFT", npcNameEB, "BOTTOMLEFT", 0, -10)
+npcFieldsLbl:SetText("Init.")
+UI.ApplyLabel(npcFieldsLbl)
+
+local function NpcFieldLabel(text, x)
+    local lbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", npcFieldsLbl, "TOPLEFT", x, 0)
+    lbl:SetWidth(NPC_FIELD_W)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetText(text)
+    UI.ApplyLabel(lbl)
+    return lbl
+end
+NpcFieldLabel("HP",   NPC_FIELD_W + NPC_FIELD_GAP)
+NpcFieldLabel("MP",   (NPC_FIELD_W + NPC_FIELD_GAP) * 2)
+NpcFieldLabel("End.", (NPC_FIELD_W + NPC_FIELD_GAP) * 3)
+
+for i = 1, 4 do
+    local eb = UI.CreateStyledEditBox(npcPopup, NPC_FIELD_W, 22)
+    eb:SetNumeric(true)
+    eb:SetMaxLetters(4)
+    eb:SetPoint("TOPLEFT", npcFieldsLbl, "BOTTOMLEFT", (i - 1) * (NPC_FIELD_W + NPC_FIELD_GAP), -4)
+    npcStatFields[i] = eb
+end
+local npcInitEB, npcHpEB, npcMpEB, npcEndEB = npcStatFields[1], npcStatFields[2], npcStatFields[3], npcStatFields[4]
+
+local npcAddConfirmBtn = UI.CreatePanelButton(npcPopup, 200, 20, "Ajouter")
+npcAddConfirmBtn:SetPoint("TOPLEFT", npcFieldsLbl, "BOTTOMLEFT", 0, -40)
+
+local function CloseNpcPopup()
+    npcPopup:Hide()
+    for _, eb in ipairs(npcStatFields) do eb:SetText("") end
+    npcNameEB:SetText("")
+end
+
+local npcPopupCloseBtn = UI.CreateCloseButton(npcPopup, function() CloseNpcPopup() end)
+npcPopupCloseBtn:ClearAllPoints()
+npcPopupCloseBtn:SetPoint("TOPRIGHT", npcPopup, "TOPRIGHT", -3, -3)
+npcPopupCloseBtn:SetSize(18, 16)
+npcPopupCloseBtn:SetFrameLevel(npcPopup:GetFrameLevel() + 50)
+
+npcAddConfirmBtn:SetScript("OnClick", function()
+    local name = npcNameEB:GetText()
+    local init = npcInitEB:GetText()
+    if name and name:match("%S") and init and init ~= "" then
+        C:AddNPC(name, init, npcHpEB:GetText(), npcMpEB:GetText(), npcEndEB:GetText())
+        CloseNpcPopup()
+        if ShowImpactStatus then ShowImpactStatus("PNJ ajouté") end
+    end
+end)
+
+addNpcBtn:SetScript("OnClick", function()
+    if not C.initiative.active then
+        if ShowImpactStatus then ShowImpactStatus("Combat non démarré") end
+        return
+    end
+    if npcPopup:IsShown() then CloseNpcPopup() else npcPopup:Show() end
+end)
+
+local function RefreshCombatControls()
+    local active = C.initiative.active
+    local hasParticipants = #C.initiative.participants > 0
+
+    combatToggleBtn:SetText(active and "Fin de combat" or "Début de combat")
+    nextTurnBtn:SetEnabled(active and hasParticipants)
+    nextTurnBtn:SetAlpha((active and hasParticipants) and 1 or 0.45)
+    addNpcBtn:SetAlpha(active and 1 or 0.45)
+    if not active then npcPopup:Hide() end
+end
+
+local prevInitMJ = C.OnInitiativeChanged
+C.OnInitiativeChanged = function()
+    if prevInitMJ then prevInitMJ() end
+    RefreshCombatControls()
+end
+
+RefreshCombatControls()
+
 -- Bouton Actualiser (à gauche du bouton fermer)
 local refreshBtn = UI.CreatePanelButton(mjPanel, 88, 16, "Actualiser")
 refreshBtn:SetPoint("TOPRIGHT", mjPanel, "TOPRIGHT", -28, -3)
@@ -460,27 +623,49 @@ local function GetImpactAmount()
     return amount
 end
 
-local function SendImpact(playerName)
+local function FindNpcParticipant(id)
+    for _, p in ipairs(C.initiative.participants) do
+        if p.kind == "npc" and p.id == id then return p end
+    end
+end
+
+-- targetId est soit un nom de joueur, soit un id de PNJ ("npc1", ...) —
+-- même Valeur/Ressource/Action/Multicible/Appliquer pour les deux.
+local function SendImpact(targetId)
     local amount = GetImpactAmount()
     if amount <= 0 then
         if ShowImpactStatus then ShowImpactStatus("Valeur ?") end
         return false
     end
 
+    if FindNpcParticipant(targetId) then
+        if not C.initiative.isHost then
+            if ShowImpactStatus then ShowImpactStatus("Vous n'êtes pas l'hôte du combat") end
+            return false
+        end
+        if impactState.mode == "buff" then
+            C:ApplyNPCTemp(targetId, impactState.stat, amount)
+        else
+            local delta = (impactState.mode == "damage") and -amount or amount
+            C:ApplyNPCDelta(targetId, impactState.stat, delta)
+        end
+        return true
+    end
+
     if impactState.mode == "buff" then
-        if playerName == UnitName("player") then
+        if targetId == UnitName("player") then
             C:AddTemp(impactState.stat, amount, true)
         elseif C.SendTempCmd then
-            C:SendTempCmd(playerName, impactState.stat, amount)
+            C:SendTempCmd(targetId, impactState.stat, amount)
         end
         return true
     end
 
     local delta = (impactState.mode == "damage") and -amount or amount
-    if playerName == UnitName("player") then
+    if targetId == UnitName("player") then
         C:Delta(impactState.stat, delta, true)
     else
-        C:SendModCmd(playerName, impactState.stat, delta)
+        C:SendModCmd(targetId, impactState.stat, delta)
     end
     return true
 end
@@ -488,6 +673,9 @@ end
 UpdateAllSelections = function()
     for name, row in pairs(rows) do
         if row.SetSelected then row:SetSelected(selectedPlayers[name]) end
+    end
+    for npcId, row in pairs(pnjRows) do
+        if row.SetSelected then row:SetSelected(selectedPlayers[npcId]) end
     end
 end
 
@@ -575,6 +763,7 @@ local function Rebuild()
 
     content:SetHeight(math.max(1, totalH))
     UpdateScrollRange()
+    if RefreshTurnHighlights then RefreshTurnHighlights() end
 end
 
 mjPanel._rebuild = Rebuild
@@ -624,3 +813,261 @@ end)
 function mjPanel:Toggle()
     if self:IsShown() then self:Hide() else self:Show() end
 end
+
+-- ── Panneau MJ — PNJ (à droite de la Vue MJ — Groupe) ────────────────────────
+-- N'apparaît que s'il y a au moins un PNJ dans le tableau d'initiative :
+-- pas la peine d'occuper l'écran avant qu'un PNJ soit créé.
+
+local function NpcRow(parent, npcId)
+    -- Button (pas juste Frame) : sélectionnable pour le Gestionnaire de
+    -- ressources, comme une ligne de joueur. Pas de SecureActionButtonTemplate
+    -- ici — un PNJ n'est pas une unité réelle, pas de ciblage à sécuriser.
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(ROW_H)
+    row.npcId = npcId
+    row:EnableMouse(true)
+    row:RegisterForClicks("AnyUp")
+
+    local bgTex = row:CreateTexture(nil, "BACKGROUND")
+    bgTex:SetAllPoints()
+    bgTex:SetColorTexture(unpack(UI.colors.rowBg))
+    row.bgTex = bgTex
+
+    local selectedTex = row:CreateTexture(nil, "BORDER")
+    selectedTex:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+    selectedTex:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
+    selectedTex:Hide()
+    row.selectedTex = selectedTex
+
+    local sep = row:CreateTexture(nil, "ARTWORK")
+    sep:SetPoint("BOTTOMLEFT"); sep:SetPoint("BOTTOMRIGHT")
+    sep:SetHeight(1)
+    UI.ApplySeparator(sep, true)
+
+    local turnBorder = AddTurnBorder(row)
+    function row:SetTurn(isCurrent) SetTurnBorderShown(turnBorder, isCurrent) end
+
+    function row:SetSelected(selected)
+        if selected then
+            selectedTex:Show()
+            bgTex:SetColorTexture(unpack(UI.colors.rowBgSelected))
+        else
+            selectedTex:Hide()
+            bgTex:SetColorTexture(unpack(UI.colors.rowBg))
+        end
+    end
+
+    row:SetScript("PostClick", function()
+        if SelectPlayerForImpact then SelectPlayerForImpact(row.npcId) end
+    end)
+
+    local nameTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    UI.ApplyBodyText(nameTxt)
+    nameTxt:SetPoint("TOPLEFT", PAD, -4)
+    nameTxt:SetPoint("RIGHT", row, "RIGHT", -20, 0)
+    nameTxt:SetWordWrap(false)
+
+    local function StatLabel(txt, col, yOff)
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetTextColor(col.fg[1], col.fg[2], col.fg[3], 1)
+        lbl:SetText(txt); lbl:SetWidth(28); lbl:SetJustifyH("LEFT")
+        lbl:SetPoint("TOPLEFT", PAD, yOff)
+        return lbl
+    end
+    local lHP = StatLabel("HP",   COL_HP,  -20)
+    local lMP = StatLabel("MP",   COL_MP,  -38)
+    local lEN = StatLabel("End.", COL_END, -56)
+
+    local barHP = MiniStatRow(row, COL_HP)
+    local barMP = MiniStatRow(row, COL_MP)
+    local barEN = MiniStatRow(row, COL_END)
+    local function SetBarLayout(bar, lbl, yOff)
+        bar:SetPoint("LEFT",  lbl, "RIGHT", 2, 0)
+        bar:SetPoint("RIGHT", row, "RIGHT", -PAD, 0)
+        bar:SetPoint("TOP",   row, "TOP",    0, yOff)
+    end
+    SetBarLayout(barHP, lHP, -17)
+    SetBarLayout(barMP, lMP, -35)
+    SetBarLayout(barEN, lEN, -53)
+
+    -- Suppression à la volée (ex : le PNJ meurt) — seul l'hôte du combat
+    -- peut effectivement retirer un PNJ (C:RemoveNPC est gardé côté Core).
+    local deleteBtn = UI.CreateCloseButton(row, nil)
+    deleteBtn:ClearAllPoints()
+    deleteBtn:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -2)
+    deleteBtn:SetSize(14, 14)
+    deleteBtn:SetScript("OnClick", function()
+        if row.npcId then C:RemoveNPC(row.npcId) end
+    end)
+
+    function row:Refresh(p)
+        row.npcId = p.id
+        nameTxt:SetText(p.name or "?")
+        local hp = p.hp or {}
+        local mp = p.mana or {}
+        local en = p.endurance or {}
+        barHP:Set(hp.cur or 0, hp.max or 0, hp.temp or 0)
+        barMP:Set(mp.cur or 0, mp.max or 0, mp.temp or 0)
+        barEN:Set(en.cur or 0, en.max or 0, en.temp or 0)
+        deleteBtn:SetShown(C.initiative.isHost)
+        row:SetSelected(selectedPlayers[p.id])
+    end
+
+    return row
+end
+
+local pnjPanel = CreateFrame("Frame", "CharacterMJPnjPanel", UIParent)
+pnjPanel:SetSize(MJ_W, MJ_H)
+pnjPanel:SetPoint("TOPLEFT", mjPanel, "TOPRIGHT", 2, 0)
+pnjPanel:SetMovable(true)
+pnjPanel:SetClampedToScreen(true)
+pnjPanel:EnableMouse(true)
+pnjPanel:SetFrameStrata("MEDIUM")
+pnjPanel:Hide()
+
+local pnjBg = pnjPanel:CreateTexture(nil, "BACKGROUND")
+pnjBg:SetAllPoints()
+UI.ApplyWindowBackground(pnjBg)
+pnjPanel.bg = pnjBg
+
+local pnjTitleBar = MakeTitleBar(pnjPanel, "Vue MJ — PNJ")
+pnjTitleBar:SetFrameLevel(pnjPanel:GetFrameLevel() + 1)
+
+local pnjManuallyClosed = false
+local pnjCloseBtn = UI.CreateCloseButton(pnjPanel, function()
+    pnjManuallyClosed = true
+    pnjPanel:Hide()
+end)
+pnjCloseBtn:ClearAllPoints()
+pnjCloseBtn:SetPoint("TOPRIGHT", pnjPanel, "TOPRIGHT", -3, -3)
+pnjCloseBtn:SetSize(18, 16)
+pnjCloseBtn:SetFrameLevel(pnjPanel:GetFrameLevel() + 50)
+
+local pnjTitleSep = pnjPanel:CreateTexture(nil, "ARTWORK")
+pnjTitleSep:SetPoint("TOPLEFT",  pnjPanel, "TOPLEFT",   8, -21)
+pnjTitleSep:SetPoint("TOPRIGHT", pnjPanel, "TOPRIGHT",  -8, -21)
+pnjTitleSep:SetHeight(1)
+UI.ApplySeparator(pnjTitleSep, true)
+
+local pnjScrollFrame = CreateFrame("ScrollFrame", nil, pnjPanel)
+pnjScrollFrame:SetPoint("TOPLEFT",     pnjPanel, "TOPLEFT",     2,  -24)
+pnjScrollFrame:SetPoint("BOTTOMRIGHT", pnjPanel, "BOTTOMRIGHT", -18,  4)
+pnjScrollFrame:EnableMouseWheel(true)
+
+local pnjContent = CreateFrame("Frame", nil, pnjScrollFrame)
+pnjContent:SetWidth(pnjScrollFrame:GetWidth())
+pnjContent:SetHeight(1)
+pnjScrollFrame:SetScrollChild(pnjContent)
+
+local pnjScrollSlider = CreateFrame("Slider", nil, pnjPanel)
+pnjScrollSlider:SetOrientation("VERTICAL")
+pnjScrollSlider:SetPoint("TOPRIGHT", pnjPanel, "TOPRIGHT", -7, -30)
+pnjScrollSlider:SetPoint("BOTTOMRIGHT", pnjPanel, "BOTTOMRIGHT", -7, 10)
+pnjScrollSlider:SetWidth(8)
+pnjScrollSlider:SetMinMaxValues(0, 0)
+pnjScrollSlider:SetValueStep(1)
+pnjScrollSlider:SetValue(0)
+
+local pnjTrack = pnjScrollSlider:CreateTexture(nil, "BACKGROUND")
+pnjTrack:SetPoint("TOP", pnjScrollSlider, "TOP", 0, 0)
+pnjTrack:SetPoint("BOTTOM", pnjScrollSlider, "BOTTOM", 0, 0)
+pnjTrack:SetWidth(4)
+pnjTrack:SetColorTexture(0.10, 0.10, 0.10, 0.82)
+
+local pnjThumb = pnjScrollSlider:CreateTexture(nil, "ARTWORK")
+pnjThumb:SetSize(10, 28)
+pnjThumb:SetColorTexture(0.46, 0.42, 0.32, 0.95)
+pnjScrollSlider:SetThumbTexture(pnjThumb)
+pnjScrollSlider:Hide()
+
+local function UpdatePnjScrollRange()
+    local viewportH = math.max(1, pnjScrollFrame:GetHeight())
+    local contentH = math.max(1, pnjContent:GetHeight())
+    local maxScroll = math.max(0, contentH - viewportH)
+    pnjScrollSlider:SetMinMaxValues(0, maxScroll)
+    pnjScrollSlider:SetValueStep(20)
+
+    if maxScroll <= 0 then
+        pnjScrollFrame:SetVerticalScroll(0)
+        pnjScrollSlider:SetValue(0)
+        pnjScrollSlider:Hide()
+    else
+        pnjScrollSlider:Show()
+        if pnjScrollSlider:GetValue() > maxScroll then pnjScrollSlider:SetValue(maxScroll) end
+    end
+end
+
+pnjScrollSlider:SetScript("OnValueChanged", function(_, value)
+    pnjScrollFrame:SetVerticalScroll(value or 0)
+end)
+
+pnjScrollFrame:SetScript("OnMouseWheel", function(_, delta)
+    local _, maxScroll = pnjScrollSlider:GetMinMaxValues()
+    if maxScroll <= 0 then return end
+    local nextValue = pnjScrollSlider:GetValue() - (delta * 34)
+    pnjScrollSlider:SetValue(math.max(0, math.min(maxScroll, nextValue)))
+end)
+
+local lastNpcCount = 0
+
+local function RebuildPnj()
+    local npcs = {}
+    for _, p in ipairs(C.initiative.participants) do
+        if p.kind == "npc" then table.insert(npcs, p) end
+    end
+
+    -- Réapparaît automatiquement dès qu'un nouveau lot de PNJ démarre
+    -- (0 → au moins 1), même si le MJ avait fermé le panneau juste avant.
+    if lastNpcCount == 0 and #npcs > 0 then
+        pnjManuallyClosed = false
+    end
+    lastNpcCount = #npcs
+
+    pnjContent:SetWidth(math.max(1, pnjScrollFrame:GetWidth()))
+    for _, row in pairs(pnjRows) do row:Hide() end
+
+    local totalH = 0
+    for _, p in ipairs(npcs) do
+        if not pnjRows[p.id] then
+            pnjRows[p.id] = NpcRow(pnjContent, p.id)
+        end
+        local row = pnjRows[p.id]
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT",  pnjContent, "TOPLEFT",  0, -totalH)
+        row:SetPoint("TOPRIGHT", pnjContent, "TOPRIGHT", 0, -totalH)
+        row:Show()
+        row:Refresh(p)
+        totalH = totalH + ROW_H + 2
+    end
+
+    pnjContent:SetHeight(math.max(1, totalH))
+    UpdatePnjScrollRange()
+
+    if #npcs > 0 and mjPanel:IsShown() and not pnjManuallyClosed then
+        pnjPanel:Show()
+    else
+        pnjPanel:Hide()
+    end
+end
+
+RefreshTurnHighlights = function()
+    local cur = C.initiative.active and C.initiative.participants[C.initiative.currentIndex]
+    for name, row in pairs(rows) do
+        if row.SetTurn then row:SetTurn(cur and cur.kind == "player" and cur.id == name) end
+    end
+    for npcId, row in pairs(pnjRows) do
+        if row.SetTurn then row:SetTurn(cur and cur.kind == "npc" and cur.id == npcId) end
+    end
+end
+
+local prevInitPnj = C.OnInitiativeChanged
+C.OnInitiativeChanged = function()
+    if prevInitPnj then prevInitPnj() end
+    RebuildPnj()
+    RefreshTurnHighlights()
+end
+
+-- Ajoutés en plus des OnShow/OnHide déjà posés sur mjPanel plus haut.
+mjPanel:HookScript("OnShow", function() RebuildPnj() end)
+mjPanel:HookScript("OnHide", function() pnjPanel:Hide() end)

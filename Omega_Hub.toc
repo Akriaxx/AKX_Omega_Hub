@@ -4,7 +4,7 @@
 ## Author: Lorkk
 ## Version: 1.0.0
 ## OptionalDeps: SpellCreator
-## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB
+## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB
 ## SavedVariablesPerCharacter: OS2DB
 
 ## -- Hub --
@@ -84,8 +84,20 @@ Modules\Character\Core.lua
 Modules\Character\UI_Player.lua
 Modules\Character\UI_MJ.lua
 Modules\Character\UI_Group.lua
+Modules\Character\UI_Initiative.lua
 Modules\Character\Launcher.lua
 Modules\Character\Settings.lua
+
+## -- Tech --
+Modules\Tech\StoreData.lua
+Modules\Tech\Core.lua
+Modules\Tech\UI_Main.lua
+Modules\Tech\UI_Notes.lua
+Modules\Tech\UI_Inventory.lua
+Modules\Tech\UI_Store.lua
+Modules\Tech\UI_Comm.lua
+Modules\Tech\UI_Settings.lua
+Modules\Tech\Launcher.lua
 
 ## -- Omega Weather (désactivé — usage privé) --
 ## Modules\Weather\Omega_Weather.lua

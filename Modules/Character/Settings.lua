@@ -6,15 +6,16 @@
 local C  = Character
 local UI = OS2.UI
 
-local PANEL_W, PANEL_H = 240, 302
+local PANEL_W, PANEL_H = 240, 346
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
-    windowOpacity = 0.65,
-    launcherSize  = 44,
-    playerScale   = 1.00,
-    mjScale       = 1.00,
-    groupScale    = 1.00,
+    windowOpacity    = 0.65,
+    launcherSize     = 44,
+    playerScale      = 1.00,
+    mjScale          = 1.00,
+    groupScale       = 1.00,
+    initiativeScale  = 1.00,
 }
 
 local function Clamp(value, minValue, maxValue)
@@ -26,11 +27,12 @@ function C:GetSettings()
     CharacterDB = CharacterDB or {}
     CharacterDB.settings = CharacterDB.settings or {}
     local s = CharacterDB.settings
-    if s.windowOpacity == nil then s.windowOpacity = DEFAULTS.windowOpacity end
-    if s.launcherSize  == nil then s.launcherSize  = DEFAULTS.launcherSize  end
-    if s.playerScale   == nil then s.playerScale   = DEFAULTS.playerScale   end
-    if s.mjScale       == nil then s.mjScale       = DEFAULTS.mjScale       end
-    if s.groupScale    == nil then s.groupScale    = DEFAULTS.groupScale    end
+    if s.windowOpacity   == nil then s.windowOpacity   = DEFAULTS.windowOpacity   end
+    if s.launcherSize    == nil then s.launcherSize    = DEFAULTS.launcherSize    end
+    if s.playerScale     == nil then s.playerScale     = DEFAULTS.playerScale     end
+    if s.mjScale         == nil then s.mjScale         = DEFAULTS.mjScale         end
+    if s.groupScale      == nil then s.groupScale      = DEFAULTS.groupScale      end
+    if s.initiativeScale == nil then s.initiativeScale = DEFAULTS.initiativeScale end
     return s
 end
 
@@ -38,8 +40,8 @@ function C:SetWindowOpacity(value)
     local s = C:GetSettings()
     s.windowOpacity = Clamp(value, 0.05, 1.00)
     for _, frame in ipairs({
-        CharacterPlayerPanel, CharacterMJPanel,
-        CharacterMJImpactPanel, CharacterGroupViewPanel,
+        CharacterPlayerPanel, CharacterMJPanel, CharacterMJImpactPanel, CharacterMJPnjPanel,
+        CharacterGroupViewPanel, CharacterInitiativeBanner,
     }) do
         if frame and frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
     end
@@ -58,6 +60,7 @@ function C:SetMJScale(value)
     s.mjScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
     if CharacterMJPanel       then CharacterMJPanel:SetScale(s.mjScale)       end
     if CharacterMJImpactPanel then CharacterMJImpactPanel:SetScale(s.mjScale) end
+    if CharacterMJPnjPanel    then CharacterMJPnjPanel:SetScale(s.mjScale)    end
 end
 
 function C:SetGroupScale(value)
@@ -67,12 +70,20 @@ function C:SetGroupScale(value)
     if CharacterGroupViewPanel then CharacterGroupViewPanel:SetScale(s.groupScale) end
 end
 
+function C:SetInitiativeScale(value)
+    local s = C:GetSettings()
+    local steps = math.floor(((Clamp(value, WINDOW_SCALE_MIN, WINDOW_SCALE_MAX) - WINDOW_SCALE_MIN) / WINDOW_SCALE_STEP) + 0.5)
+    s.initiativeScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
+    if CharacterInitiativeBanner then CharacterInitiativeBanner:SetScale(s.initiativeScale) end
+end
+
 function C:ApplyDisplaySettings()
     local s = C:GetSettings()
     C:SetWindowOpacity(s.windowOpacity)
     C:SetPlayerScale(s.playerScale)
     C:SetMJScale(s.mjScale)
     C:SetGroupScale(s.groupScale)
+    C:SetInitiativeScale(s.initiativeScale)
     if C.SetLauncherSize then C:SetLauncherSize(s.launcherSize, false) end
 end
 
@@ -238,6 +249,12 @@ local refreshGroup = MakeScaleControl(
     function(v) C:SetGroupScale(v) end
 )
 
+local refreshInitiative = MakeScaleControl(
+    "Taille — Bandeau Initiative", -290,
+    function() return C:GetSettings().initiativeScale end,
+    function(v) C:SetInitiativeScale(v) end
+)
+
 -- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
 local function SyncControls()
@@ -247,6 +264,7 @@ local function SyncControls()
     refreshPlayer()
     refreshMJ()
     refreshGroup()
+    refreshInitiative()
 end
 
 panel:SetScript("OnShow", SyncControls)

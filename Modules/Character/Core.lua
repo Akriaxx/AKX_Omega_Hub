@@ -314,6 +314,224 @@ function C:SendTempCmd(target, stat, amount)
     SendAddon("T|" .. stat .. SEP .. tostring(amount), "WHISPER", target)
 end
 
+-- ── Initiative (Combat) ─────────────────────────────────────────────────────
+-- Pas de rôle MJ formel : quiconque clique "Début de combat" devient l'hôte
+-- pour son client, maintient la liste triée et rediffuse l'état complet à
+-- chaque changement. Les autres clients appliquent l'état reçu tel quel.
+
+C.initiative = {
+    active       = false,
+    isHost       = false,
+    currentIndex = 1,
+    participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
+}
+
+local nextNpcSeq = 0
+
+local function SortParticipants(list)
+    table.sort(list, function(a, b)
+        if a.initiative ~= b.initiative then return a.initiative > b.initiative end
+        return (a.name or "") < (b.name or "")
+    end)
+end
+
+-- Les PNJ portent un bloc HP/Mana/Endurance (comme une fiche perso, en plus
+-- léger) pour s'afficher dans la Vue MJ — PNJ. Inutilisé pour les joueurs
+-- (leurs vraies stats viennent de C.groupData / GetMyChar), mais toujours
+-- empaqueté pour garder un format à largeur fixe, simple à parser.
+local function PackInitiative()
+    local st = C.initiative
+    local parts = { st.active and 1 or 0, st.currentIndex, #st.participants }
+    for _, p in ipairs(st.participants) do
+        local hp   = p.hp or {}
+        local mana = p.mana or {}
+        local endu = p.endurance or {}
+        table.insert(parts, p.kind)
+        table.insert(parts, Enc(p.id))
+        table.insert(parts, Enc(p.name))
+        table.insert(parts, p.initiative)
+        table.insert(parts, Enc(p.creator))
+        table.insert(parts, math.floor(hp.cur or 0))
+        table.insert(parts, math.floor(hp.max or 0))
+        table.insert(parts, math.floor(hp.temp or 0))
+        table.insert(parts, math.floor(mana.cur or 0))
+        table.insert(parts, math.floor(mana.max or 0))
+        table.insert(parts, math.floor(mana.temp or 0))
+        table.insert(parts, math.floor(endu.cur or 0))
+        table.insert(parts, math.floor(endu.max or 0))
+        table.insert(parts, math.floor(endu.temp or 0))
+    end
+    return table.concat(parts, SEP)
+end
+
+local function UnpackInitiative(payload)
+    local t = { strsplit(SEP, payload) }
+    local active       = tonumber(t[1]) == 1
+    local currentIndex = tonumber(t[2]) or 1
+    local n             = tonumber(t[3]) or 0
+    local participants = {}
+    local idx = 4
+    for i = 1, n do
+        participants[i] = {
+            kind       = t[idx],
+            id         = t[idx + 1],
+            name       = t[idx + 2],
+            initiative = tonumber(t[idx + 3]) or 0,
+            creator    = t[idx + 4],
+            hp         = { cur = tonumber(t[idx + 5]) or 0, max = tonumber(t[idx + 6]) or 0, temp = tonumber(t[idx + 7]) or 0 },
+            mana       = { cur = tonumber(t[idx + 8]) or 0, max = tonumber(t[idx + 9]) or 0, temp = tonumber(t[idx + 10]) or 0 },
+            endurance  = { cur = tonumber(t[idx + 11]) or 0, max = tonumber(t[idx + 12]) or 0, temp = tonumber(t[idx + 13]) or 0 },
+        }
+        idx = idx + 14
+    end
+    C.initiative.active       = active
+    C.initiative.currentIndex = currentIndex
+    C.initiative.participants = participants
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+local function FindNPC(id)
+    for _, p in ipairs(C.initiative.participants) do
+        if p.kind == "npc" and p.id == id then return p end
+    end
+end
+
+local function BroadcastInitiative()
+    local ct = GroupChat(); if not ct then return end
+    SendAddon("IC|" .. PackInitiative(), ct)
+end
+
+function C:StartCombat()
+    C.initiative.isHost       = true
+    C.initiative.active       = true
+    C.initiative.currentIndex = 1
+    C.initiative.participants = {}
+    nextNpcSeq = 0
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:EndCombat()
+    if not C.initiative.isHost then return end
+    C.initiative.active       = false
+    C.initiative.participants = {}
+    C.initiative.currentIndex = 1
+    BroadcastInitiative()
+    C.initiative.isHost = false
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:AddNPC(name, initiative, hp, mana, endurance)
+    if not C.initiative.isHost or not C.initiative.active then return end
+    name = tostring(name or ""):match("^%s*(.-)%s*$") or ""
+    if name == "" then return end
+    nextNpcSeq = nextNpcSeq + 1
+    local hpMax  = math.max(0, math.floor(tonumber(hp) or 0))
+    local mpMax  = math.max(0, math.floor(tonumber(mana) or 0))
+    local endMax = math.max(0, math.floor(tonumber(endurance) or 0))
+    table.insert(C.initiative.participants, {
+        kind       = "npc",
+        id         = "npc" .. nextNpcSeq,
+        name       = name,
+        initiative = math.floor(tonumber(initiative) or 0),
+        creator    = MyName(),
+        hp         = { cur = hpMax,  max = hpMax,  temp = 0 },
+        mana       = { cur = mpMax,  max = mpMax,  temp = 0 },
+        endurance  = { cur = endMax, max = endMax, temp = 0 },
+    })
+    SortParticipants(C.initiative.participants)
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+-- Même mécanique que C:Delta / C:AddTemp pour un joueur, mais appliquée
+-- directement au bloc de stats d'un PNJ (l'hôte est la seule autorité :
+-- pas de PNJ "réel" à qui envoyer une commande en whisper).
+function C:ApplyNPCDelta(id, stat, delta)
+    if not C.initiative.isHost then return end
+    local p = FindNPC(id); if not p then return end
+    local s = p[stat]; if not s then return end
+    delta = tonumber(delta) or 0
+    if delta < 0 and (s.temp or 0) > 0 then
+        local loss = math.abs(delta)
+        local absorbed = math.min(s.temp, loss)
+        s.temp = s.temp - absorbed
+        loss = loss - absorbed
+        if loss <= 0 then
+            BroadcastInitiative()
+            if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+            return
+        end
+        delta = -loss
+    end
+    s.cur = math.max(0, math.min((s.cur or 0) + delta, s.max or 0))
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:ApplyNPCTemp(id, stat, amount)
+    if not C.initiative.isHost then return end
+    local p = FindNPC(id); if not p then return end
+    local s = p[stat]; if not s then return end
+    amount = math.floor(tonumber(amount) or 0)
+    if amount == 0 then return end
+    s.temp = math.max(0, (s.temp or 0) + amount)
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:RemoveNPC(id)
+    if not C.initiative.isHost or not id then return end
+    for i, p in ipairs(C.initiative.participants) do
+        if p.kind == "npc" and p.id == id then
+            table.remove(C.initiative.participants, i)
+            if C.initiative.currentIndex > i then
+                C.initiative.currentIndex = C.initiative.currentIndex - 1
+            end
+            break
+        end
+    end
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:NextTurn()
+    if not C.initiative.isHost or not C.initiative.active then return end
+    if #C.initiative.participants == 0 then return end
+    C.initiative.currentIndex = (C.initiative.currentIndex % #C.initiative.participants) + 1
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:_ApplyInitiativeInput(name, value)
+    if not C.initiative.isHost or not C.initiative.active then return end
+    if not name or name == "" then return end
+    value = math.floor(tonumber(value) or 0)
+    local found
+    for _, p in ipairs(C.initiative.participants) do
+        if p.kind == "player" and p.id == name then found = p; break end
+    end
+    if found then
+        found.initiative = value
+    else
+        table.insert(C.initiative.participants, {
+            kind = "player", id = name, name = name, initiative = value, creator = name,
+        })
+    end
+    SortParticipants(C.initiative.participants)
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+function C:SubmitMyInitiative(value)
+    value = math.floor(tonumber(value) or 0)
+    local ct = GroupChat()
+    if ct then SendAddon("II|" .. tostring(value), ct) end
+    if C.initiative.isHost then
+        C:_ApplyInitiativeInput(MyName(), value)
+    end
+end
+
 -- ── Réception ─────────────────────────────────────────────────────────────────
 
 local function HandlePayload(payload, sender)
@@ -330,8 +548,23 @@ local function HandlePayload(payload, sender)
         return true
     end
 
+    local icBody = payload:match("^IC%|(.*)$")
+    if icBody then
+        if name ~= MyName() then UnpackInitiative(icBody) end
+        return true
+    end
+
+    local iiBody = payload:match("^II%|(.*)$")
+    if iiBody then
+        if IsGroupMember(name) then C:_ApplyInitiativeInput(name, tonumber(iiBody) or 0) end
+        return true
+    end
+
     if payload == "R" then
-        if name ~= MyName() then C:Broadcast(true) end
+        if name ~= MyName() then
+            C:Broadcast(true)
+            if C.initiative.isHost then BroadcastInitiative() end
+        end
         return true
     end
 
@@ -405,9 +638,26 @@ eventFrame:SetScript("OnEvent", function(_, event, prefix, payload, channel, sen
     end
 end)
 
+-- ── Slash ─────────────────────────────────────────────────────────────────────
+-- Enregistrées/désenregistrées dans Enable()/Disable() : sinon /ochar et /ocharmj
+-- restent fonctionnelles même quand le module est désactivé.
+
+local function RegisterSlash()
+    SLASH_OCHAR1 = "/ochar"
+    SlashCmdList["OCHAR"] = function()
+        if CharacterPlayerPanel then CharacterPlayerPanel:Toggle() end
+    end
+
+    SLASH_OCHARMJ1 = "/ocharmj"
+    SlashCmdList["OCHARMJ"] = function()
+        if CharacterMJPanel then CharacterMJPanel:Toggle() end
+    end
+end
+
 -- ── Enable / Disable ──────────────────────────────────────────────────────────
 
 function C:Enable()
+    RegisterSlash()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
     elseif RegisterAddonMessagePrefix then
@@ -432,22 +682,26 @@ function C:Disable()
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
     for _, ev in ipairs(EVENTS) do ChatFrame_RemoveMessageEventFilter(ev, Filter) end
     C._resetLauncherOnNextEnable = true
-    if CharacterSettingsPanel then CharacterSettingsPanel:Hide() end
-    if CharacterLauncherBtn then CharacterLauncherBtn:Hide() end
+    -- Si je suis l'hôte du combat, le clore proprement referme la bannière
+    -- d'initiative chez tout le monde plutôt que de la laisser bloquée active.
+    if C.initiative.isHost then C:EndCombat() end
+    -- Referme toutes les fenêtres du module : sinon elles restent ouvertes et
+    -- pleinement fonctionnelles (HP/Mana/Endurance modifiables, broadcast envoyé)
+    -- alors que le module est censé être désactivé.
+    if CharacterSettingsPanel      then CharacterSettingsPanel:Hide()      end
+    if CharacterPlayerPanel        then CharacterPlayerPanel:Hide()        end
+    if CharacterMJPanel            then CharacterMJPanel:Hide()            end
+    if CharacterMJImpactPanel      then CharacterMJImpactPanel:Hide()      end
+    if CharacterMJPnjPanel         then CharacterMJPnjPanel:Hide()         end
+    if CharacterGroupViewPanel     then CharacterGroupViewPanel:Hide()     end
+    if CharacterInitiativeBanner   then CharacterInitiativeBanner:Hide()   end
+    if CharacterLauncherBtn        then CharacterLauncherBtn:Hide()        end
+    SLASH_OCHAR1   = nil
+    SLASH_OCHARMJ1 = nil
+    SlashCmdList["OCHAR"]   = nil
+    SlashCmdList["OCHARMJ"] = nil
     OmegaHub:SetModuleLoaded("Character", false)
     OmegaHub.Print("Character désactivé.")
-end
-
--- ── Slash ─────────────────────────────────────────────────────────────────────
-
-SLASH_OCHAR1 = "/ochar"
-SlashCmdList["OCHAR"] = function()
-    if CharacterPlayerPanel then CharacterPlayerPanel:Toggle() end
-end
-
-SLASH_OCHARMJ1 = "/ocharmj"
-SlashCmdList["OCHARMJ"] = function()
-    if CharacterMJPanel then CharacterMJPanel:Toggle() end
 end
 
 -- ── Init ─────────────────────────────────────────────────────────────────────

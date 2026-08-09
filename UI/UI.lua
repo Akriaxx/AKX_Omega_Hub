@@ -52,6 +52,8 @@ UI.colors = {
     rowSelection       = { 0.78, 0.62, 0.24, 0.18 },
     -- Barre temporaire
     tempFill           = { 0.95, 0.74, 0.20, 0.88 },
+    -- Surbrillance "tour en cours" (Character, initiative)
+    turnHighlight      = { 0.25, 0.90, 0.95, 1.00 },
     -- Stats (partagées entre tous les modules Character)
     statHP   = { fg = {0.85, 0.15, 0.15, 1}, bg = {0.20, 0.04, 0.04, 1}, label = "HP"  },
     statMana = { fg = {0.18, 0.42, 0.90, 1}, bg = {0.04, 0.11, 0.27, 1}, label = "MP"  },
