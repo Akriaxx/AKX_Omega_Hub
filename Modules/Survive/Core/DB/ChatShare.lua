@@ -791,6 +791,104 @@ function OS2.DB.CreateChatShare(deps)
         return didReplace, result, shouldHide
     end
 
+    local function SendFragmentSequence(editBox, messages)
+        local chatType = (editBox.GetAttribute and editBox:GetAttribute("chatType")) or editBox.chatType
+        local language = (editBox.GetAttribute and editBox:GetAttribute("languageID")) or editBox.languageID
+        local target = (editBox.GetAttribute and editBox:GetAttribute("tellTarget")) or editBox.tellTarget
+
+        if not target then
+            target = (editBox.GetAttribute and editBox:GetAttribute("channelTarget")) or editBox.channelTarget
+        end
+        if not target then
+            target = (editBox.GetAttribute and editBox:GetAttribute("channelNumber")) or editBox.channelNumber
+        end
+
+        if chatType == "CHANNEL" then
+            target = tonumber(target) or target
+        end
+
+        for _, line in ipairs(messages) do
+            if line and line ~= "" then
+                SendChatMessage(line, chatType, language, target)
+            end
+        end
+    end
+
+    local function TrySendFragmentedShare(editBox)
+        local text = tostring((editBox.GetText and editBox:GetText()) or "")
+        if text == "" then
+            return false
+        end
+
+        local contPattern = SHARE_CONT_TOKEN_PREFIX:gsub("(%p)", "%%%1") .. "[^}]*" .. SHARE_TOKEN_SUFFIX:gsub("(%p)", "%%%1")
+        if not text:find(contPattern) then
+            return false
+        end
+
+        local firstMessage = text:gsub(contPattern, "")
+        local messages = {}
+
+        if firstMessage:find("%S") then
+            messages[#messages + 1] = firstMessage
+        end
+
+        for token in text:gmatch(contPattern) do
+            messages[#messages + 1] = token
+        end
+
+        if #messages <= 1 then
+            return false
+        end
+
+        SendFragmentSequence(editBox, messages)
+
+        if ChatEdit_AddHistory then
+            ChatEdit_AddHistory(editBox)
+        end
+        editBox:SetText("")
+        if ChatEdit_DeactivateChat then
+            ChatEdit_DeactivateChat(editBox)
+        elseif editBox.Hide then
+            editBox:Hide()
+        end
+
+        return true
+    end
+
+    -- Installs a ONE-SHOT override of OnEnterPressed on the given edit box,
+    -- right after we've inserted a share token into it. This intercepts the
+    -- very next Enter press to either send the fragmented chunks ourselves
+    -- or fall back to the real Blizzard handler for a single-chunk share.
+    --
+    -- Crucially, the override is removed again before doing anything else
+    -- (including before falling back to the original handler), so it never
+    -- lingers on the edit box. Calling Blizzard's own OnEnterPressed from
+    -- addon code taints that one call — that's an acceptable, contained cost
+    -- for the deliberate "send what I just shared" action, but leaving the
+    -- override permanently installed (as before) meant EVERY chat command
+    -- typed afterwards — including plain /target — was routed through addon
+    -- code first and got blocked as "an action only available to the Blizzard
+    -- UI". Restoring the pristine handler immediately keeps that blast radius
+    -- to just this one send.
+    local function InstallOneShotEnterHook(editBox)
+        if editBox.OS2SharePending then return end
+        local originalHandler = editBox:GetScript("OnEnterPressed")
+
+        editBox.OS2SharePending = true
+        editBox:SetScript("OnEnterPressed", function(self, ...)
+            self.OS2SharePending = nil
+            self:SetScript("OnEnterPressed", originalHandler)
+
+            if TrySendFragmentedShare(self) then
+                return
+            end
+
+            if originalHandler then
+                return originalHandler(self, ...)
+            end
+        end)
+    end
+
     local function InsertLinkToChat(item, itemType)
         local payload = BuildSharePayload(item, itemType)
         if not payload then
@@ -824,10 +922,10 @@ function OS2.DB.CreateChatShare(deps)
         local token = table.concat(tokens)
         eb:Insert(token)
         eb:SetFocus()
+        InstallOneShotEnterHook(eb)
     end
 
     local itemRefHookInstalled = false
-    local chatEditHookInstalled = false
 
     local function InstallHooks(showItemInfo)
         local function HandleSharedItemLink(link)
@@ -895,70 +993,6 @@ function OS2.DB.CreateChatShare(deps)
             return false, message, ...
         end
 
-        local function SendFragmentSequence(editBox, messages)
-            local chatType = (editBox.GetAttribute and editBox:GetAttribute("chatType")) or editBox.chatType
-            local language = (editBox.GetAttribute and editBox:GetAttribute("languageID")) or editBox.languageID
-            local target = (editBox.GetAttribute and editBox:GetAttribute("tellTarget")) or editBox.tellTarget
-
-            if not target then
-                target = (editBox.GetAttribute and editBox:GetAttribute("channelTarget")) or editBox.channelTarget
-            end
-            if not target then
-                target = (editBox.GetAttribute and editBox:GetAttribute("channelNumber")) or editBox.channelNumber
-            end
-
-            if chatType == "CHANNEL" then
-                target = tonumber(target) or target
-            end
-
-            for _, line in ipairs(messages) do
-                if line and line ~= "" then
-                    SendChatMessage(line, chatType, language, target)
-                end
-            end
-        end
-
-        local function TrySendFragmentedShare(editBox)
-            local text = tostring((editBox.GetText and editBox:GetText()) or "")
-            if text == "" then
-                return false
-            end
-
-            local contPattern = SHARE_CONT_TOKEN_PREFIX:gsub("(%p)", "%%%1") .. "[^}]*" .. SHARE_TOKEN_SUFFIX:gsub("(%p)", "%%%1")
-            if not text:find(contPattern) then
-                return false
-            end
-
-            local firstMessage = text:gsub(contPattern, "")
-            local messages = {}
-
-            if firstMessage:find("%S") then
-                messages[#messages + 1] = firstMessage
-            end
-
-            for token in text:gmatch(contPattern) do
-                messages[#messages + 1] = token
-            end
-
-            if #messages <= 1 then
-                return false
-            end
-
-            SendFragmentSequence(editBox, messages)
-
-            if ChatEdit_AddHistory then
-                ChatEdit_AddHistory(editBox)
-            end
-            editBox:SetText("")
-            if ChatEdit_DeactivateChat then
-                ChatEdit_DeactivateChat(editBox)
-            elseif editBox.Hide then
-                editBox:Hide()
-            end
-
-            return true
-        end
-
         for _, eventName in ipairs(CHAT_SHARE_EVENTS) do
             ChatFrame_AddMessageEventFilter(eventName, ShareTokenFilter)
         end
@@ -971,25 +1005,10 @@ function OS2.DB.CreateChatShare(deps)
             InstallItemRefHook(true)
         end)
 
-        if not chatEditHookInstalled then
-            for i = 1, 10 do
-                local editBox = _G["ChatFrame" .. i .. "EditBox"]
-                if editBox and not editBox.OS2ShareHooked then
-                    local previousHandler = editBox:GetScript("OnEnterPressed")
-                    editBox:SetScript("OnEnterPressed", function(self, ...)
-                        if TrySendFragmentedShare(self) then
-                            return
-                        end
-
-                        if previousHandler then
-                            return previousHandler(self, ...)
-                        end
-                    end)
-                    editBox.OS2ShareHooked = true
-                end
-            end
-            chatEditHookInstalled = true
-        end
+        -- Note: OnEnterPressed is deliberately NOT hooked here for all chat
+        -- edit boxes up front. See InstallOneShotEnterHook — it's installed
+        -- lazily, only on the box that just received a share token, and only
+        -- for the very next Enter press.
     end
 
     return {
