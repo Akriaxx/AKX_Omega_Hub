@@ -65,45 +65,11 @@ local function ParsePerDieModifiers(modifiersText, numRolls)
     return perDie
 end
 
-function OmegaDice.RollDice(command)
-    local dicePattern = "(%d+)(x?)d(%d+)([%+%-%d%s!]*)%s*(.*)"
-    local numRolls, separateFlag, dieSides, modifiers, description = string.match(command or "", dicePattern)
-
-    local separate = (separateFlag == "x")
-
-    numRolls = tonumber(numRolls) or DEFAULT_ROLLS
-    dieSides = tonumber(dieSides) or DEFAULT_SIDES
-    description = OmegaDice.Trim(description)
-
-    if numRolls < 1 or dieSides < 1 then
-        OmegaDice.PrintError("Commande invalide. Le nombre de des et leurs faces doivent etre superieurs a 0.")
-        return
-    end
-
-    if not separate and modifiers:find("!", 1, true) then
-        OmegaDice.PrintError("Le caractere '!' n'est utilisable qu'avec le mode separe : /rd NxdM[+X][!+X...]")
-        return
-    end
-
-    local perDieMods
-    if separate then
-        local perDie, err = ParsePerDieModifiers(modifiers, numRolls)
-        if not perDie then
-            OmegaDice.PrintError(err)
-            return
-        end
-        perDieMods = perDie
-    end
-
-    local rolls   = {}
-    local rollSum = 0
-    for i = 1, numRolls do
-        rolls[i] = math.random(1, dieSides)
-        rollSum  = rollSum + rolls[i]
-    end
-
+-- Construit le message de resultat pour un jeu de valeurs deja tirees (vrai
+-- hasard ou valeurs truquees via /rdfdp) et l'envoie, avec animation le cas
+-- echeant. Partage par OmegaDice.RollDice et OmegaDice.ExecuteForcedRoll.
+function OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, separate, modifier, perDieMods, description)
     local diceLabel = numRolls .. (separate and "x" or "") .. "D" .. dieSides
-    local modifier  = 0
     local resultMessage
 
     if separate then
@@ -119,7 +85,6 @@ function OmegaDice.RollDice(command)
         end
         resultMessage = string.format("[ Jets separes : %s -> %s ]", diceLabel, table.concat(valueParts, " | "))
     else
-        modifier = OmegaDice.SumModifiers(modifiers)
         local total = rollSum + modifier
         if modifier ~= 0 then
             resultMessage = string.format(
@@ -157,4 +122,68 @@ function OmegaDice.RollDice(command)
     end
 
     OmegaDice.SendResult(resultMessage)
+end
+
+function OmegaDice.RollDice(command)
+    local dicePattern = "(%d+)(x?)d(%d+)([%+%-%d%s!]*)%s*(.*)"
+    local numRolls, separateFlag, dieSides, modifiers, description = string.match(command or "", dicePattern)
+
+    local separate = (separateFlag == "x")
+
+    numRolls = tonumber(numRolls) or DEFAULT_ROLLS
+    dieSides = tonumber(dieSides) or DEFAULT_SIDES
+    description = OmegaDice.Trim(description)
+
+    if numRolls < 1 or dieSides < 1 then
+        OmegaDice.PrintError("Commande invalide. Le nombre de des et leurs faces doivent etre superieurs a 0.")
+        return
+    end
+
+    if not separate and modifiers:find("!", 1, true) then
+        OmegaDice.PrintError("Le caractere '!' n'est utilisable qu'avec le mode separe : /rd NxdM[+X][!+X...]")
+        return
+    end
+
+    local perDieMods
+    if separate then
+        local perDie, err = ParsePerDieModifiers(modifiers, numRolls)
+        if not perDie then
+            OmegaDice.PrintError(err)
+            return
+        end
+        perDieMods = perDie
+    end
+
+    local rolls   = {}
+    local rollSum = 0
+    for i = 1, numRolls do
+        rolls[i] = math.random(1, dieSides)
+        rollSum  = rollSum + rolls[i]
+    end
+
+    local modifier = separate and 0 or OmegaDice.SumModifiers(modifiers)
+
+    OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, separate, modifier, perDieMods, description)
+end
+
+-- Jet truque (/rdfdp, local ou recu via message d'addon depuis un autre
+-- joueur) : chaque de tombe sur forcedValue au lieu d'etre tire au hasard.
+-- Le message final a la meme forme qu'un jet normal, rien ne trahit le
+-- trucage cote spectateurs du canal de raid.
+function OmegaDice.ExecuteForcedRoll(numRolls, dieSides, forcedValue, modifiersText, description)
+    numRolls    = tonumber(numRolls) or DEFAULT_ROLLS
+    dieSides    = tonumber(dieSides) or DEFAULT_SIDES
+    forcedValue = math.max(1, math.min(tonumber(forcedValue) or 1, dieSides))
+    description = OmegaDice.Trim(description)
+
+    local rolls   = {}
+    local rollSum = 0
+    for i = 1, numRolls do
+        rolls[i] = forcedValue
+        rollSum  = rollSum + forcedValue
+    end
+
+    local modifier = OmegaDice.SumModifiers(modifiersText)
+
+    OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, false, modifier, nil, description)
 end

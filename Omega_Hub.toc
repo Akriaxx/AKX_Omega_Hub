@@ -27,6 +27,8 @@ Modules\Dice\UI\ResultFrame.lua
 Modules\Dice\UI\DiceAnimation.lua
 Modules\Dice\UI\D20Animation.lua
 Modules\Dice\Modules\RollDice.lua
+Modules\Dice\Modules\ForceRoll.lua
+Modules\Dice\Modules\Network.lua
 Modules\Dice\Modules\RandomNumber.lua
 Modules\Dice\Modules\Commands.lua
 

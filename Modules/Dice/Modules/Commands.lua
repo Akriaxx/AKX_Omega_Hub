@@ -22,6 +22,12 @@ function OmegaDice.RegisterCommands()
             OmegaDice.RandomNumber("0-15")
         end
     end
+
+    SLASH_DICEROLLERFORCE1 = "/rdfdp"
+    SlashCmdList.DICEROLLERFORCE = function(message)
+        local command = OmegaDice.Trim(message)
+        OmegaDice.ForceRoll(command)
+    end
 end
 
 function OmegaDice.UnregisterCommands()
@@ -29,4 +35,6 @@ function OmegaDice.UnregisterCommands()
     SlashCmdList.DICEROLLER = nil
     SLASH_RANDOMNUMBER1 = nil
     SlashCmdList.RANDOMNUMBER = nil
+    SLASH_DICEROLLERFORCE1 = nil
+    SlashCmdList.DICEROLLERFORCE = nil
 end
