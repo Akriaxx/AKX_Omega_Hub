@@ -45,7 +45,7 @@ function OmegaDice:Enable()
     OmegaDice.RegisterCommands()
     OmegaHub:SetModuleLoaded("Omega_Dice", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("Omega Dice activé.  |cffAAAAAA/rd <NdM[±X]>   /rnd [min-max]|r")
+        OmegaHub.Print("Omega Dice activé.  |cffAAAAAA/rd <NdM[±X]>   /rd <NxdM[±X][!±X ou !D±X...]> (jets séparés, !D cible le dé D)   /rnd [min-max]|r")
     end
 end
 

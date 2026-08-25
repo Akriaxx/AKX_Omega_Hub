@@ -4,11 +4,11 @@ function OmegaDice.RegisterCommands()
     SLASH_DICEROLLER1 = "/rd"
     SlashCmdList.DICEROLLER = function(message)
         local command = OmegaDice.Trim(message)
-        if command:match("%d+d%d+") then
+        if command:match("%d+x?d%d+") then
             OmegaDice.RollDice(command)
             return
         end
-        OmegaDice.PrintError("Commande invalide. Utilisez : /rd <NdM[+|-X...]> [Texte optionnel]")
+        OmegaDice.PrintError("Commande invalide. Utilisez : /rd <NdM[+|-X...]> ou /rd <NxdM[+X][!+X ou !D+X...]> (jets separes, !D cible le de D) [Texte optionnel]")
     end
 
     SLASH_RANDOMNUMBER1 = "/rnd"

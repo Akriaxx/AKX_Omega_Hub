@@ -25,12 +25,19 @@ local function EnsureFlatSlots(frame)
     frame.detail:SetText("")
 
     frame.dieValues = {}
+    frame.modValues = {}
     for i = 1, MAX_DICE do
         local fs = frame:CreateFontString(nil, "OVERLAY")
         fs:SetFont(STANDARD_TEXT_FONT, 64, "OUTLINE")
         fs:SetTextColor(1, 0.88, 0.35)
         fs:Hide()
         frame.dieValues[i] = fs
+
+        local modFs = frame:CreateFontString(nil, "OVERLAY")
+        modFs:SetFont(STANDARD_TEXT_FONT, 24, "OUTLINE")
+        modFs:SetTextColor(0.65, 0.75, 1, 1)
+        modFs:Hide()
+        frame.modValues[i] = modFs
     end
 end
 
@@ -136,8 +143,61 @@ local function PlayFlatMultiSequence(frame, dvs, xOffsets, n, rollSum, total, mo
     end)
 end
 
+-- ─── Modifier sequence for separate (independent) dice ────────────────────────
+-- Same reveal as PlayFlatSingleSequence, run in parallel on every die that has
+-- its own non-zero modifier. Dice without one already show their final value.
+local function PlaySeparateModifierSequence(frame, dvs, xOffsets, n, rolls, perDieMods, fontSize, animId, onDone)
+    local modSz  = math.floor(fontSize * 0.62)
+    local modIdx = {}
+    for i = 1, n do
+        if perDieMods and perDieMods[i] and perDieMods[i] ~= 0 then
+            table.insert(modIdx, i)
+            frame.modValues[i]:Hide()
+        end
+    end
+
+    if #modIdx == 0 then
+        if onDone then onDone() end
+        return
+    end
+
+    C_Timer.After(SEQ_SHOW_MOD, function()
+        if OmegaDice.animId ~= animId then return end
+        local shift = modSz * 1.1
+        for _, i in ipairs(modIdx) do
+            local dv   = dvs[i]
+            local fs   = frame.modValues[i]
+            local dmod = perDieMods[i]
+            dv:ClearAllPoints(); dv:SetPoint("CENTER", frame, "CENTER", xOffsets[i]-shift, 10)
+            local sign = dmod > 0 and "+" or ""
+            fs:SetFont(STANDARD_TEXT_FONT, modSz, "OUTLINE")
+            fs:SetText(sign..tostring(dmod))
+            fs:ClearAllPoints(); fs:SetPoint("LEFT", dv, "RIGHT", 6, 0)
+            fs:SetAlpha(0); fs:Show()
+            OmegaDice.FadeAlpha(fs, 0, 1, SEQ_FADE_DUR)
+        end
+        C_Timer.After(SEQ_HOLD_MOD, function()
+            if OmegaDice.animId ~= animId then return end
+            for k, i in ipairs(modIdx) do
+                local dv      = dvs[i]
+                local fs      = frame.modValues[i]
+                local dmod    = perDieMods[i]
+                local isLast  = (k == #modIdx)
+                OmegaDice.FadeAlpha(dv, 1, 0, SEQ_FADE_DUR)
+                OmegaDice.FadeAlpha(fs, 1, 0, SEQ_FADE_DUR, function()
+                    if OmegaDice.animId ~= animId then return end
+                    fs:Hide()
+                    dv:ClearAllPoints(); dv:SetPoint("CENTER", frame, "CENTER", xOffsets[i], 10)
+                    dv:SetText(tostring(rolls[i] + dmod))
+                    OmegaDice.FadeAlpha(dv, 0, 1, SEQ_FADE_DUR, isLast and onDone or nil)
+                end)
+            end
+        end)
+    end)
+end
+
 -- ─── Main entry point ─────────────────────────────────────────────────────────
-function OmegaDice.PlayD20Animation(rolls, total, modifier, description, minPerDie, maxPerDie, diceLabel, onComplete)
+function OmegaDice.PlayD20Animation(rolls, total, modifier, separate, perDieMods, description, minPerDie, maxPerDie, diceLabel, onComplete)
     -- ── Flat animation (always — routing to wireframe is done by RollDice.lua) ──
     local n        = math.min(#rolls, MAX_DICE)
     local isSingle = (n == 1)
@@ -212,7 +272,11 @@ function OmegaDice.PlayD20Animation(rolls, total, modifier, description, minPerD
             end
 
             -- Top label : same style as wireframe
-            if modifier ~= 0 then
+            if separate then
+                local parts = {}
+                for i = 1, n do parts[i] = tostring(rolls[i]) end
+                self.topLabel:SetText("Jets : "..table.concat(parts, " | "))
+            elseif modifier ~= 0 then
                 self.topLabel:SetText("Jet : "..tostring(rollSum).."  |  Mod. : "..tostring(modifier))
             else
                 self.topLabel:SetText("Jet : "..tostring(rollSum))
@@ -236,6 +300,8 @@ function OmegaDice.PlayD20Animation(rolls, total, modifier, description, minPerD
             if isSingle and modifier ~= 0 then
                 local dv = self.dieValues[1]
                 PlayFlatSingleSequence(self, dv, xOffsets[1], rolls[1], total, modifier, fontSize, animId, startHold)
+            elseif separate then
+                PlaySeparateModifierSequence(self, self.dieValues, xOffsets, n, rolls, perDieMods, fontSize, animId, startHold)
             elseif not isSingle then
                 PlayFlatMultiSequence(self, self.dieValues, xOffsets, n, rollSum, total, modifier, fontSize, animId, startHold)
             else

@@ -45,7 +45,7 @@ function OmegaDice.RandomNumber(command)
 
     if OmegaDice.PlayD20Animation then
         local diceLabel = minVal .. "-" .. maxVal
-        OmegaDice.PlayD20Animation({ roll }, total, modifier, description, minVal, maxVal, diceLabel, function()
+        OmegaDice.PlayD20Animation({ roll }, total, modifier, false, nil, description, minVal, maxVal, diceLabel, function()
             OmegaDice.SendResult(resultMessage)
         end)
         return

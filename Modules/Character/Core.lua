@@ -73,8 +73,39 @@ function C:TargetPlayer(name)
     return false, token or "Ciblage sécurisé indisponible"
 end
 
+-- TRP3 concatène tel quel le contenu des champs Titre/Prénom/Nom (voir
+-- TRP3_API.register.getCompleteName) : un joueur peut y taper des codes
+-- couleurs bien formés (|cffRRGGBB...|r) pour un effet dégradé lettre par
+-- lettre. Mais le getter "safe" qu'on utilise (getUnitIDCurrentProfileSafe)
+-- assainit lui-même ce texte et bousille au passage les balises : le "|" et
+-- un des deux "f" disparaissent, laissant un résidu du type "c fFFD300"
+-- (espace parasite, 6 hexa au lieu de 8, sans pipe) directement collé à la
+-- lettre suivante. Confirmé en comparant le texte source fourni par un
+-- joueur avec ce que GetDisplayName renvoie réellement en jeu. On gère donc
+-- les deux formes : la balise standard bien formée, et ce résidu assaini.
 local function CleanDisplayName(name)
-    name = tostring(name or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    name = tostring(name or "")
+    -- Liens hypertexte RP (|Hxxx|htexte|h) : on garde le texte visible.
+    -- Le "|" reste obligatoire ici (pattern trop générique sinon : "T...t"
+    -- matcherait n'importe quel vrai nom contenant un T majuscule suivi
+    -- plus loin d'un t minuscule, ex. "Tristan").
+    name = name:gsub("|H.-|h(.-)|h", "%1")
+    -- Textures / atlas embarqués (icônes) : aucun équivalent textuel, on retire
+    name = name:gsub("|T.-|t", ""):gsub("|A.-|a", "")
+    -- 1) Code couleur standard bien formé : "|" optionnel + 8 hexa exacts
+    name = name:gsub("|?c%x%x%x%x%x%x%x%x", "")
+    -- 2) Résidu assaini par TRP3 : "|" et "f" optionnels, espace parasite
+    -- optionnel, puis EXACTEMENT 6 hexa (pas de chiffre en plus : sinon ça
+    -- mange la vraie lettre du nom quand elle vaut a-f, ex. le "d" de "Lydia")
+    name = name:gsub("|?c ?f?%x%x%x%x%x%x", "")
+    -- Couleurs nommées (cnNOM:), "|" optionnel
+    name = name:gsub("|?cn[%w_]+:", "")
+    -- Fermeture "|r" (uniquement avec le "|" : un simple "r" seul est trop
+    -- courant dans un vrai nom pour le purger sans balise devant)
+    name = name:gsub("|r", "")
+    -- Filet de sécurité : toute pipe orpheline restante (code tronqué
+    -- ou format non prévu) est purgée pour ne jamais laisser de markup brut
+    name = name:gsub("|", "")
     name = name:match("^%s*(.-)%s*$") or ""
     if name == "" or name == UNKNOWN or name == UNKNOWNOBJECT then return nil end
     return name
@@ -541,7 +572,7 @@ function C:AnnounceCurrentTurn()
 
     local label
     if p.kind == "npc" then
-        label = p.name
+        label = CleanDisplayName(p.name) or p.name
     else
         local data = (p.id == MyName()) and MyChar() or C.groupData[p.id]
         label = C:GetDisplayName(p.id, data)

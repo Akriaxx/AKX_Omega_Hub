@@ -81,6 +81,10 @@ local function EnsureWireframeSlots(frame)
         slot.result:SetFont(STANDARD_TEXT_FONT, 56, "OUTLINE")
         slot.result:SetTextColor(1, 0.88, 0.35)
         slot.result:Hide()
+        slot.modDisplay = frame:CreateFontString(nil, "OVERLAY")
+        slot.modDisplay:SetFont(STANDARD_TEXT_FONT, 24, "OUTLINE")
+        slot.modDisplay:SetTextColor(0.65, 0.75, 1, 1)
+        slot.modDisplay:Hide()
         slot.glow = CreateGlow(frame)
         frame.dice[di] = slot
     end
@@ -97,6 +101,7 @@ local function HideSlot(slot)
     for _, ln in ipairs(slot.lines)  do ln:Hide() end
     for _, fs in ipairs(slot.labels) do fs:Hide() end
     slot.result:Hide()
+    slot.modDisplay:Hide()
     GlowHide(slot.glow)
 end
 
@@ -113,6 +118,9 @@ function OmegaDice.ResetDiceFrame()
     -- Hide flat die value fontstrings
     if frame.dieValues then
         for _, dv in ipairs(frame.dieValues) do dv:Hide() end
+    end
+    if frame.modValues then
+        for _, fs in ipairs(frame.modValues) do fs:Hide() end
     end
     if frame.detail then frame.detail:Hide() end
 end
@@ -333,8 +341,65 @@ local function PlayMultiDieSequence(frame, slots, xOffsets, n, rollSum, total, m
     end)
 end
 
+-- ─── Modifier sequence for separate (independent) dice ────────────────────────
+-- Same reveal as PlaySingleDieSequence, run in parallel on every die that has
+-- its own non-zero modifier. Dice without one already show their final value.
+local function PlaySeparateModifierSequence(frame, slots, xOffsets, n, rolls, perDieMods, cfg, animId, onDone)
+    local modSz  = math.floor(cfg.res * 0.62)
+    local modIdx = {}
+    for i = 1, n do
+        if perDieMods and perDieMods[i] and perDieMods[i] ~= 0 then
+            table.insert(modIdx, i)
+            slots[i].modDisplay:Hide()
+        end
+    end
+
+    if #modIdx == 0 then
+        if onDone then onDone() end
+        return
+    end
+
+    C_Timer.After(SEQ_SHOW_MOD, function()
+        if OmegaDice.animId ~= animId then return end
+        local shift = modSz * 1.1
+        for _, i in ipairs(modIdx) do
+            local res  = slots[i].result
+            local fs   = slots[i].modDisplay
+            local dmod = perDieMods[i]
+            res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i]-shift, 0)
+            local sign = dmod > 0 and "+" or ""
+            fs:SetFont(STANDARD_TEXT_FONT, modSz, "OUTLINE")
+            fs:SetText(sign..tostring(dmod))
+            fs:ClearAllPoints(); fs:SetPoint("LEFT", res, "RIGHT", 6, 0)
+            fs:SetAlpha(0); fs:Show()
+            FadeAlpha(fs, 0, 1, SEQ_FADE_DUR)
+        end
+        C_Timer.After(SEQ_HOLD_MOD, function()
+            if OmegaDice.animId ~= animId then return end
+            for k, i in ipairs(modIdx) do
+                local slot   = slots[i]
+                local res    = slot.result
+                local fs     = slot.modDisplay
+                local dmod   = perDieMods[i]
+                local isLast = (k == #modIdx)
+                FadeAlpha(res, 1, 0, SEQ_FADE_DUR)
+                FadeGlow(slot.glow, 1, 0, SEQ_FADE_DUR)
+                FadeAlpha(fs, 1, 0, SEQ_FADE_DUR, function()
+                    if OmegaDice.animId ~= animId then return end
+                    fs:Hide()
+                    res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i], 0)
+                    res:SetText(tostring(rolls[i] + dmod))
+                    GlowAttach(slot.glow, res, cfg.res*3.2, cfg.res*2.1)
+                    FadeAlpha(res, 0, 1, SEQ_FADE_DUR)
+                    FadeGlow(slot.glow, 0, 1, SEQ_FADE_DUR, isLast and onDone or nil)
+                end)
+            end
+        end)
+    end)
+end
+
 -- ─── Entry point ──────────────────────────────────────────────────────────────
-function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, description, minVal, maxVal, onComplete)
+function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate, perDieMods, description, minVal, maxVal, onComplete)
     local n        = math.min(#rolls, MAX_DICE)
     local isSingle = (n == 1)
     local trimDesc = OmegaDice.Trim(description)
@@ -349,7 +414,7 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, descripti
     local frame = GetWireframeFrame()
     frame:SetSize(totalW + 20, FRAME_H)
     frame:SetScale(1)
-    frame.topLabel:SetText(n.."D"..geo.sides)
+    frame.topLabel:SetText(n..(separate and "x" or "").."D"..geo.sides)
     frame.footer:SetText("Lancement...")
 
     -- Font pass for active slots (slots are already fully hidden by ResetDiceFrame)
@@ -423,7 +488,11 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, descripti
             self:SetScript("OnUpdate", nil)
             self:SetScale(1)
 
-            if modifier ~= 0 then
+            if separate then
+                local parts = {}
+                for i = 1, n do parts[i] = tostring(rolls[i]) end
+                self.topLabel:SetText("Jets : "..table.concat(parts, " | "))
+            elseif modifier ~= 0 then
                 self.topLabel:SetText("Jet : "..tostring(rollSum).."  |  Mod. : "..tostring(modifier))
             else
                 self.topLabel:SetText("Jet : "..tostring(rollSum))
@@ -435,7 +504,9 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, descripti
 
             if onComplete then onComplete() end
 
-            if isSingle then
+            if separate then
+                PlaySeparateModifierSequence(self, self.dice, xOffsets, n, rolls, perDieMods, cfg, animId, startHold)
+            elseif isSingle then
                 local rv      = rolls[1]
                 local r, g, b = RollColor(rv, minVal, maxVal)
                 self.dice[1].result:SetTextColor(r, g, b)
@@ -467,5 +538,5 @@ end
 
 -- Compat shim
 function OmegaDice.PlayIcoAnimation(rolls, total, modifier, description, minVal, maxVal, onComplete)
-    OmegaDice.PlayWireframeAnimation(OmegaDice.D20Geometry, rolls, total, modifier, description, minVal, maxVal, onComplete)
+    OmegaDice.PlayWireframeAnimation(OmegaDice.D20Geometry, rolls, total, modifier, false, nil, description, minVal, maxVal, onComplete)
 end
