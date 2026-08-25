@@ -587,14 +587,42 @@ function C:AnnounceCurrentTurn()
     end
 end
 
+-- HP courants d'un participant (même logique que UI_Initiative.lua, qui
+-- masque la carte correspondante) : PNJ => hp embarqué sur le participant ;
+-- joueur => fiche perso (MyChar / groupData, pas embarquée dans
+-- l'initiative). HP inconnu (pas encore synchronisé) => considéré vivant.
+local function IsParticipantAlive(p)
+    local hp
+    if p.kind == "npc" then
+        hp = p.hp and p.hp.cur
+    else
+        local data = (p.id == MyName()) and MyChar() or C.groupData[p.id]
+        hp = data and data.hp and data.hp.cur
+    end
+    return not hp or hp > 0
+end
+
+-- Passe au participant vivant suivant dans l'ordre d'initiative, en sautant
+-- ceux à 0 HP (qui n'apparaissent plus dans la bannière non plus). Si
+-- personne n'est vivant, le tour ne bouge pas (évite une boucle infinie).
 function C:NextTurn()
     if not C.initiative.isHost or not C.initiative.active then return false end
-    if #C.initiative.participants == 0 then return false end
-    C.initiative.currentIndex = (C.initiative.currentIndex % #C.initiative.participants) + 1
-    BroadcastInitiative()
-    C:AnnounceCurrentTurn()
-    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
-    return true
+    local n = #C.initiative.participants
+    if n == 0 then return false end
+
+    local idx = C.initiative.currentIndex
+    for _ = 1, n do
+        idx = (idx % n) + 1
+        local p = C.initiative.participants[idx]
+        if p and IsParticipantAlive(p) then
+            C.initiative.currentIndex = idx
+            BroadcastInitiative()
+            C:AnnounceCurrentTurn()
+            if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+            return true
+        end
+    end
+    return false
 end
 
 function C:_ApplyInitiativeInput(name, value)
