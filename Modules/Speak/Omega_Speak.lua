@@ -439,13 +439,14 @@ local function CreatePanel()
             self:SetText("")
         end
 
-        self:HighlightText(0, 0)
-        C_Timer.After(0, function()
-            if self and self:IsShown() then
-                self:SetFocus()
-                self:HighlightText(0, 0)
-            end
-        end)
+        -- Ne PAS reprendre le focus ici : le reprendre automatiquement
+        -- laissait la boite active en permanence, y compris apres un envoi.
+        -- Resultat : la touche Entree destinee a ouvrir le chat normal etait
+        -- interceptee par cette boite au lieu du chat, et tout ce qui etait
+        -- tape ensuite (en pensant ecrire ailleurs) repartait tout seul en
+        -- ".n sa ..." au prochain Entree. Le joueur doit desormais recliquer
+        -- explicitement dans la boite pour enchainer une nouvelle replique.
+        self:ClearFocus()
     end)
 
     channelButton = UI.CreatePanelButton(panel, 110, 20, "")
