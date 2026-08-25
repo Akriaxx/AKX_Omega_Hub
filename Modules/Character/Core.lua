@@ -419,6 +419,20 @@ local function PackInitiative()
     return table.concat(parts, SEP)
 end
 
+-- Vrai seulement si aucun des arguments passés n'est nil (contrairement à
+-- ipairs sur une table, ça ne s'arrête pas au premier trou).
+local function AllPresent(...)
+    for i = 1, select("#", ...) do
+        if select(i, ...) == nil then return false end
+    end
+    return true
+end
+
+-- Renvoie false sans rien appliquer si le payload est tronqué/corrompu
+-- (champ manquant en plein milieu d'un participant) : mieux vaut garder le
+-- dernier état valide que d'afficher un PNJ à 0 d'initiative avec une icône
+-- "?" par défaut, ou un joueur dont l'entrée a été écrasée par des champs
+-- décalés.
 local function UnpackInitiative(payload)
     local t = { strsplit(SEP, payload) }
     local active       = tonumber(t[1]) == 1
@@ -427,14 +441,18 @@ local function UnpackInitiative(payload)
     local participants = {}
     local idx = 4
     for i = 1, n do
-        local kind = t[idx]
+        local kind, id, initRaw = t[idx], t[idx + 1], t[idx + 2]
+        if not AllPresent(kind, id, initRaw) then return false end
         local entry = {
             kind       = kind,
-            id         = t[idx + 1],
-            initiative = tonumber(t[idx + 2]) or 0,
+            id         = id,
+            initiative = tonumber(initRaw) or 0,
         }
         idx = idx + 3
         if kind == "npc" then
+            if not AllPresent(t[idx], t[idx+1], t[idx+2], t[idx+3], t[idx+4], t[idx+5], t[idx+6], t[idx+7], t[idx+8], t[idx+9], t[idx+10], t[idx+11]) then
+                return false
+            end
             entry.name      = t[idx]
             entry.creator   = t[idx + 1]
             entry.hp        = { cur = tonumber(t[idx + 2]) or 0, max = tonumber(t[idx + 3]) or 0, temp = tonumber(t[idx + 4]) or 0 }
@@ -451,6 +469,7 @@ local function UnpackInitiative(payload)
     C.initiative.currentIndex = currentIndex
     C.initiative.participants = participants
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
 end
 
 local function FindNPC(id)
@@ -459,9 +478,58 @@ local function FindNPC(id)
     end
 end
 
+-- Un combat avec plusieurs PNJ (bloc HP/Mana/Endurance/icône complet chacun)
+-- dépasse vite la limite de taille d'un message d'addon sur ce serveur, et
+-- le payload arrivait tronqué en cours de route (d'où PNJ à 0 d'initiative,
+-- icône "?" par défaut, voire joueurs disparus si leur entrée tombait après
+-- la coupure). On découpe donc en plusieurs messages numérotés
+-- ("IC|<id du message>|<n° de morceau>|<total>|<données>"), réassemblés
+-- côté réception avant d'être décodés — voir HandleInitiativeChunk.
+local INITIATIVE_CHUNK_SIZE = 200
+local initiativeMsgSeq = 0
+
 local function BroadcastInitiative()
     local ct = GroupChat(); if not ct then return end
-    SendAddon("IC|" .. PackInitiative(), ct)
+    local payload = PackInitiative()
+
+    initiativeMsgSeq = (initiativeMsgSeq % 999999) + 1
+    local msgId = initiativeMsgSeq
+    local total = math.max(1, math.ceil(#payload / INITIATIVE_CHUNK_SIZE))
+
+    for i = 1, total do
+        local chunk = payload:sub((i - 1) * INITIATIVE_CHUNK_SIZE + 1, i * INITIATIVE_CHUNK_SIZE)
+        SendAddon(string.format("IC|%d|%d|%d|%s", msgId, i, total, chunk), ct)
+    end
+end
+
+-- Réassemblage des morceaux, par expéditeur. Un nouveau message (msgId
+-- différent) du même expéditeur abandonne un réassemblage précédent
+-- incomplet : mieux vaut attendre le prochain état complet que rester
+-- bloqué sur un morceau perdu — l'hôte rediffuse de toute façon l'état
+-- entier à chaque changement.
+local icBuffers = {}
+
+local function HandleInitiativeChunk(sender, msgIdStr, indexStr, totalStr, chunk)
+    local msgId, index, total = tonumber(msgIdStr), tonumber(indexStr), tonumber(totalStr)
+    if not msgId or not index or not total or total < 1 or index < 1 or index > total then return end
+
+    local buf = icBuffers[sender]
+    if not buf or buf.msgId ~= msgId then
+        buf = { msgId = msgId, total = total, chunks = {}, count = 0 }
+        icBuffers[sender] = buf
+    end
+
+    if buf.chunks[index] == nil then
+        buf.chunks[index] = chunk or ""
+        buf.count = buf.count + 1
+    end
+
+    if buf.count >= buf.total then
+        local parts = {}
+        for i = 1, buf.total do parts[i] = buf.chunks[i] or "" end
+        icBuffers[sender] = nil
+        UnpackInitiative(table.concat(parts))
+    end
 end
 
 function C:StartCombat()
@@ -670,9 +738,9 @@ local function HandlePayload(payload, sender)
         return true
     end
 
-    local icBody = payload:match("^IC%|(.*)$")
-    if icBody then
-        if name ~= MyName() then UnpackInitiative(icBody) end
+    local icMsgId, icIndex, icTotal, icChunk = payload:match("^IC%|(%d+)%|(%d+)%|(%d+)%|(.*)$")
+    if icMsgId then
+        if name ~= MyName() then HandleInitiativeChunk(name, icMsgId, icIndex, icTotal, icChunk) end
         return true
     end
 
