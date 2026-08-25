@@ -14,17 +14,22 @@ local targetedPattern = "^(%d+)d(%d+)=(%d+)([%+%-%d]*)%s*(.*)$"
 local function MyName() return UnitName("player") or "" end
 
 -- Normalise la casse d'un nom de cible sur celui du groupe/raid s'il en fait
--- partie (le message d'addon WHISPER exige la casse exacte).
+-- partie (le message d'addon exige la casse exacte pour matcher chez le
+-- destinataire). Renvoie aussi un flag "verifie" : le nom RP affiche par
+-- TRP3 (ex. "Clayden E. Thorne") n'a souvent aucun rapport avec le vrai nom
+-- de personnage attendu ici — un nom non trouve dans le groupe/raid est tres
+-- probablement faux et le message ne sera jamais recu.
 local function ResolveTargetName(rawName)
     for i = 1, 4 do
         local n = UnitName("party" .. i)
-        if n and n:lower() == rawName:lower() then return n end
+        if n and n:lower() == rawName:lower() then return n, true end
     end
     for i = 1, 40 do
         local n = UnitName("raid" .. i)
-        if n and n:lower() == rawName:lower() then return n end
+        if n and n:lower() == rawName:lower() then return n, true end
     end
-    return rawName
+    if rawName:lower() == MyName():lower() then return MyName(), true end
+    return rawName, false
 end
 
 -- Nom complet ("Nom-Royaume" si la cible est cross-royaume) de la cible UI
@@ -74,11 +79,18 @@ function OmegaDice.ForceRoll(command)
         return
     end
 
-    local target = ResolveTargetName(rawTarget)
+    local target, verified = ResolveTargetName(rawTarget)
 
     if target == MyName() then
         OmegaDice.ExecuteForcedRoll(numRolls, dieSides, forcedValue, modifiers, description)
         return
+    end
+
+    if not verified then
+        OmegaDice.PrintError(string.format(
+            "Attention : aucun membre du groupe/raid ne s'appelle exactement '%s' (le nom RP affiche par TRP3 differe souvent du vrai nom de personnage). Envoi tente quand meme, mais il n'arrivera jamais si ce nom est faux. Prefere /rdfdp sans nom en ciblant le joueur (/target ou un clic).",
+            rawTarget
+        ))
     end
 
     local sent = OmegaDice.SendForcedRoll and OmegaDice.SendForcedRoll(target, numRolls, dieSides, forcedValue, modifiers, description)
