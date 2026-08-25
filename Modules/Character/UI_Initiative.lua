@@ -196,20 +196,49 @@ end
 
 -- ── Rendu ─────────────────────────────────────────────────────────────────────
 
+-- HP courants d'un participant : lus directement sur le PNJ (hp embarqué
+-- dans l'initiative), ou sur la fiche du joueur (MyChar / groupData — les
+-- joueurs ne portent pas leur bloc HP dans C.initiative.participants).
+-- HP inconnu (pas encore synchronisé) => on ne masque pas, par défaut visible.
+local function GetHP(p)
+    if p.kind == "npc" then
+        return p.hp and p.hp.cur
+    end
+    local data = (p.id == UnitName("player")) and C:GetMyChar() or C.groupData[p.id]
+    return data and data.hp and data.hp.cur
+end
+
+local function IsAlive(p)
+    local hp = GetHP(p)
+    return not hp or hp > 0
+end
+
 local function Rebuild()
     local st = C.initiative
     local participants = st.participants or {}
+    local current = participants[st.currentIndex]
 
     for _, card in ipairs(cards) do card:Hide() end
 
+    -- À 0 HP, le participant disparaît de la bannière (mais reste dans
+    -- C.initiative.participants — l'ordre du tour n'est pas affecté) ; il
+    -- réapparaît dès que ses HP repassent au-dessus de 0. L'index de carte
+    -- (cardIndex) est donc distinct de l'index dans la liste complète : la
+    -- surbrillance "tour en cours" compare directement les participants
+    -- (référence de table), pas leur position, pour rester correcte même
+    -- quand des cartes sont sautées.
     local x = INPUT_W + 20
-    for i, p in ipairs(participants) do
-        local card = GetCard(i)
-        card:ClearAllPoints()
-        card:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
-        card:Refresh(p, i == st.currentIndex)
-        card:Show()
-        x = x + CARD_W + CARD_GAP
+    local cardIndex = 0
+    for _, p in ipairs(participants) do
+        if IsAlive(p) then
+            cardIndex = cardIndex + 1
+            local card = GetCard(cardIndex)
+            card:ClearAllPoints()
+            card:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
+            card:Refresh(p, p == current)
+            card:Show()
+            x = x + CARD_W + CARD_GAP
+        end
     end
 
     banner:SetWidth(math.max(200, x + 6))
@@ -238,6 +267,24 @@ end
 local prevInit = C.OnInitiativeChanged
 C.OnInitiativeChanged = function()
     if prevInit then prevInit() end
+    Refresh()
+end
+
+-- Les PNJ portent leurs HP directement dans C.initiative.participants, donc
+-- OnInitiativeChanged (déjà déclenché par ApplyNPCDelta/ApplyNPCTemp) suffit
+-- pour eux. Les joueurs, eux, ont leurs HP dans MyChar()/C.groupData : il
+-- faut aussi rafraîchir sur ces deux évènements pour que la carte
+-- disparaisse/réapparaisse en combat sans attendre un autre changement
+-- d'initiative.
+local prevMine = C.OnMyDataChanged
+C.OnMyDataChanged = function()
+    if prevMine then prevMine() end
+    Refresh()
+end
+
+local prevGroup = C.OnGroupDataChanged
+C.OnGroupDataChanged = function(name)
+    if prevGroup then prevGroup(name) end
     Refresh()
 end
 
