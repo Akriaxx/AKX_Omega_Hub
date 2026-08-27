@@ -632,6 +632,35 @@ function C:RemoveNPC(id)
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
 
+-- Retire de l'initiative les joueurs déconnectés (UnitIsConnected faux) :
+-- sans ça ils restent affichés dans la bannière / tour par tour bien
+-- qu'injoignables. Ne touche pas aux joueurs ayant simplement quitté le
+-- groupe (token introuvable, on ne peut pas distinguer déco/départ) ni aux
+-- PNJ. Seul l'hôte du combat retire réellement les participants, puis
+-- rebroadcast l'état à jour à tout le monde (déclenché sur GROUP_ROSTER_UPDATE).
+local function PruneDisconnectedPlayers()
+    if not C.initiative.isHost or not C.initiative.active then return end
+    local participants = C.initiative.participants
+    local removed = false
+    for i = #participants, 1, -1 do
+        local p = participants[i]
+        if p.kind == "player" then
+            local token = UnitTokenForName(p.id)
+            if token and UnitIsConnected and not UnitIsConnected(token) then
+                table.remove(participants, i)
+                if C.initiative.currentIndex > i then
+                    C.initiative.currentIndex = C.initiative.currentIndex - 1
+                end
+                removed = true
+            end
+        end
+    end
+    if removed then
+        BroadcastInitiative()
+        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    end
+end
+
 -- Annonce en /rw (raid warning, ou /p si pas en raid) le nom/prénom RP (TRP3)
 -- du joueur dont c'est le tour, ou juste son nom brut si c'est un PNJ.
 function C:AnnounceCurrentTurn()
@@ -825,6 +854,8 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:SetScript("OnEvent", function(_, event, prefix, payload, channel, sender)
     if event == "CHAT_MSG_ADDON" and prefix == PREFIX then
         HandlePayload(payload, sender)
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        PruneDisconnectedPlayers()
     end
 end)
 
@@ -884,6 +915,7 @@ function C:Enable()
         RegisterAddonMessagePrefix(PREFIX)
     end
     eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+    eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     for _, ev in ipairs(EVENTS) do ChatFrame_AddMessageEventFilter(ev, Filter) end
     if C._resetLauncherOnNextEnable and C.ResetLauncherPosition then
         C:ResetLauncherPosition(true)
@@ -900,6 +932,7 @@ end
 
 function C:Disable()
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
+    eventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
     for _, ev in ipairs(EVENTS) do ChatFrame_RemoveMessageEventFilter(ev, Filter) end
     C._resetLauncherOnNextEnable = true
     -- Si je suis l'hôte du combat, le clore proprement referme la bannière
