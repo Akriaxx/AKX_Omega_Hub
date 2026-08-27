@@ -20,6 +20,7 @@ local ApplyImpactToPlayer, SelectPlayerForImpact, UpdateAllSelections
 local UpdateScrollRange
 local ShowImpactStatus
 local RefreshTurnHighlights  -- défini plus bas (Vue MJ — PNJ), appelé dès que le tour change
+local TogglePnjPanel  -- défini plus bas (Vue MJ — PNJ), utilisé par le bouton "Voir les PNJ"
 
 -- ── Barre de titre draggable ──────────────────────────────────────────────────
 
@@ -441,12 +442,23 @@ local addNpcBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Rajouter un NPC")
 addNpcBtn:SetPoint("TOPLEFT", nextTurnBtn, "BOTTOMLEFT", 0, -4)
 addNpcBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 
+-- Rouvre le panneau "Vue MJ — PNJ" une fois fermé : sans ce bouton, le
+-- fermer alors qu'il y a déjà des PNJ ne laissait aucun moyen de le
+-- rouvrir (il ne réapparaît automatiquement que sur un 0 → ≥1 PNJ, voir
+-- TogglePnjPanel / RebuildPnj plus bas).
+local togglePnjBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Voir les PNJ")
+togglePnjBtn:SetPoint("TOPLEFT", addNpcBtn, "BOTTOMLEFT", 0, -4)
+togglePnjBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+togglePnjBtn:SetScript("OnClick", function()
+    if TogglePnjPanel then TogglePnjPanel() end
+end)
+
 -- Qui pilote le combat : sans ça, un non-hôte qui clique Fin de combat /
 -- Joueur suivant / Rajouter un NPC pendant qu'un combat est en cours ne
 -- comprend pas pourquoi rien ne se passe (ces actions n'ont d'effet que
 -- pour l'hôte, celui qui a cliqué Début de combat).
 local hostStatus = impactPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-hostStatus:SetPoint("TOPLEFT", addNpcBtn, "BOTTOMLEFT", 2, -3)
+hostStatus:SetPoint("TOPLEFT", togglePnjBtn, "BOTTOMLEFT", 2, -3)
 hostStatus:SetPoint("RIGHT", impactPanel, "RIGHT", -10, 0)
 hostStatus:SetJustifyH("LEFT")
 UI.ApplyMutedText(hostStatus)
@@ -1203,6 +1215,20 @@ local function RebuildPnj()
     else
         pnjPanel:Hide()
     end
+
+    if togglePnjBtn then
+        togglePnjBtn:SetEnabled(#npcs > 0)
+        togglePnjBtn:SetAlpha(#npcs > 0 and 1 or 0.45)
+        togglePnjBtn:SetText(pnjPanel:IsShown() and "Masquer les PNJ" or "Voir les PNJ")
+    end
+end
+
+-- Bouton "Voir les PNJ" (impactPanel) : bascule manuellement le panneau,
+-- indépendamment de l'auto-réaffichage sur 0 → ≥1 PNJ ci-dessus — c'est le
+-- seul moyen de le rouvrir une fois fermé alors qu'il y a déjà des PNJ.
+TogglePnjPanel = function()
+    pnjManuallyClosed = pnjPanel:IsShown()
+    RebuildPnj()
 end
 
 RefreshTurnHighlights = function()
