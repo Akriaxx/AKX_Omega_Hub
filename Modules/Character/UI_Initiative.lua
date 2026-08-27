@@ -15,6 +15,27 @@ local INPUT_W        = 60
 
 local cards = {}
 
+-- Défini plus bas (popup "Ajouter un évènement") ; référencé depuis MakeCard
+-- avant sa définition, d'où le forward-declare.
+local OpenEventPopup
+
+-- Nom affiché d'un participant : nom brut pour un PNJ, nom/prénom RP (TRP3)
+-- via GetDisplayName pour un joueur — même logique que AnnounceCurrentTurn
+-- côté Core.lua (sans le nettoyage TRP3 des PNJ, ici purement pour un libellé
+-- de popup, pas une annonce en chat).
+local function ParticipantLabel(p)
+    if not p then return "" end
+    if p.kind == "npc" then return p.name or "" end
+    local data = (p.id == UnitName("player")) and C:GetMyChar() or C.groupData[p.id]
+    return (C.GetDisplayName and C:GetDisplayName(p.id, data)) or p.id
+end
+
+local function FindParticipantById(id)
+    for _, p in ipairs(C.initiative.participants) do
+        if p.id == id then return p end
+    end
+end
+
 -- ── Bannière ──────────────────────────────────────────────────────────────────
 
 local banner = CreateFrame("Frame", "CharacterInitiativeBanner", UIParent)
@@ -148,10 +169,83 @@ local function MakeCard(parent)
     closeBtn:Hide()
     card.closeBtn = closeBtn
 
+    -- "+" pour rajouter un évènement différé sur CE participant : visible
+    -- seulement pendant son tour (c'est le principe demandé : on planifie
+    -- l'évènement "dans N tours" à partir de maintenant) et seulement pour
+    -- l'hôte du combat (seul C:AddEvent peut réellement l'enregistrer).
+    local addEventBtn = CreateFrame("Button", nil, card)
+    addEventBtn:SetSize(12, 12)
+    addEventBtn:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", -2, -2)
+    local aebBg = addEventBtn:CreateTexture(nil, "BACKGROUND")
+    aebBg:SetAllPoints()
+    aebBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+    local aebLbl = addEventBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    aebLbl:SetAllPoints()
+    aebLbl:SetText("+")
+    UI.ApplyBodyText(aebLbl)
+    local aebHl = addEventBtn:CreateTexture(nil, "HIGHLIGHT")
+    aebHl:SetAllPoints()
+    aebHl:SetColorTexture(unpack(UI.colors.panelButtonHighlight))
+    addEventBtn:Hide()
+    addEventBtn:SetScript("OnClick", function()
+        if card.participantId and OpenEventPopup then OpenEventPopup(card.participantId) end
+    end)
+    addEventBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Ajouter un évènement", unpack(UI.colors.title))
+        GameTooltip:AddLine("Se déclenche (annoncé en /rw) après N tours de ce participant.", unpack(UI.colors.textMuted))
+        GameTooltip:Show()
+    end)
+    addEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    card.addEventBtn = addEventBtn
+
+    -- Badge (nombre) affiché tant que ce participant a des évènements en
+    -- attente, peu importe le tour ; l'infobulle liste leur description et
+    -- le nombre de tours restants.
+    local eventBadge = CreateFrame("Frame", nil, card)
+    eventBadge:SetSize(14, 12)
+    eventBadge:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 2, -2)
+    eventBadge:EnableMouse(true)
+    local ebBg = eventBadge:CreateTexture(nil, "BACKGROUND")
+    ebBg:SetAllPoints()
+    ebBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+    local ebLbl = eventBadge:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ebLbl:SetAllPoints()
+    UI.ApplyBodyText(ebLbl)
+    eventBadge.label = ebLbl
+    eventBadge:SetScript("OnEnter", function(self)
+        if not card.participantId then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Évènements en attente", unpack(UI.colors.title))
+        for _, e in ipairs(C.initiative.events or {}) do
+            if e.participantId == card.participantId then
+                local turnWord = (e.turnsLeft > 1) and "tours" or "tour"
+                GameTooltip:AddLine(e.description .. "  (" .. e.turnsLeft .. " " .. turnWord .. ")", unpack(UI.colors.textMuted))
+            end
+        end
+        GameTooltip:Show()
+    end)
+    eventBadge:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    eventBadge:Hide()
+    card.eventBadge = eventBadge
+
     function card:Refresh(p, isCurrent)
         card.participantId = p.id
         initFS:SetText(tostring(p.initiative or 0))
         for _, line in ipairs(glow) do line:SetShown(isCurrent) end
+
+        addEventBtn:SetShown(isCurrent and C.initiative.isHost)
+
+        local pendingN = 0
+        for _, e in ipairs(C.initiative.events or {}) do
+            if e.participantId == p.id then pendingN = pendingN + 1 end
+        end
+        if C.initiative.isHost and pendingN > 0 then
+            ebLbl:SetText(tostring(pendingN))
+            eventBadge:Show()
+        else
+            eventBadge:Hide()
+        end
 
         if p.kind == "player" then
             local ok = false
@@ -192,6 +286,107 @@ end
 local function GetCard(i)
     if not cards[i] then cards[i] = MakeCard(banner) end
     return cards[i]
+end
+
+-- ── Popup "Ajouter un évènement" ─────────────────────────────────────────────
+-- Ouverte via le "+" affiché sur la carte du participant dont c'est le tour :
+-- décrit un évènement annoncé en /rw une fois que ce participant a effectué
+-- le nombre de tours indiqué (voir C:AddEvent / TickEventsFor côté Core.lua).
+
+local eventPopupTarget = nil  -- id du participant visé par le popup ouvert
+
+local eventPopup = CreateFrame("Frame", nil, banner)
+eventPopup:SetSize(220, 208)
+eventPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+eventPopup:SetFrameStrata("DIALOG")
+eventPopup:SetMovable(true)
+eventPopup:SetClampedToScreen(true)
+eventPopup:EnableMouse(true)
+eventPopup:Hide()
+
+local eventPopupBg = eventPopup:CreateTexture(nil, "BACKGROUND")
+eventPopupBg:SetAllPoints()
+UI.ApplyWindowBackground(eventPopupBg, 0.95)
+UI.ApplyBorder(eventPopup)
+
+local eventPopupBar = CreateFrame("Frame", nil, eventPopup)
+eventPopupBar:SetPoint("TOPLEFT"); eventPopupBar:SetPoint("TOPRIGHT")
+eventPopupBar:SetHeight(20)
+eventPopupBar:EnableMouse(true)
+eventPopupBar:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then eventPopup:StartMoving() end end)
+eventPopupBar:SetScript("OnMouseUp", function() eventPopup:StopMovingOrSizing() end)
+
+local eventPopupBarBg = eventPopupBar:CreateTexture(nil, "BACKGROUND")
+eventPopupBarBg:SetAllPoints()
+eventPopupBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+
+local eventPopupTitle = eventPopupBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+eventPopupTitle:SetPoint("LEFT", eventPopupBar, "LEFT", 8, 0)
+eventPopupTitle:SetText("Ajouter un évènement")
+UI.ApplyTitle(eventPopupTitle)
+
+local eventForLbl = eventPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+eventForLbl:SetPoint("TOPLEFT", eventPopupBar, "BOTTOMLEFT", 10, -8)
+eventForLbl:SetPoint("RIGHT", eventPopup, "RIGHT", -10, 0)
+eventForLbl:SetJustifyH("LEFT")
+eventForLbl:SetWordWrap(false)
+UI.ApplyMutedText(eventForLbl)
+
+local eventDescLbl = eventPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+eventDescLbl:SetPoint("TOPLEFT", eventForLbl, "BOTTOMLEFT", 0, -8)
+eventDescLbl:SetText("Description")
+UI.ApplyLabel(eventDescLbl)
+
+local eventDescEB = UI.CreateStyledEditBox(eventPopup, 200, 44, true)
+eventDescEB:SetPoint("TOPLEFT", eventDescLbl, "BOTTOMLEFT", 0, -4)
+eventDescEB:SetMaxLetters(200)
+
+local eventTurnsLbl = eventPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+eventTurnsLbl:SetPoint("TOPLEFT", eventDescEB, "BOTTOMLEFT", 0, -8)
+eventTurnsLbl:SetText("Dans combien de tours")
+UI.ApplyLabel(eventTurnsLbl)
+
+local eventTurnsEB = UI.CreateStyledEditBox(eventPopup, 50, 22)
+eventTurnsEB:SetNumeric(true)
+eventTurnsEB:SetMaxLetters(3)
+eventTurnsEB:SetPoint("TOPLEFT", eventTurnsLbl, "BOTTOMLEFT", 0, -4)
+
+local eventConfirmBtn = UI.CreatePanelButton(eventPopup, 200, 20, "Ajouter")
+eventConfirmBtn:SetPoint("TOPLEFT", eventTurnsEB, "BOTTOMLEFT", 0, -14)
+
+local function CloseEventPopup()
+    eventPopup:Hide()
+    eventDescEB:SetText("")
+    eventTurnsEB:SetText("")
+    eventPopupTarget = nil
+end
+
+local eventPopupCloseBtn = UI.CreateCloseButton(eventPopup, function() CloseEventPopup() end)
+eventPopupCloseBtn:ClearAllPoints()
+eventPopupCloseBtn:SetPoint("TOPRIGHT", eventPopup, "TOPRIGHT", -3, -3)
+eventPopupCloseBtn:SetSize(18, 16)
+eventPopupCloseBtn:SetFrameLevel(eventPopup:GetFrameLevel() + 50)
+
+eventConfirmBtn:SetScript("OnClick", function()
+    local desc  = eventDescEB:GetText()
+    local turns = eventTurnsEB:GetText()
+    if eventPopupTarget and desc and desc:match("%S") and turns and turns ~= "" then
+        if C:AddEvent(eventPopupTarget, desc, turns) then
+            CloseEventPopup()
+        end
+    end
+end)
+
+OpenEventPopup = function(participantId)
+    if not C.initiative.isHost or not C.initiative.active then return end
+    local p = FindParticipantById(participantId)
+    if not p then return end
+    eventPopupTarget = participantId
+    eventForLbl:SetText("Pour : " .. ParticipantLabel(p))
+    eventDescEB:SetText("")
+    eventTurnsEB:SetText("")
+    eventPopup:Show()
+    eventDescEB:SetFocus()
 end
 
 -- ── Rendu ─────────────────────────────────────────────────────────────────────
@@ -260,6 +455,10 @@ local function Refresh()
         Rebuild()
         banner:Show()
     else
+        -- Sinon un popup laissé ouvert en fin de combat resurgirait tel
+        -- quel (visible, ciblant un participant qui n'existe plus) au
+        -- prochain combat démarré.
+        CloseEventPopup()
         banner:Hide()
     end
 end

@@ -355,6 +355,7 @@ C.initiative = {
     isHost       = false,
     currentIndex = 1,
     participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
+    events       = {},  -- { {id, participantId, description, turnsLeft}, ... } — voir AddEvent
 }
 
 local nextNpcSeq = 0
@@ -537,6 +538,7 @@ function C:StartCombat()
     C.initiative.active       = true
     C.initiative.currentIndex = 1
     C.initiative.participants = {}
+    C.initiative.events       = {}
     nextNpcSeq = 0
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
@@ -546,6 +548,7 @@ function C:EndCombat()
     if not C.initiative.isHost then return false end
     C.initiative.active       = false
     C.initiative.participants = {}
+    C.initiative.events       = {}
     C.initiative.currentIndex = 1
     BroadcastInitiative()
     C.initiative.isHost = false
@@ -628,8 +631,53 @@ function C:RemoveNPC(id)
             break
         end
     end
+    C:RemoveEventsFor(id)
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
+-- ── Évènements différés ("dans N tours") ────────────────────────────────────
+-- Accrochés à un participant précis, décrémentés uniquement quand c'est SON
+-- tour (pas à chaque tour global — voir TickEventsFor dans NextTurn), et
+-- annoncés en /rw (ou /p si pas en raid) une fois à 0. Contrairement aux
+-- participants/PNJ, purement local à l'hôte : pas besoin de les synchroniser
+-- aux autres clients puisque l'annonce en chat, elle, atteint tout le monde
+-- au moment voulu.
+local nextEventSeq = 0
+
+function C:AddEvent(participantId, description, turns)
+    if not C.initiative.isHost or not C.initiative.active then return false end
+    if not participantId or participantId == "" then return false end
+    description = tostring(description or ""):match("^%s*(.-)%s*$") or ""
+    turns = math.floor(tonumber(turns) or 0)
+    if description == "" or turns < 1 then return false end
+    nextEventSeq = nextEventSeq + 1
+    table.insert(C.initiative.events, {
+        id            = "evt" .. nextEventSeq,
+        participantId = participantId,
+        description   = description,
+        turnsLeft     = turns,
+    })
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
+end
+
+-- Retire tous les évènements en attente accrochés à ce participant (appelé
+-- quand il quitte l'initiative : PNJ supprimé ou joueur déconnecté) : sans
+-- ça un évènement orphelin pourrait ressurgir si un futur participant
+-- récupère le même id (ex. un joueur qui se reconnecte et resoumet son
+-- initiative reprend son nom comme id).
+function C:RemoveEventsFor(participantId)
+    if not C.initiative.isHost or not participantId then return end
+    local events = C.initiative.events
+    local removed = false
+    for i = #events, 1, -1 do
+        if events[i].participantId == participantId then
+            table.remove(events, i)
+            removed = true
+        end
+    end
+    if removed and C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
 
 -- Retire de l'initiative les joueurs déconnectés (UnitIsConnected faux) :
@@ -651,6 +699,7 @@ local function PruneDisconnectedPlayers()
                 if C.initiative.currentIndex > i then
                     C.initiative.currentIndex = C.initiative.currentIndex - 1
                 end
+                C:RemoveEventsFor(p.id)
                 removed = true
             end
         end
@@ -658,6 +707,17 @@ local function PruneDisconnectedPlayers()
     if removed then
         BroadcastInitiative()
         if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    end
+end
+
+-- Envoie un texte en /rw (raid warning), ou /p si pas en raid (silencieux
+-- hors groupe) : partagé par l'annonce de tour et le déclenchement d'un
+-- évènement différé.
+local function AnnounceToGroup(text)
+    if IsInRaid and IsInRaid() then
+        SendChatMessage(text, "RAID_WARNING")
+    elseif IsInGroup and IsInGroup() then
+        SendChatMessage(text, "PARTY")
     end
 end
 
@@ -676,11 +736,24 @@ function C:AnnounceCurrentTurn()
     end
     if not label or label == "" then return end
 
-    local text = "Au tour de " .. label .. " !"
-    if IsInRaid and IsInRaid() then
-        SendChatMessage(text, "RAID_WARNING")
-    elseif IsInGroup and IsInGroup() then
-        SendChatMessage(text, "PARTY")
+    AnnounceToGroup("Au tour de " .. label .. " !")
+end
+
+-- Décrémente les évènements accrochés à ce participant quand c'est (de
+-- nouveau) son tour, et annonce/retire ceux qui atteignent 0. Appelé depuis
+-- NextTurn juste après avoir désigné le nouveau participant courant.
+local function TickEventsFor(p)
+    if not p then return end
+    local events = C.initiative.events
+    for i = #events, 1, -1 do
+        local e = events[i]
+        if e.participantId == p.id then
+            e.turnsLeft = e.turnsLeft - 1
+            if e.turnsLeft <= 0 then
+                AnnounceToGroup(e.description)
+                table.remove(events, i)
+            end
+        end
     end
 end
 
@@ -715,6 +788,7 @@ function C:NextTurn()
             C.initiative.currentIndex = idx
             BroadcastInitiative()
             C:AnnounceCurrentTurn()
+            TickEventsFor(p)
             if C.OnInitiativeChanged then C.OnInitiativeChanged() end
             return true
         end
