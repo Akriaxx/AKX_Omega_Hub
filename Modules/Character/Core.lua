@@ -637,24 +637,27 @@ function C:RemoveNPC(id)
 end
 
 -- ── Évènements différés ("dans N tours") ────────────────────────────────────
--- Accrochés à un participant précis, décrémentés uniquement quand c'est SON
--- tour (pas à chaque tour global — voir TickEventsFor dans NextTurn), et
--- annoncés en /rw (ou /p si pas en raid) une fois à 0. Contrairement aux
+-- Deux formes : accroché à un participant précis (décrémenté uniquement
+-- quand c'est SON tour), ou "général" (participantId = nil, décrémenté à
+-- CHAQUE tour, peu importe qui joue — voir TickEventsFor dans NextTurn).
+-- Annoncés en /rw (ou /p si pas en raid) une fois à 0. Contrairement aux
 -- participants/PNJ, purement local à l'hôte : pas besoin de les synchroniser
 -- aux autres clients puisque l'annonce en chat, elle, atteint tout le monde
 -- au moment voulu.
 local nextEventSeq = 0
 
+-- participantId peut être nil (évènement général, dissocié de tout PNJ/
+-- joueur) ; seule une chaîne vide est rejetée (id invalide).
 function C:AddEvent(participantId, description, turns)
     if not C.initiative.isHost or not C.initiative.active then return false end
-    if not participantId or participantId == "" then return false end
+    if participantId == "" then return false end
     description = tostring(description or ""):match("^%s*(.-)%s*$") or ""
     turns = math.floor(tonumber(turns) or 0)
     if description == "" or turns < 1 then return false end
     nextEventSeq = nextEventSeq + 1
     table.insert(C.initiative.events, {
         id            = "evt" .. nextEventSeq,
-        participantId = participantId,
+        participantId = participantId,  -- nil = évènement général
         description   = description,
         turnsLeft     = turns,
     })
@@ -740,14 +743,16 @@ function C:AnnounceCurrentTurn()
 end
 
 -- Décrémente les évènements accrochés à ce participant quand c'est (de
--- nouveau) son tour, et annonce/retire ceux qui atteignent 0. Appelé depuis
--- NextTurn juste après avoir désigné le nouveau participant courant.
+-- nouveau) son tour, PLUS les évènements généraux (participantId nil, qui
+-- décomptent à chaque tour peu importe qui joue), et annonce/retire ceux
+-- qui atteignent 0. Appelé depuis NextTurn juste après avoir désigné le
+-- nouveau participant courant.
 local function TickEventsFor(p)
     if not p then return end
     local events = C.initiative.events
     for i = #events, 1, -1 do
         local e = events[i]
-        if e.participantId == p.id then
+        if e.participantId == nil or e.participantId == p.id then
             e.turnsLeft = e.turnsLeft - 1
             if e.turnsLeft <= 0 then
                 AnnounceToGroup(e.description)

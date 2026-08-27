@@ -79,6 +79,51 @@ headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
 headerSep:SetHeight(1)
 UI.ApplySeparator(headerSep, true)
 
+-- Bouton "+ Évt" (hôte uniquement) : ajoute un évènement GÉNÉRAL, dissocié
+-- de tout participant — il décompte à chaque tour, peu importe qui joue
+-- (contrairement au "+" d'une carte, lié aux tours d'UN participant précis).
+-- Voir OpenEventPopup(nil) plus bas / C:AddEvent + TickEventsFor côté Core.lua.
+local addGlobalEventBtn = UI.CreatePanelButton(header, 54, 16, "+ Évt")
+addGlobalEventBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
+addGlobalEventBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+addGlobalEventBtn:SetScript("OnClick", function()
+    if OpenEventPopup then OpenEventPopup(nil) end
+end)
+addGlobalEventBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Ajouter un évènement général", unpack(UI.colors.title))
+    GameTooltip:AddLine("Dissocié de tout participant : décompte à chaque tour, peu importe qui joue.", unpack(UI.colors.textMuted))
+    GameTooltip:Show()
+end)
+addGlobalEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+addGlobalEventBtn:Hide()
+
+-- Badge (nombre) tant qu'il y a des évènements généraux en attente ;
+-- l'infobulle liste leur description et le nombre de tours restants.
+local globalEventBadge = CreateFrame("Frame", nil, header)
+globalEventBadge:SetSize(16, 14)
+globalEventBadge:SetPoint("RIGHT", addGlobalEventBtn, "LEFT", -4, 0)
+globalEventBadge:EnableMouse(true)
+local gebBg = globalEventBadge:CreateTexture(nil, "BACKGROUND")
+gebBg:SetAllPoints()
+gebBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+local gebLbl = globalEventBadge:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+gebLbl:SetAllPoints()
+UI.ApplyBodyText(gebLbl)
+globalEventBadge:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Évènements généraux en attente", unpack(UI.colors.title))
+    for _, e in ipairs(C.initiative.events or {}) do
+        if e.participantId == nil then
+            local turnWord = (e.turnsLeft > 1) and "tours" or "tour"
+            GameTooltip:AddLine(e.description .. "  (" .. e.turnsLeft .. " " .. turnWord .. ")", unpack(UI.colors.textMuted))
+        end
+    end
+    GameTooltip:Show()
+end)
+globalEventBadge:SetScript("OnLeave", function() GameTooltip:Hide() end)
+globalEventBadge:Hide()
+
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
 local inputLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -289,11 +334,14 @@ local function GetCard(i)
 end
 
 -- ── Popup "Ajouter un évènement" ─────────────────────────────────────────────
--- Ouverte via le "+" affiché sur la carte du participant dont c'est le tour :
--- décrit un évènement annoncé en /rw une fois que ce participant a effectué
--- le nombre de tours indiqué (voir C:AddEvent / TickEventsFor côté Core.lua).
+-- Ouverte soit via le "+" d'une carte (évènement accroché à ce participant,
+-- décompté sur SES tours), soit via le "+ Évt" du header (évènement général,
+-- décompté à chaque tour peu importe qui joue) : décrit un évènement annoncé
+-- en /rw une fois le compte à rebours écoulé (voir C:AddEvent / TickEventsFor
+-- côté Core.lua).
 
-local eventPopupTarget = nil  -- id du participant visé par le popup ouvert
+local eventPopupTarget = nil    -- id du participant visé, ou nil si évènement général
+local eventPopupOpen   = false  -- distingue "pas de popup ouvert" de "cible générale (nil)"
 
 local eventPopup = CreateFrame("Frame", nil, banner)
 eventPopup:SetSize(220, 208)
@@ -359,6 +407,7 @@ local function CloseEventPopup()
     eventDescEB:SetText("")
     eventTurnsEB:SetText("")
     eventPopupTarget = nil
+    eventPopupOpen   = false
 end
 
 local eventPopupCloseBtn = UI.CreateCloseButton(eventPopup, function() CloseEventPopup() end)
@@ -370,19 +419,29 @@ eventPopupCloseBtn:SetFrameLevel(eventPopup:GetFrameLevel() + 50)
 eventConfirmBtn:SetScript("OnClick", function()
     local desc  = eventDescEB:GetText()
     local turns = eventTurnsEB:GetText()
-    if eventPopupTarget and desc and desc:match("%S") and turns and turns ~= "" then
+    if eventPopupOpen and desc and desc:match("%S") and turns and turns ~= "" then
         if C:AddEvent(eventPopupTarget, desc, turns) then
             CloseEventPopup()
         end
     end
 end)
 
+-- participantId nil => évènement général, dissocié de tout participant
+-- (bouton "+ Évt" du header) ; sinon accroché aux tours de ce participant
+-- précis (bouton "+" de sa carte, visible seulement pendant son tour).
 OpenEventPopup = function(participantId)
     if not C.initiative.isHost or not C.initiative.active then return end
-    local p = FindParticipantById(participantId)
-    if not p then return end
+    local label
+    if participantId then
+        local p = FindParticipantById(participantId)
+        if not p then return end
+        label = ParticipantLabel(p)
+    else
+        label = "Tout le monde (décompte à chaque tour)"
+    end
     eventPopupTarget = participantId
-    eventForLbl:SetText("Pour : " .. ParticipantLabel(p))
+    eventPopupOpen   = true
+    eventForLbl:SetText("Pour : " .. label)
     eventDescEB:SetText("")
     eventTurnsEB:SetText("")
     eventPopup:Show()
@@ -412,6 +471,18 @@ local function Rebuild()
     local st = C.initiative
     local participants = st.participants or {}
     local current = participants[st.currentIndex]
+
+    addGlobalEventBtn:SetShown(st.isHost)
+    local globalPending = 0
+    for _, e in ipairs(st.events or {}) do
+        if e.participantId == nil then globalPending = globalPending + 1 end
+    end
+    if st.isHost and globalPending > 0 then
+        gebLbl:SetText(tostring(globalPending))
+        globalEventBadge:Show()
+    else
+        globalEventBadge:Hide()
+    end
 
     for _, card in ipairs(cards) do card:Hide() end
 
