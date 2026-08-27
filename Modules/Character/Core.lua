@@ -842,6 +842,36 @@ local function RegisterSlash()
     SlashCmdList["OCHARMJ"] = function()
         if CharacterMJPanel then CharacterMJPanel:Toggle() end
     end
+
+    -- /chnpcadd Nom HP Mana Endu Initiative — ouvre la fiche d'ajout de PNJ
+    -- (Vue MJ) pré-remplie avec ces valeurs ; il ne reste plus qu'à choisir
+    -- l'icone et valider. Le nom peut contenir des espaces : on prend les 4
+    -- derniers mots comme HP/Mana/Endu/Initiative, le reste forme le nom.
+    SLASH_CHNPCADD1 = "/chnpcadd"
+    SlashCmdList["CHNPCADD"] = function(message)
+        if not C.initiative.isHost or not C.initiative.active then
+            OmegaHub.Print("|cffFF4444Character :|r combat non démarré (ou vous n'êtes pas l'hôte).")
+            return
+        end
+        local words = {}
+        for w in tostring(message or ""):gmatch("%S+") do table.insert(words, w) end
+        if #words < 5 then
+            OmegaHub.Print("|cffFF4444Character :|r utilisation : /chnpcadd Nom HP Mana Endu Initiative")
+            return
+        end
+        local init = table.remove(words)
+        local endu = table.remove(words)
+        local mana = table.remove(words)
+        local hp   = table.remove(words)
+        local name = table.concat(words, " ")
+        if not tonumber(hp) or not tonumber(mana) or not tonumber(endu) or not tonumber(init) then
+            OmegaHub.Print("|cffFF4444Character :|r HP/Mana/Endu/Initiative doivent être des nombres.")
+            return
+        end
+        if C.ShowNpcAddPopup then
+            C:ShowNpcAddPopup({ name = name, hp = hp, mana = mana, endurance = endu, initiative = init })
+        end
+    end
 end
 
 -- ── Enable / Disable ──────────────────────────────────────────────────────────
@@ -864,7 +894,7 @@ function C:Enable()
     if C.ApplyDisplaySettings then C:ApplyDisplaySettings() end
     OmegaHub:SetModuleLoaded("Character", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("Character activé.  |cffAAAAAA/ochar · /ocharmj|r")
+        OmegaHub.Print("Character activé.  |cffAAAAAA/ochar · /ocharmj · /chnpcadd Nom HP Mana Endu Init|r")
     end
 end
 
@@ -886,10 +916,12 @@ function C:Disable()
     if CharacterGroupViewPanel     then CharacterGroupViewPanel:Hide()     end
     if CharacterInitiativeBanner   then CharacterInitiativeBanner:Hide()   end
     if CharacterLauncherBtn        then CharacterLauncherBtn:Hide()        end
-    SLASH_OCHAR1   = nil
-    SLASH_OCHARMJ1 = nil
-    SlashCmdList["OCHAR"]   = nil
-    SlashCmdList["OCHARMJ"] = nil
+    SLASH_OCHAR1    = nil
+    SLASH_OCHARMJ1  = nil
+    SLASH_CHNPCADD1 = nil
+    SlashCmdList["OCHAR"]    = nil
+    SlashCmdList["OCHARMJ"]  = nil
+    SlashCmdList["CHNPCADD"] = nil
     OmegaHub:SetModuleLoaded("Character", false)
     OmegaHub.Print("Character désactivé.")
 end

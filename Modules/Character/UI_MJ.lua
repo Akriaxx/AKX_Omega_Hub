@@ -583,13 +583,46 @@ npcAddConfirmBtn:SetScript("OnClick", function()
     end
 end)
 
+-- Pré-remplit les champs du popup depuis `prefill` (nom/hp/mana/endurance/
+-- initiative/icone), ou les vide si prefill est nil. Utilisé par le bouton
+-- "Rajouter un NPC" (vide), /chnpcadd et "Dupliquer" sur un PNJ existant
+-- (pré-rempli).
+local function FillNpcPopup(prefill)
+    prefill = prefill or {}
+    npcNameEB:SetText(prefill.name and tostring(prefill.name) or "")
+    npcInitEB:SetText(prefill.initiative ~= nil and tostring(prefill.initiative) or "")
+    npcHpEB:SetText(prefill.hp ~= nil and tostring(prefill.hp) or "")
+    npcMpEB:SetText(prefill.mana ~= nil and tostring(prefill.mana) or "")
+    npcEndEB:SetText(prefill.endurance ~= nil and tostring(prefill.endurance) or "")
+    selectedNpcIcon = prefill.icon
+    npcIconTex:SetTexture(prefill.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+end
+
+local function OpenNpcPopup(prefill)
+    if not C.initiative.active then
+        if ShowImpactStatus then ShowImpactStatus("Combat non démarré") end
+        return
+    end
+    FillNpcPopup(prefill)
+    npcPopup:Show()
+end
+
 addNpcBtn:SetScript("OnClick", function()
     if not C.initiative.active then
         if ShowImpactStatus then ShowImpactStatus("Combat non démarré") end
         return
     end
-    if npcPopup:IsShown() then CloseNpcPopup() else npcPopup:Show() end
+    if npcPopup:IsShown() then CloseNpcPopup() else OpenNpcPopup() end
 end)
+
+-- Point d'entrée pour /chnpcadd (Core.lua) : ouvre la Vue MJ si besoin, puis
+-- le popup d'ajout de PNJ déjà rempli.
+function C:ShowNpcAddPopup(prefill)
+    if CharacterMJPanel and not CharacterMJPanel:IsShown() then
+        CharacterMJPanel:Show()
+    end
+    OpenNpcPopup(prefill)
+end
 
 local function RefreshCombatControls()
     local active = C.initiative.active
@@ -1002,6 +1035,24 @@ local function NpcRow(parent, npcId)
         if row.npcId then C:RemoveNPC(row.npcId) end
     end)
 
+    -- Rouvre le popup d'ajout de PNJ pré-rempli avec les stats max de ce
+    -- PNJ (pas ses HP/Mana/Endu actuels — un clone part au complet) : il ne
+    -- reste plus qu'à changer le nom et valider.
+    local duplicateBtn = UI.CreatePanelButton(row, 62, 14, "Dupliquer")
+    duplicateBtn:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -2, 2)
+    duplicateBtn:SetScript("OnClick", function()
+        local p = row.npcId and FindNpcParticipant(row.npcId)
+        if not p then return end
+        OpenNpcPopup({
+            name       = p.name,
+            initiative = p.initiative,
+            hp         = p.hp and p.hp.max,
+            mana       = p.mana and p.mana.max,
+            endurance  = p.endurance and p.endurance.max,
+            icon       = p.icon,
+        })
+    end)
+
     function row:Refresh(p)
         row.npcId = p.id
         nameTxt:SetText(p.name or "?")
@@ -1013,6 +1064,7 @@ local function NpcRow(parent, npcId)
         barMP:Set(mp.cur or 0, mp.max or 0, mp.temp or 0)
         barEN:Set(en.cur or 0, en.max or 0, en.temp or 0)
         deleteBtn:SetShown(C.initiative.isHost)
+        duplicateBtn:SetShown(C.initiative.isHost)
         row:SetSelected(selectedPlayers[p.id])
     end
 
