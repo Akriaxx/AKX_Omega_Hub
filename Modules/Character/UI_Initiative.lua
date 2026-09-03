@@ -12,8 +12,10 @@ local HEADER_H       = 20
 local CONTENT_H      = CARD_H + 10
 local BANNER_H       = HEADER_H + CONTENT_H
 local INPUT_W        = 60
+local EVENT_CARD_W   = 40
 
-local cards = {}
+local cards      = {}
+local eventCards = {}
 
 -- Défini plus bas (popup "Ajouter un évènement") ; référencé depuis MakeCard
 -- avant sa définition, d'où le forward-declare.
@@ -80,9 +82,14 @@ headerSep:SetHeight(1)
 UI.ApplySeparator(headerSep, true)
 
 -- Bouton "+ Évt" (hôte uniquement) : ajoute un évènement GÉNÉRAL, dissocié
--- de tout participant — il décompte à chaque tour, peu importe qui joue
--- (contrairement au "+" d'une carte, lié aux tours d'UN participant précis).
--- Voir OpenEventPopup(nil) plus bas / C:AddEvent + TickEventsFor côté Core.lua.
+-- de tout participant — il est injecté dans la rotation d'initiative (ancré
+-- au participant en cours à l'instant de la création, voir AddEvent côté
+-- Core.lua) et décompte donc une fois par tour de table, jamais sur le tour
+-- où il apparaît (contrairement au "+" d'une carte, lié directement aux
+-- tours d'UN participant précis). Une fois ajouté, il s'affiche comme une
+-- carte dédiée tout à droite de la rangée de participants — voir la boucle
+-- sur `st.events` dans Rebuild plus bas. Voir OpenEventPopup(nil) plus bas /
+-- C:AddEvent + TickEventsFor côté Core.lua.
 local addGlobalEventBtn = UI.CreatePanelButton(header, 54, 16, "+ Évt")
 addGlobalEventBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
 addGlobalEventBtn:SetFrameLevel(header:GetFrameLevel() + 2)
@@ -92,37 +99,11 @@ end)
 addGlobalEventBtn:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine("Ajouter un évènement général", unpack(UI.colors.title))
-    GameTooltip:AddLine("Dissocié de tout participant : décompte à chaque tour, peu importe qui joue.", unpack(UI.colors.textMuted))
+    GameTooltip:AddLine("Dissocié de tout participant : décompte une fois par tour de table complet, peu importe qui joue en premier.", unpack(UI.colors.textMuted))
     GameTooltip:Show()
 end)
 addGlobalEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 addGlobalEventBtn:Hide()
-
--- Badge (nombre) tant qu'il y a des évènements généraux en attente ;
--- l'infobulle liste leur description et le nombre de tours restants.
-local globalEventBadge = CreateFrame("Frame", nil, header)
-globalEventBadge:SetSize(16, 14)
-globalEventBadge:SetPoint("RIGHT", addGlobalEventBtn, "LEFT", -4, 0)
-globalEventBadge:EnableMouse(true)
-local gebBg = globalEventBadge:CreateTexture(nil, "BACKGROUND")
-gebBg:SetAllPoints()
-gebBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
-local gebLbl = globalEventBadge:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-gebLbl:SetAllPoints()
-UI.ApplyBodyText(gebLbl)
-globalEventBadge:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine("Évènements généraux en attente", unpack(UI.colors.title))
-    for _, e in ipairs(C.initiative.events or {}) do
-        if e.participantId == nil then
-            local turnWord = (e.turnsLeft > 1) and "tours" or "tour"
-            GameTooltip:AddLine(e.description .. "  (" .. e.turnsLeft .. " " .. turnWord .. ")", unpack(UI.colors.textMuted))
-        end
-    end
-    GameTooltip:Show()
-end)
-globalEventBadge:SetScript("OnLeave", function() GameTooltip:Hide() end)
-globalEventBadge:Hide()
 
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
@@ -244,9 +225,13 @@ local function MakeCard(parent)
     addEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     card.addEventBtn = addEventBtn
 
-    -- Badge (nombre) affiché tant que ce participant a des évènements en
-    -- attente, peu importe le tour ; l'infobulle liste leur description et
-    -- le nombre de tours restants.
+    -- Badge (nombre) en bas à droite DE CE PERSONNAGE tant qu'il a des
+    -- évènements en attente accrochés à lui : ces évènements comptent comme
+    -- s'ils étaient ce participant (décomptés sur ses tours, voir
+    -- TickEventsFor côté Core.lua), donc affichés directement sur sa carte
+    -- plutôt qu'en case séparée — contrairement à un évènement général (non
+    -- affilié), lui affiché en case dédiée dans la rangée (voir
+    -- MakeEventCard).
     local eventBadge = CreateFrame("Frame", nil, card)
     eventBadge:SetSize(14, 12)
     eventBadge:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 2, -2)
@@ -265,7 +250,9 @@ local function MakeCard(parent)
         for _, e in ipairs(C.initiative.events or {}) do
             if e.participantId == card.participantId then
                 local turnWord = (e.turnsLeft > 1) and "tours" or "tour"
-                GameTooltip:AddLine(e.description .. "  (" .. e.turnsLeft .. " " .. turnWord .. ")", unpack(UI.colors.textMuted))
+                local line = e.description .. "  (" .. e.turnsLeft .. " " .. turnWord .. ")"
+                if e.repeatable then line = line .. " [répétable]" end
+                GameTooltip:AddLine(line, unpack(UI.colors.textMuted))
             end
         end
         GameTooltip:Show()
@@ -333,18 +320,118 @@ local function GetCard(i)
     return cards[i]
 end
 
+-- ── Cartes évènement (généraux uniquement) ──────────────────────────────────
+-- Une "case propre" par évènement GÉNÉRAL en attente (participantId nil,
+-- dissocié de tout participant), affichée tout à droite de la rangée — voir
+-- Rebuild. Un évènement accroché à un participant précis, lui, reste un
+-- badge sur SA carte (voir eventBadge dans MakeCard) puisqu'il compte comme
+-- s'il était ce participant. Un coup d'œil suffit ici pour voir qu'il y a un
+-- évènement, combien de tours de table il reste, et s'il est répétable ; la
+-- description complète reste en infobulle (rarement plus de quelques mots,
+-- mais la carte est trop étroite pour l'afficher en clair sans wordwrap
+-- illisible).
+
+local function MakeEventCard(parent)
+    local card = CreateFrame("Frame", nil, parent)
+    card:SetSize(EVENT_CARD_W, CARD_H)
+    card:EnableMouse(true)
+
+    local cbg = card:CreateTexture(nil, "BACKGROUND")
+    cbg:SetAllPoints()
+    cbg:SetColorTexture(unpack(UI.colors.rowBg))
+
+    -- Simple bandeau d'accent en haut, pour distinguer une carte évènement
+    -- d'une carte participant au premier coup d'œil.
+    local accent = card:CreateTexture(nil, "BORDER")
+    accent:SetPoint("TOPLEFT"); accent:SetPoint("TOPRIGHT")
+    accent:SetHeight(3)
+    accent:SetColorTexture(unpack(UI.colors.warning))
+
+    local icon = card:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOP", card, "TOP", 0, -7)
+    icon:SetSize(18, 18)
+    icon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    -- Nombre de tours de table restants avant déclenchement.
+    local turnsFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    turnsFS:SetPoint("TOP", icon, "BOTTOM", 0, -2)
+    turnsFS:SetPoint("LEFT", card, "LEFT", 1, 0)
+    turnsFS:SetPoint("RIGHT", card, "RIGHT", -1, 0)
+    turnsFS:SetJustifyH("CENTER")
+    turnsFS:SetWordWrap(false)
+    UI.ApplyBodyText(turnsFS)
+    card.turnsFS = turnsFS
+
+    -- Icône "répétition" tant que l'évènement est répétable (se relance
+    -- après déclenchement au lieu d'être retiré) : une texture plutôt qu'un
+    -- symbole Unicode ("↻"), que la police par défaut de WoW n'a pas et qui
+    -- s'affichait comme un carré vide.
+    local repeatIcon = card:CreateTexture(nil, "OVERLAY")
+    repeatIcon:SetPoint("BOTTOM", card, "BOTTOM", 0, 4)
+    repeatIcon:SetSize(10, 10)
+    repeatIcon:SetTexture("Interface\\Buttons\\UI-RefreshButton")
+    card.repeatIcon = repeatIcon
+
+    -- Retire manuellement l'évènement (seul moyen d'arrêter un répétable
+    -- avant terme, ex. une fois le boss vaincu).
+    local closeBtn = UI.CreateCloseButton(card, nil)
+    closeBtn:ClearAllPoints()
+    closeBtn:SetPoint("TOPRIGHT", card, "TOPRIGHT", 2, 2)
+    closeBtn:SetSize(10, 10)
+    if closeBtn.label then closeBtn.label:SetScale(0.7) end
+    closeBtn:SetScript("OnClick", function()
+        if card.eventId and C.RemoveEvent then C:RemoveEvent(card.eventId) end
+    end)
+    card.closeBtn = closeBtn
+
+    card:SetScript("OnEnter", function(self)
+        if not card.eventId then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(card.description or "", unpack(UI.colors.title))
+        local turnWord = (card.turnsLeft > 1) and "tours" or "tour"
+        GameTooltip:AddLine(card.turnsLeft .. " " .. turnWord .. " de table restant" .. ((card.turnsLeft > 1) and "s" or ""), unpack(UI.colors.textMuted))
+        if card.repeatable then
+            GameTooltip:AddLine("Répétable : se relance toutes les " .. (card.interval or "?") .. " tours de table.", unpack(UI.colors.textMuted))
+        end
+        GameTooltip:Show()
+    end)
+    card:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    function card:Refresh(e)
+        card.eventId     = e.id
+        card.description = e.description
+        card.turnsLeft   = e.turnsLeft
+        card.repeatable  = e.repeatable
+        card.interval    = e.interval
+        turnsFS:SetText(tostring(e.turnsLeft))
+        repeatIcon:SetShown(e.repeatable and true or false)
+    end
+
+    return card
+end
+
+local function GetEventCard(i)
+    if not eventCards[i] then eventCards[i] = MakeEventCard(banner) end
+    return eventCards[i]
+end
+
 -- ── Popup "Ajouter un évènement" ─────────────────────────────────────────────
 -- Ouverte soit via le "+" d'une carte (évènement accroché à ce participant,
 -- décompté sur SES tours), soit via le "+ Évt" du header (évènement général,
--- décompté à chaque tour peu importe qui joue) : décrit un évènement annoncé
--- en /rw une fois le compte à rebours écoulé (voir C:AddEvent / TickEventsFor
--- côté Core.lua).
+-- décompté une fois par tour de table complet peu importe qui joue) : décrit
+-- un évènement annoncé en /rw une fois le compte à rebours écoulé (voir
+-- C:AddEvent / TickEventsFor côté Core.lua). "Répétable" : au lieu d'être
+-- retiré au déclenchement, il se relance pour le même nombre de tours (ex.
+-- une bourrasque récurrente qu'on retire manuellement une fois le boss
+-- vaincu) — sinon c'est un évènement ponctuel (ex. une bombe qui explose une
+-- fois).
 
 local eventPopupTarget = nil    -- id du participant visé, ou nil si évènement général
 local eventPopupOpen   = false  -- distingue "pas de popup ouvert" de "cible générale (nil)"
 
 local eventPopup = CreateFrame("Frame", nil, banner)
-eventPopup:SetSize(220, 208)
+eventPopup:SetSize(220, 234)
 eventPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 eventPopup:SetFrameStrata("DIALOG")
 eventPopup:SetMovable(true)
@@ -399,13 +486,25 @@ eventTurnsEB:SetNumeric(true)
 eventTurnsEB:SetMaxLetters(3)
 eventTurnsEB:SetPoint("TOPLEFT", eventTurnsLbl, "BOTTOMLEFT", 0, -4)
 
+local eventRepeatCB = UI.CreateStyledCheckbox(eventPopup, "Répétable (se relance)")
+eventRepeatCB:SetPoint("TOPLEFT", eventTurnsEB, "BOTTOMLEFT", 2, -12)
+eventRepeatCB.label:SetPoint("LEFT", eventRepeatCB, "RIGHT", 5, 0)
+eventRepeatCB:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Une fois déclenché, l'évènement se relance pour le même nombre de tours au lieu d'être retiré.", unpack(UI.colors.textMuted))
+    GameTooltip:AddLine("Ex. une bourrasque toutes les 3 tours jusqu'à ce que vous le retiriez (bouton × sur sa carte).", unpack(UI.colors.textMuted))
+    GameTooltip:Show()
+end)
+eventRepeatCB:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
 local eventConfirmBtn = UI.CreatePanelButton(eventPopup, 200, 20, "Ajouter")
-eventConfirmBtn:SetPoint("TOPLEFT", eventTurnsEB, "BOTTOMLEFT", 0, -14)
+eventConfirmBtn:SetPoint("TOPLEFT", eventRepeatCB, "BOTTOMLEFT", -2, -16)
 
 local function CloseEventPopup()
     eventPopup:Hide()
     eventDescEB:SetText("")
     eventTurnsEB:SetText("")
+    eventRepeatCB:SetChecked(false)
     eventPopupTarget = nil
     eventPopupOpen   = false
 end
@@ -420,7 +519,7 @@ eventConfirmBtn:SetScript("OnClick", function()
     local desc  = eventDescEB:GetText()
     local turns = eventTurnsEB:GetText()
     if eventPopupOpen and desc and desc:match("%S") and turns and turns ~= "" then
-        if C:AddEvent(eventPopupTarget, desc, turns) then
+        if C:AddEvent(eventPopupTarget, desc, turns, eventRepeatCB:GetChecked()) then
             CloseEventPopup()
         end
     end
@@ -429,6 +528,9 @@ end)
 -- participantId nil => évènement général, dissocié de tout participant
 -- (bouton "+ Évt" du header) ; sinon accroché aux tours de ce participant
 -- précis (bouton "+" de sa carte, visible seulement pendant son tour).
+-- Rien n'empêche de rouvrir ce popup plusieurs fois pour la même cible :
+-- chaque validation empile un évènement de plus (badge sur la carte pour un
+-- participant, carte dédiée de plus pour un général — voir Rebuild).
 OpenEventPopup = function(participantId)
     if not C.initiative.isHost or not C.initiative.active then return end
     local label
@@ -437,13 +539,14 @@ OpenEventPopup = function(participantId)
         if not p then return end
         label = ParticipantLabel(p)
     else
-        label = "Tout le monde (décompte à chaque tour)"
+        label = "Tout le monde (par tour de table)"
     end
     eventPopupTarget = participantId
     eventPopupOpen   = true
     eventForLbl:SetText("Pour : " .. label)
     eventDescEB:SetText("")
     eventTurnsEB:SetText("")
+    eventRepeatCB:SetChecked(false)
     eventPopup:Show()
     eventDescEB:SetFocus()
 end
@@ -473,18 +576,9 @@ local function Rebuild()
     local current = participants[st.currentIndex]
 
     addGlobalEventBtn:SetShown(st.isHost)
-    local globalPending = 0
-    for _, e in ipairs(st.events or {}) do
-        if e.participantId == nil then globalPending = globalPending + 1 end
-    end
-    if st.isHost and globalPending > 0 then
-        gebLbl:SetText(tostring(globalPending))
-        globalEventBadge:Show()
-    else
-        globalEventBadge:Hide()
-    end
 
     for _, card in ipairs(cards) do card:Hide() end
+    for _, ec in ipairs(eventCards) do ec:Hide() end
 
     -- À 0 HP, le participant disparaît de la bannière (mais reste dans
     -- C.initiative.participants — l'ordre du tour n'est pas affecté) ; il
@@ -504,6 +598,27 @@ local function Rebuild()
             card:Refresh(p, p == current)
             card:Show()
             x = x + CARD_W + CARD_GAP
+        end
+    end
+
+    -- Évènements généraux (dissociés de tout participant) uniquement : une
+    -- carte par évènement en attente, tout à droite de la rangée, après tous
+    -- les joueurs/PNJ. Un évènement accroché à un participant précis, lui,
+    -- reste un badge sur SA carte (voir eventBadge dans MakeCard). Local à
+    -- l'hôte (seul lui gère C.initiative.events) : les autres clients ne
+    -- voient tout simplement aucune carte évènement.
+    if st.isHost then
+        local eventCardIndex = 0
+        for _, e in ipairs(st.events or {}) do
+            if e.participantId == nil then
+                eventCardIndex = eventCardIndex + 1
+                local ec = GetEventCard(eventCardIndex)
+                ec:ClearAllPoints()
+                ec:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
+                ec:Refresh(e)
+                ec:Show()
+                x = x + EVENT_CARD_W + CARD_GAP
+            end
         end
     end
 

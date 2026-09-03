@@ -120,7 +120,10 @@ local function createRow(addonData, index)
     -- Version
     local verFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     verFS:SetPoint("LEFT", nameFS, "RIGHT", 8, -1)
-    verFS:SetText("v" .. addonData.version)
+    -- addonData.version vient du Version.lua propre à chaque module, posé
+    -- au moment de son VRAI enregistrement (PLAYER_LOGIN) — pas encore
+    -- disponible que si ce module n'a pas fini de charger.
+    verFS:SetText("v" .. (addonData.version or "?"))
     UI.ApplyMutedText(verFS)
 
     -- Description

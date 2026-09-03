@@ -524,7 +524,7 @@ eventFrame:SetScript("OnEvent", function()
     OS.db = OmegaSpeakDB
 
     -- Lie la référence du module au Hub pour Enable/Disable dynamique
-    OmegaHub:RegisterModule({ name = "Omega_Speak", module = OS })
+    OmegaHub:RegisterModule({ name = "Omega_Speak", module = OS, version = OMEGA_SPEAK_VERSION })
 
     if OmegaHub:IsModuleEnabled("Omega_Speak") then
         OS:Enable()

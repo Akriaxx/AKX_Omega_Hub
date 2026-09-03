@@ -2083,7 +2083,7 @@ init:SetScript("OnEvent", function(_, _, addon)
     init:UnregisterEvent("ADDON_LOADED")
 
     -- Lie le module au Hub
-    OmegaHub:RegisterModule({ name = "Omega_Survive", module = OS2 })
+    OmegaHub:RegisterModule({ name = "Omega_Survive", module = OS2, version = OMEGA_SURVIVE_VERSION })
 
     if not OmegaHub:IsModuleEnabled("Omega_Survive") then
         Launcher:Hide()

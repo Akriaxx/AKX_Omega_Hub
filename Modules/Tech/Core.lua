@@ -259,7 +259,7 @@ f:SetScript("OnEvent", function()
         name    = "Tech",
         title   = "Omega Tech",
         desc    = "Tablette RP : notes, inventaire, store et communications",
-        version = "1.0.0",
+        version = TECH_VERSION,
         module  = T,
     })
     EnsureDB()

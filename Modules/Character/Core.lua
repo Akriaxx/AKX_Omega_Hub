@@ -355,7 +355,7 @@ C.initiative = {
     isHost       = false,
     currentIndex = 1,
     participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
-    events       = {},  -- { {id, participantId, description, turnsLeft}, ... } — voir AddEvent
+    events       = {},  -- { {id, participantId, description, turnsLeft, interval, repeatable}, ... } — voir AddEvent
 }
 
 local nextNpcSeq = 0
@@ -638,31 +638,78 @@ end
 
 -- ── Évènements différés ("dans N tours") ────────────────────────────────────
 -- Deux formes : accroché à un participant précis (décrémenté uniquement
--- quand c'est SON tour), ou "général" (participantId = nil, décrémenté à
--- CHAQUE tour, peu importe qui joue — voir TickEventsFor dans NextTurn).
--- Annoncés en /rw (ou /p si pas en raid) une fois à 0. Contrairement aux
--- participants/PNJ, purement local à l'hôte : pas besoin de les synchroniser
--- aux autres clients puisque l'annonce en chat, elle, atteint tout le monde
--- au moment voulu.
+-- quand c'est SON tour — donc une fois par tour de table, chaque participant
+-- ne jouant qu'une fois par tour), ou "général" (participantId = nil,
+-- dissocié de tout participant à l'affichage — voir UI_Initiative.lua). Un
+-- général n'en est pas moins injecté dans la rotation : à la création, on
+-- retient dans `anchorId` le participant en cours à cet instant (voir
+-- AddEvent), et il décompte ensuite exactement comme un évènement accroché à
+-- CE participant (voir TickEventsFor) — donc jamais sur le tour où il
+-- apparaît (il faut que ce participant termine son tour ET fasse un tour de
+-- table complet avant de retomber sur lui), et une fois par tour de table
+-- ensuite. Annoncés en /rw (ou /p si pas en raid) une fois à 0 ; si
+-- `repeatable`, se relance pour `interval` tours de plus au lieu d'être
+-- retiré (ex. une bourrasque qui revient tant que le MJ ne la retire pas).
+-- Contrairement aux participants/PNJ, purement local à l'hôte : pas besoin
+-- de les synchroniser aux autres clients puisque l'annonce en chat, elle,
+-- atteint tout le monde au moment voulu.
 local nextEventSeq = 0
 
+local function FindParticipant(id)
+    if not id then return nil end
+    for _, p in ipairs(C.initiative.participants) do
+        if p.id == id then return p end
+    end
+end
+
 -- participantId peut être nil (évènement général, dissocié de tout PNJ/
--- joueur) ; seule une chaîne vide est rejetée (id invalide).
-function C:AddEvent(participantId, description, turns)
+-- joueur à l'affichage) ; seule une chaîne vide est rejetée (id invalide).
+-- `repeatable` : une fois déclenché, l'évènement se relance pour `turns`
+-- tours de plus au lieu d'être retiré (ex. "toutes les 3 tours jusqu'à ce
+-- que je le retire"), sinon il s'agit d'un évènement ponctuel (ex. "dans 3
+-- tours").
+function C:AddEvent(participantId, description, turns, repeatable)
     if not C.initiative.isHost or not C.initiative.active then return false end
     if participantId == "" then return false end
     description = tostring(description or ""):match("^%s*(.-)%s*$") or ""
     turns = math.floor(tonumber(turns) or 0)
     if description == "" or turns < 1 then return false end
     nextEventSeq = nextEventSeq + 1
+    -- Ancre un évènement général au participant dont c'est le tour à
+    -- l'instant de la création : il ne décomptera donc qu'à son PROCHAIN
+    -- tour, jamais immédiatement (voir TickEventsFor).
+    local anchorId
+    if participantId == nil then
+        local current = C.initiative.participants[C.initiative.currentIndex]
+        anchorId = current and current.id
+    end
     table.insert(C.initiative.events, {
         id            = "evt" .. nextEventSeq,
         participantId = participantId,  -- nil = évènement général
+        anchorId      = anchorId,       -- (généraux uniquement) voir TickEventsFor
         description   = description,
         turnsLeft     = turns,
+        interval      = turns,          -- valeur de reset si repeatable
+        repeatable    = repeatable and true or false,
     })
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
     return true
+end
+
+-- Retire manuellement un évènement (bouton de fermeture sur sa carte dans la
+-- bannière) : seul moyen d'arrêter un évènement répétable avant son terme
+-- naturel (ex. "jusqu'à ce que le boss soit vaincu" → le MJ le retire quand
+-- c'est le cas), ou de renoncer à un évènement ponctuel encore en attente.
+function C:RemoveEvent(id)
+    if not C.initiative.isHost or not id then return end
+    local events = C.initiative.events
+    for i = #events, 1, -1 do
+        if events[i].id == id then
+            table.remove(events, i)
+            if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+            return
+        end
+    end
 end
 
 -- Retire tous les évènements en attente accrochés à ce participant (appelé
@@ -743,20 +790,41 @@ function C:AnnounceCurrentTurn()
 end
 
 -- Décrémente les évènements accrochés à ce participant quand c'est (de
--- nouveau) son tour, PLUS les évènements généraux (participantId nil, qui
--- décomptent à chaque tour peu importe qui joue), et annonce/retire ceux
--- qui atteignent 0. Appelé depuis NextTurn juste après avoir désigné le
--- nouveau participant courant.
-local function TickEventsFor(p)
+-- nouveau) son tour — donc une fois par tour de table, chaque participant ne
+-- jouant qu'une fois par tour. Un évènement général (participantId nil) est
+-- ancré au participant qui était en cours à sa création (`anchorId`, voir
+-- AddEvent) et suit exactement la même règle sur SES tours à lui : jamais au
+-- moment de la création (ce n'est pas encore "son" tour suivant), une fois
+-- par tour de table ensuite. Si ce participant a depuis quitté le combat
+-- (PNJ supprimé, joueur déconnecté), on retombe sur `roundAdvanced` (vrai
+-- quand ce tour de jeu boucle sur un nouveau tour de table, voir NextTurn)
+-- pour ne pas rester bloqué indéfiniment. Annonce/retire ceux qui atteignent
+-- 0, sauf s'ils sont `repeatable` : ils se relancent alors pour `interval`
+-- tours de plus (l'annonce, elle, a bien lieu à chaque déclenchement).
+-- Appelé depuis NextTurn juste après avoir désigné le nouveau participant
+-- courant.
+local function TickEventsFor(p, roundAdvanced)
     if not p then return end
     local events = C.initiative.events
     for i = #events, 1, -1 do
         local e = events[i]
-        if e.participantId == nil or e.participantId == p.id then
+        local ticks
+        if e.participantId ~= nil then
+            ticks = (e.participantId == p.id)
+        elseif e.anchorId and FindParticipant(e.anchorId) then
+            ticks = (e.anchorId == p.id)
+        else
+            ticks = roundAdvanced
+        end
+        if ticks then
             e.turnsLeft = e.turnsLeft - 1
             if e.turnsLeft <= 0 then
                 AnnounceToGroup(e.description)
-                table.remove(events, i)
+                if e.repeatable then
+                    e.turnsLeft = e.interval
+                else
+                    table.remove(events, i)
+                end
             end
         end
     end
@@ -780,20 +848,25 @@ end
 -- Passe au participant vivant suivant dans l'ordre d'initiative, en sautant
 -- ceux à 0 HP (qui n'apparaissent plus dans la bannière non plus). Si
 -- personne n'est vivant, le tour ne bouge pas (évite une boucle infinie).
+-- `roundAdvanced` devient vrai dès que la boucle repasse par la position 1
+-- de l'ordre d'initiative, c'est-à-dire qu'un tour de table complet s'est
+-- écoulé (peu importe le nombre de participants) — voir TickEventsFor.
 function C:NextTurn()
     if not C.initiative.isHost or not C.initiative.active then return false end
     local n = #C.initiative.participants
     if n == 0 then return false end
 
     local idx = C.initiative.currentIndex
+    local roundAdvanced = false
     for _ = 1, n do
         idx = (idx % n) + 1
+        if idx == 1 then roundAdvanced = true end
         local p = C.initiative.participants[idx]
         if p and IsParticipantAlive(p) then
             C.initiative.currentIndex = idx
             BroadcastInitiative()
             C:AnnounceCurrentTurn()
-            TickEventsFor(p)
+            TickEventsFor(p, roundAdvanced)
             if C.OnInitiativeChanged then C.OnInitiativeChanged() end
             return true
         end
@@ -1043,7 +1116,7 @@ end
 local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function()
-    OmegaHub:RegisterModule({ name = "Character", module = C })
+    OmegaHub:RegisterModule({ name = "Character", module = C, version = CHARACTER_VERSION })
     CharacterDB = CharacterDB or {}
     if C.ApplyDisplaySettings then C:ApplyDisplaySettings() end
     broadcastFrame = CreateFrame("Frame")

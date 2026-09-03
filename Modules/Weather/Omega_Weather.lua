@@ -270,7 +270,7 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function()
-    OmegaHub:RegisterModule({ name = "Omega_Weather", module = OW })
+    OmegaHub:RegisterModule({ name = "Omega_Weather", module = OW, version = OMEGA_WEATHER_VERSION })
 
     if OmegaHub:IsModuleEnabled("Omega_Weather") then
         OW:Enable()

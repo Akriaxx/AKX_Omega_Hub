@@ -2,10 +2,10 @@
 ## Title: Omega Hub
 ## Notes: Gestionnaire central et conteneur monolithique des addons Omega
 ## Author: Lorkk
-## Version: 1.0.0
+## Version: 1.1.20
 ## OptionalDeps: SpellCreator
-## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB
-## SavedVariablesPerCharacter: OS2DB
+## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB
+## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
 
 ## -- Hub --
 Core\Registry.lua
@@ -15,6 +15,7 @@ UI\Panel.lua
 UI\MinimapButton.lua
 
 ## -- Omega Dice --
+Modules\Dice\Version.lua
 Modules\Dice\Core.lua
 Modules\Dice\UI\Geometry\D4Geometry.lua
 Modules\Dice\UI\Geometry\D6Geometry.lua
@@ -33,11 +34,13 @@ Modules\Dice\Modules\RandomNumber.lua
 Modules\Dice\Modules\Commands.lua
 
 ## -- Omega Speak --
+Modules\Speak\Version.lua
 Modules\Speak\Omega_Speak_UI.lua
 Modules\Speak\Omega_Speak.lua
 Modules\Speak\OmegaSpeak_Settings.lua
 
 ## -- Omega Spell --
+Modules\Spell\Version.lua
 Modules\Spell\OmegaSpell_Data.lua
 Modules\Spell\OmegaSpell_DB.lua
 Modules\Spell\OmegaSpell_Arcaneum.lua
@@ -57,6 +60,7 @@ Modules\Spell\OmegaSpell_Settings.lua
 Modules\Spell\OmegaSpell_Core.lua
 
 ## -- Omega Survive --
+Modules\Survive\Version.lua
 Modules\Survive\Core\MenuItems.lua
 Modules\Survive\Core\DefaultEmotes.lua
 Modules\Survive\Core\UI.lua
@@ -82,6 +86,7 @@ Modules\Survive\Core\DB\Database.lua
 Modules\Survive\Core\Settings.lua
 
 ## -- Character --
+Modules\Character\Version.lua
 Modules\Character\Core.lua
 Modules\Character\UI_Player.lua
 Modules\Character\UI_MJ.lua
@@ -91,6 +96,7 @@ Modules\Character\Launcher.lua
 Modules\Character\Settings.lua
 
 ## -- Tech --
+Modules\Tech\Version.lua
 Modules\Tech\StoreData.lua
 Modules\Tech\Core.lua
 Modules\Tech\UI_Main.lua
@@ -101,6 +107,21 @@ Modules\Tech\UI_Comm.lua
 Modules\Tech\UI_Settings.lua
 Modules\Tech\Launcher.lua
 
+## -- Item Creator --
+Modules\Item\Version.lua
+Modules\Item\Data.lua
+Modules\Item\Core.lua
+Modules\Item\UI_Creator.lua
+Modules\Item\UI_Balance.lua
+
+## -- Zone Gate --
+Modules\ZoneGate\Version.lua
+Modules\ZoneGate\Core.lua
+Modules\ZoneGate\UI_Radar.lua
+Modules\ZoneGate\UI_Banner.lua
+Modules\ZoneGate\UI_Panel.lua
+
 ## -- Omega Weather (désactivé — usage privé) --
+## Modules\Weather\Version.lua
 ## Modules\Weather\Omega_Weather.lua
 ## Modules\Weather\Omega_Weather_Data.lua

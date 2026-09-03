@@ -712,7 +712,7 @@ initFrame:SetScript("OnEvent", function()
         name    = "Omega_Spell",
         title   = "Omega Spell",
         desc    = "Créateur de sorts RP, macros et groupes d'emotes randomisés.",
-        version = "2.0",
+        version = OMEGA_SPELL_VERSION,
         module  = OS,
     })
     if OmegaHub:IsModuleEnabled("Omega_Spell") then

@@ -18,6 +18,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build ZIP
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -30,6 +32,15 @@ jobs:
             --exclude "dist" \
             --exclude "*.zip" \
             ./ dist/Omega_Hub/
+
+          # Le champ "## Version:" du .toc est ce qu'un updater externe
+          # (WowUp, etc.) lit pour connaître la version installée — sans
+          # cette étape il reste figé (ex: bloqué à 1.0.0 pendant 19
+          # releases) et l'updater ne détecte jamais correctement les mises
+          # à jour. On l'aligne ici sur le tag qui déclenche CE build, donc
+          # il ne peut plus dériver du tag réel.
+          VERSION="${TAG_NAME#v}"
+          sed -i "s/^## Version:.*/## Version: ${VERSION}/" dist/Omega_Hub/Omega_Hub.toc
 
           cd dist
           zip -r Omega_Hub.zip Omega_Hub

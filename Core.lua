@@ -20,47 +20,62 @@ function Hub.Print(msg)
 end
 
 -- ── Pré-enregistrement des modules ─────────────────────────────────────────
+-- Juste de quoi peupler la liste du panneau (nom/titre/description) avant
+-- même que chaque module ait fini de charger. PAS de "version" ici : chaque
+-- module a son propre Modules\<X>\Version.lua (une constante style
+-- FOO_VERSION, chargée en tout premier dans son bloc du .toc) et se
+-- l'attribue lui-même au moment de son VRAI enregistrement (voir la fin de
+-- son Core.lua/Launcher.lua, à l'événement PLAYER_LOGIN) — RegisterModule
+-- fusionne les champs, donc ce second appel écrase proprement celui-ci.
+-- Versionner chaque module séparément évite qu'un changement dans l'un
+-- (ex. Character) ne fasse gonfler le numéro de tous les autres.
 
 Hub:RegisterModule({
     name    = "Omega_Dice",
     title   = "Omega Dice",
     desc    = "Lanceur de dés pour le JDR",
-    version = "2.0.0",
 })
 
 Hub:RegisterModule({
     name    = "Omega_Speak",
     title   = "Omega Speak",
     desc    = "Assistant de discours PNJ",
-    version = "1.0.0",
 })
 
 Hub:RegisterModule({
     name    = "Omega_Spell",
     title   = "Omega Spell",
     desc    = "Tables d'émotes pour SpellCreator",
-    version = "1.0",
 })
 
 Hub:RegisterModule({
     name    = "Omega_Survive",
     title   = "Omega Survive",
     desc    = "Système de survie RP",
-    version = "2.0",
 })
 
 Hub:RegisterModule({
     name    = "Character",
     title   = "Character",
     desc    = "Fiches de personnage RP (HP / Mana / Endurance)",
-    version = "1.0",
 })
 
 Hub:RegisterModule({
     name    = "Tech",
     title   = "Omega Tech",
     desc    = "Tablette RP : notes, inventaire, store et communications",
-    version = "1.0.0",
+})
+
+Hub:RegisterModule({
+    name    = "ItemCreator",
+    title   = "Item Creator",
+    desc    = "Créateur d'items RP avec calcul de points et paliers de qualité",
+})
+
+Hub:RegisterModule({
+    name    = "ZoneGate",
+    title   = "Zone Gate",
+    desc    = "Bannières d'entrée/sortie de zone (checkpoints RP)",
 })
 
 -- Omega_Weather est commenté dans le TOC (usage privé, non chargé)
@@ -124,8 +139,10 @@ local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("ADDON_LOADED")
 initFrame:SetScript("OnEvent", function(_, _, addonName)
     if addonName == "Omega_Hub" then
-        OmegaHubDB = OmegaHubDB or { showHidden = false, modules = {} }
+        OmegaHubDB     = OmegaHubDB     or { showHidden = false, modules = {} }
         OmegaHubDB.modules = OmegaHubDB.modules or {}
+        ItemCreatorDB  = ItemCreatorDB  or {}
+        ZoneGateDB     = ZoneGateDB     or {}
         initFrame:UnregisterAllEvents()
     end
 end)

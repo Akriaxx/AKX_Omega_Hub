@@ -62,7 +62,7 @@ end
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function()
-    OmegaHub:RegisterModule({ name = "Omega_Dice", module = OmegaDice })
+    OmegaHub:RegisterModule({ name = "Omega_Dice", module = OmegaDice, version = OMEGA_DICE_VERSION })
 
     if OmegaHub:IsModuleEnabled("Omega_Dice") then
         OmegaDice:Enable()
