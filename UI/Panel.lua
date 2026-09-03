@@ -26,7 +26,15 @@ end
 local panel = CreateFrame("Frame", "OmegaHubPanel", UIParent, "BackdropTemplate")
 panel:SetWidth(PANEL_W)
 panel:SetPoint("CENTER")
-panel:SetFrameStrata("HIGH")
+-- "DIALOG" (pas "HIGH") : les panneaux principaux des modules (Zone Gate,
+-- Item Creator, Omega Tech, ...) sont tous en "HIGH" et se centrent tous à
+-- l'écran par défaut comme celui-ci, donc à égalité de strata ils pouvaient
+-- se retrouver l'un pile sur l'autre sans qu'on sache lequel est au-dessus
+-- ("fusion" visuelle rapportée). Le gestionnaire de modules doit toujours
+-- passer par-dessus une fenêtre de module — même convention que les popups/
+-- réglages de chaque module (voir ex. Character/Settings.lua) déjà en
+-- "DIALOG" pour surplomber leur propre panneau principal.
+panel:SetFrameStrata("DIALOG")
 panel:SetMovable(true)
 panel:EnableMouse(true)
 panel:RegisterForDrag("LeftButton")
@@ -68,9 +76,14 @@ titleText:SetPoint("LEFT", header, "LEFT", PADDING, 0)
 titleText:SetText("Omega Hub")
 UI.ApplyTitle(titleText)
 
+-- Version de l'addon lui-même (le champ "## Version:" du .toc, tenu à jour
+-- par le workflow de release à partir du tag) — pas celle d'un module en
+-- particulier, affichée elle sur chaque rangée. Restait figée à "v1.0.0"
+-- (jamais mise à jour depuis la toute première version).
 local versionText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 versionText:SetPoint("RIGHT", header, "RIGHT", -32, 0)
-versionText:SetText("v1.0.0")
+local hubVersion = (C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata)("Omega_Hub", "Version")
+versionText:SetText("v" .. (hubVersion or "?"))
 UI.ApplyMutedText(versionText)
 
 UI.CreateCloseButton(panel, function() panel:Hide() end)
