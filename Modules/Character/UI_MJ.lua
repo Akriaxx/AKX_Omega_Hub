@@ -299,7 +299,16 @@ end
 -- ── Panneau d'impact MJ ──────────────────────────────────────────────────────
 
 impactPanel = CreateFrame("Frame", "CharacterMJImpactPanel", UIParent)
-impactPanel:SetSize(220, 284)
+-- Hauteur = somme des offsets réels de la chaîne Valeur → Ressource → Action
+-- → Multicible → "+ État" → Appliquer → statut (voir plus bas, tous ancrés
+-- depuis le HAUT maintenant, "+ État" et Appliquer y compris) : ne peut donc
+-- plus diverger de leur position réelle, contrairement à l'ancien calcul où
+-- Appliquer restait ancré depuis le BAS d'une hauteur fixée à la main (source
+-- de l'espace mort sous "Appliquer" signalé par l'utilisateur, même défaut
+-- que la Vue joueur — voir UI_Group.lua). Tout ce qui est accroché EN DESSOUS
+-- du panneau (combatToggleBtn et la suite, ancrés à BOTTOMLEFT) redescend
+-- uniformément avec lui, sans chevauchement.
+impactPanel:SetSize(220, 281)
 impactPanel:SetPoint("TOPRIGHT", mjPanel, "TOPLEFT", -2, 0)
 impactPanel:SetFrameStrata("MEDIUM")
 impactPanel:SetFrameLevel(mjPanel:GetFrameLevel() + 5)
@@ -343,26 +352,26 @@ impactValueEB:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -50)
 impactValueEB:SetNumeric(true)
 impactValueEB:SetMaxLetters(7)
 impactValueEB:SetText("1")
-ImpactSeparator(-80)
+ImpactSeparator(-77)
 
 local statDropdown = CreateImpactDropdown(impactPanel, 198, "Ressource", {
     { value = "hp", label = "HP" },
     { value = "mana", label = "Mana" },
     { value = "endurance", label = "Endurance" },
 }, function() return impactState.stat end, function(value) impactState.stat = value end)
-statDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -92)
-ImpactSeparator(-138)
+statDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -83)
+ImpactSeparator(-128)
 
 local actionDropdown = CreateImpactDropdown(impactPanel, 198, "Action", {
     { value = "damage", label = "Retrait" },
     { value = "heal", label = "Ajout" },
     { value = "buff", label = "Buff Temp" },
 }, function() return impactState.mode end, function(value) impactState.mode = value end)
-actionDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -150)
-ImpactSeparator(-196)
+actionDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -134)
+ImpactSeparator(-179)
 
 impactMultiCB = UI.CreateStyledCheckbox(impactPanel, "Multicible")
-impactMultiCB:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -208)
+impactMultiCB:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -185)
 impactMultiCB.label:SetPoint("LEFT", impactMultiCB, "RIGHT", 6, 0)
 impactMultiCB:SetScript("OnClick", function(self)
     if not self:GetChecked() then
@@ -371,8 +380,22 @@ impactMultiCB:SetScript("OnClick", function(self)
     end
 end)
 
+-- Ouvre le popup partagé "Ajouter un état" (UI_Initiative.lua) : liste TOUTES
+-- les cibles (joueurs ET PNJ), nom + icone seulement. Le MJ a déjà le détail
+-- complet ailleurs dans cette vue, mais réutilise volontairement le même
+-- popup minimal que la Vue joueur plutôt qu'un ciblage dédié en plus.
+local addStatusBtn = UI.CreatePanelButton(impactPanel, 198, 20, "+ État")
+addStatusBtn:SetPoint("TOPLEFT", impactMultiCB, "BOTTOMLEFT", 0, -8)
+addStatusBtn:SetScript("OnClick", function()
+    if not C.initiative.active then
+        if ShowImpactStatus then ShowImpactStatus("Combat non démarré") end
+        return
+    end
+    if C.OpenStatusPopup then C:OpenStatusPopup() end
+end)
+
 local applyBtn = UI.CreatePanelButton(impactPanel, 72, 20, "Appliquer")
-applyBtn:SetPoint("BOTTOMLEFT", impactPanel, "BOTTOMLEFT", 10, 28)
+applyBtn:SetPoint("TOPLEFT", addStatusBtn, "BOTTOMLEFT", 0, -8)
 applyBtn:SetScript("OnClick", function()
     local count = 0
     for name in pairs(selectedPlayers) do

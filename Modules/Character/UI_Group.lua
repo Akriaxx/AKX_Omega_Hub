@@ -10,6 +10,21 @@ local W, PAD = 118, 4
 local ROW_H = 40
 local BAR_H = 9
 
+-- Zone des contrôles (Valeur → Appliquer), sous la liste. TOP_CHROME est la
+-- distance fixe entre le haut du panneau et le haut de la liste ; CONTROLS_H
+-- est la hauteur nécessaire à `controls` (valeur/ressource/action/multicible/
+-- +État/Appliquer/statut), dérivée directement de la chaîne d'ancrage
+-- ci-dessous (voir Build) — à mettre à jour ici si un élément y est
+-- ajouté/retiré. `controls` est ancré au bas de la LISTE (pas du panneau,
+-- voir Build) : la hauteur du panneau (Rebuild) en est la SOMME directe,
+-- donc ne peut plus diverger de la position réelle des contrôles, contrairement
+-- à l'ancien calcul (deux formules à recaler à la main à chaque changement,
+-- source de l'espace mort sous "Appliquer" signalé par l'utilisateur).
+local TOP_CHROME    = 26
+local SEP_GAP       = 6
+local CONTROLS_H    = 232
+local BOTTOM_MARGIN = 6
+
 local rows = {}
 local selectedPlayers = {}
 local selectedStat = "hp"
@@ -281,14 +296,20 @@ local function Rebuild()
 
     local listH = #members * (ROW_H + 2) + 2
     content:SetHeight(listH)
-    panel:SetHeight(math.max(386, listH + 276))
+    -- Somme directe des mêmes constantes qui positionnent `controls` (voir
+    -- Build) : ne peut plus diverger de sa position réelle, donc plus jamais
+    -- d'espace mort entre la liste et les contrôles, ni sous "Appliquer".
+    panel:SetHeight(TOP_CHROME + listH + SEP_GAP + 1 + SEP_GAP + CONTROLS_H + BOTTOM_MARGIN)
 end
 
 local function Build()
     if panel then return panel end
 
     panel = CreateFrame("Frame", "CharacterGroupViewPanel", UIParent)
-    panel:SetSize(W, 386)
+    -- Taille de secours avant le premier Rebuild (qui la recalcule aussitôt
+    -- à l'ouverture, voir ToggleGroupView) : un seul membre, juste pour
+    -- éviter un flash à une taille absurde.
+    panel:SetSize(W, TOP_CHROME + (ROW_H + 2 + 2) + SEP_GAP + 1 + SEP_GAP + CONTROLS_H + BOTTOM_MARGIN)
     panel:SetPoint("CENTER", UIParent, "CENTER", -260, 0)
     panel:SetMovable(true)
     panel:SetClampedToScreen(true)
@@ -363,16 +384,19 @@ local function Build()
     content:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -26)
     content:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -PAD, -26)
 
-    local controls = CreateFrame("Frame", nil, panel)
-    controls:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, 8)
-    controls:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -PAD, 8)
-    controls:SetHeight(238)
-
+    -- Ancré au bas de la LISTE (pas du panneau) : sa position suit donc
+    -- directement `content`, quelle que soit la taille du groupe — voir
+    -- TOP_CHROME/SEP_GAP/CONTROLS_H/BOTTOM_MARGIN plus haut.
     local controlSep = panel:CreateTexture(nil, "ARTWORK")
-    controlSep:SetPoint("BOTTOMLEFT", controls, "TOPLEFT", 0, 6)
-    controlSep:SetPoint("BOTTOMRIGHT", controls, "TOPRIGHT", 0, 6)
+    controlSep:SetPoint("TOPLEFT", content, "BOTTOMLEFT", 0, -SEP_GAP)
+    controlSep:SetPoint("TOPRIGHT", content, "BOTTOMRIGHT", 0, -SEP_GAP)
     controlSep:SetHeight(1)
     UI.ApplySeparator(controlSep, true)
+
+    local controls = CreateFrame("Frame", nil, panel)
+    controls:SetPoint("TOPLEFT", controlSep, "BOTTOMLEFT", 0, -SEP_GAP)
+    controls:SetPoint("TOPRIGHT", controlSep, "BOTTOMRIGHT", 0, -SEP_GAP)
+    controls:SetHeight(CONTROLS_H)
 
     local valueLabel = controls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     valueLabel:SetPoint("TOPLEFT", controls, "TOPLEFT", 2, -2)
@@ -390,17 +414,17 @@ local function Build()
         { value = "mana", label = "Mana" },
         { value = "endurance", label = "Endurance" },
     }, function() return selectedStat end, function(value) selectedStat = value end)
-    statDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -58)
+    statDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -46)
 
     local actionDropdown = CreateMiniDropdown(controls, W - PAD * 2, "Action", {
         { value = "damage", label = "Retrait" },
         { value = "gain", label = "Gain" },
         { value = "buff", label = "Buff temp." },
     }, function() return selectedAction end, function(value) selectedAction = value end)
-    actionDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -118)
+    actionDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -92)
 
     multiCB = UI.CreateStyledCheckbox(controls, "Multicible")
-    multiCB:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -174)
+    multiCB:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -138)
     multiCB.label:SetPoint("LEFT", multiCB, "RIGHT", 5, 0)
     multiCB:SetScript("OnClick", function(self)
         if not self:GetChecked() then
@@ -412,9 +436,29 @@ local function Build()
         end
     end)
 
+    -- "+ État" et Appliquer enchaînés depuis Multicible (TOP-anchorés, pas
+    -- ancrés depuis le bas de `controls`) : leur position ne dépend donc que
+    -- de ce qui est réellement au-dessus, jamais d'une hauteur de `controls`
+    -- à recaler à la main (voir CONTROLS_H plus haut, qui ne sert plus qu'au
+    -- calcul de la hauteur du panneau, pas à leur position).
+
+    -- Ouvre le popup partagé "Ajouter un état" (UI_Initiative.lua) : liste
+    -- TOUTES les cibles disponibles (joueurs ET PNJ), nom + icone seulement —
+    -- contrairement à la liste ci-dessus qui ne montre que les joueurs (les
+    -- joueurs ne voient pas le détail des PNJ), c'est la seule façon pour un
+    -- joueur normal de viser aussi un PNJ.
+    local addStatusBtn = UI.CreatePanelButton(controls, W - PAD * 2, 20, "+ État")
+    addStatusBtn:SetPoint("TOPLEFT", multiCB, "BOTTOMLEFT", 0, -8)
+    addStatusBtn:SetScript("OnClick", function()
+        if not C.initiative.active then
+            if ShowGroupStatus then ShowGroupStatus("Combat non démarré") end
+            return
+        end
+        if C.OpenStatusPopup then C:OpenStatusPopup() end
+    end)
+
     applyBtn = UI.CreatePanelButton(controls, W - PAD * 2, 20, "Appliquer")
-    applyBtn:SetPoint("BOTTOMLEFT", controls, "BOTTOMLEFT", 0, 18)
-    applyBtn:SetPoint("BOTTOMRIGHT", controls, "BOTTOMRIGHT", 0, 18)
+    applyBtn:SetPoint("TOPLEFT", addStatusBtn, "BOTTOMLEFT", 0, -8)
     applyBtn:SetScript("OnClick", ApplyToSelected)
 
     statusFS = controls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

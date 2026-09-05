@@ -5,4 +5,4 @@
 --  dans Core.lua, en bas du fichier).
 -- ============================================================
 
-CHARACTER_VERSION = "1.1.21"
+CHARACTER_VERSION = "1.1.22"

@@ -356,6 +356,7 @@ C.initiative = {
     currentIndex = 1,
     participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
     events       = {},  -- { {id, participantId, description, turnsLeft, interval, repeatable}, ... } — voir AddEvent
+    statuses     = {},  -- { {id, targetId, text, turnsLeft, source}, ... } — voir AddStatus, synchronisé (contrairement à events)
 }
 
 local nextNpcSeq = 0
@@ -417,6 +418,18 @@ local function PackInitiative()
             table.insert(parts, EncodeIcon(p.icon))
         end
     end
+    -- États appliqués (voir AddStatus) : contrairement aux évènements, ils
+    -- doivent être visibles de tout le monde (badge "E" + infobulle sur la
+    -- bannière, voir UI_Initiative.lua), donc synchronisés ici comme les
+    -- participants plutôt que gardés purement côté hôte.
+    table.insert(parts, #st.statuses)
+    for _, s in ipairs(st.statuses) do
+        table.insert(parts, Enc(s.id))
+        table.insert(parts, Enc(s.targetId))
+        table.insert(parts, Enc(s.text))
+        table.insert(parts, math.floor(tonumber(s.turnsLeft) or 0))
+        table.insert(parts, Enc(s.source))
+    end
     return table.concat(parts, SEP)
 end
 
@@ -466,9 +479,27 @@ local function UnpackInitiative(payload)
         end
         participants[i] = entry
     end
+
+    if not t[idx] then return false end
+    local nStatuses = tonumber(t[idx]) or 0
+    idx = idx + 1
+    local statuses = {}
+    for i = 1, nStatuses do
+        if not AllPresent(t[idx], t[idx + 1], t[idx + 2], t[idx + 3], t[idx + 4]) then return false end
+        statuses[i] = {
+            id        = t[idx],
+            targetId  = t[idx + 1],
+            text      = t[idx + 2],
+            turnsLeft = tonumber(t[idx + 3]) or 0,
+            source    = t[idx + 4],
+        }
+        idx = idx + 5
+    end
+
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
     C.initiative.participants = participants
+    C.initiative.statuses     = statuses
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
     return true
 end
@@ -539,6 +570,7 @@ function C:StartCombat()
     C.initiative.currentIndex = 1
     C.initiative.participants = {}
     C.initiative.events       = {}
+    C.initiative.statuses     = {}
     nextNpcSeq = 0
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
@@ -549,6 +581,7 @@ function C:EndCombat()
     C.initiative.active       = false
     C.initiative.participants = {}
     C.initiative.events       = {}
+    C.initiative.statuses     = {}
     C.initiative.currentIndex = 1
     BroadcastInitiative()
     C.initiative.isHost = false
@@ -632,27 +665,28 @@ function C:RemoveNPC(id)
         end
     end
     C:RemoveEventsFor(id)
+    C:RemoveStatusesFor(id)
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
 
 -- ── Évènements différés ("dans N tours") ────────────────────────────────────
--- Deux formes : accroché à un participant précis (décrémenté uniquement
--- quand c'est SON tour — donc une fois par tour de table, chaque participant
--- ne jouant qu'une fois par tour), ou "général" (participantId = nil,
--- dissocié de tout participant à l'affichage — voir UI_Initiative.lua). Un
--- général n'en est pas moins injecté dans la rotation : à la création, on
--- retient dans `anchorId` le participant en cours à cet instant (voir
--- AddEvent), et il décompte ensuite exactement comme un évènement accroché à
--- CE participant (voir TickEventsFor) — donc jamais sur le tour où il
--- apparaît (il faut que ce participant termine son tour ET fasse un tour de
--- table complet avant de retomber sur lui), et une fois par tour de table
--- ensuite. Annoncés en /rw (ou /p si pas en raid) une fois à 0 ; si
--- `repeatable`, se relance pour `interval` tours de plus au lieu d'être
--- retiré (ex. une bourrasque qui revient tant que le MJ ne la retire pas).
--- Contrairement aux participants/PNJ, purement local à l'hôte : pas besoin
--- de les synchroniser aux autres clients puisque l'annonce en chat, elle,
--- atteint tout le monde au moment voulu.
+-- Deux formes : accroché à un participant précis, ou "général" (participantId
+-- = nil, dissocié de tout participant à l'affichage — voir UI_Initiative.lua)
+-- et alors ancré dans `anchorId` au participant en cours à l'instant de la
+-- création (voir AddEvent). Décompte et déclenchement sont deux étapes
+-- distinctes (voir TickEventsFor) : le compteur descend de 1 à CHAQUE tour de
+-- table complet, pour tous les évènements sans exception (peu importe à qui
+-- ils sont accrochés) ; mais l'évènement ne se déclenche (annonce + retrait,
+-- ou reset si `repeatable`) que lorsque le bandeau d'initiative arrive
+-- effectivement sur le participant visé (celui accroché, ou l'ancre pour un
+-- général) — même si le compteur est tombé à 0 avant, il patiente jusque-là.
+-- Annoncés en /rw (ou /p si pas en raid) au déclenchement ; si `repeatable`,
+-- se relance pour `interval` tours de plus au lieu d'être retiré (ex. une
+-- bourrasque qui revient tant que le MJ ne la retire pas). Contrairement aux
+-- participants/PNJ, purement local à l'hôte : pas besoin de les synchroniser
+-- aux autres clients puisque l'annonce en chat, elle, atteint tout le monde
+-- au moment voulu.
 local nextEventSeq = 0
 
 local function FindParticipant(id)
@@ -676,8 +710,9 @@ function C:AddEvent(participantId, description, turns, repeatable)
     if description == "" or turns < 1 then return false end
     nextEventSeq = nextEventSeq + 1
     -- Ancre un évènement général au participant dont c'est le tour à
-    -- l'instant de la création : il ne décomptera donc qu'à son PROCHAIN
-    -- tour, jamais immédiatement (voir TickEventsFor).
+    -- l'instant de la création : c'est ce participant que le bandeau devra
+    -- retrouver pour que l'évènement se déclenche (le décompte, lui, avance
+    -- à chaque tour de table pour tous les évènements — voir TickEventsFor).
     local anchorId
     if participantId == nil then
         local current = C.initiative.participants[C.initiative.currentIndex]
@@ -730,6 +765,145 @@ function C:RemoveEventsFor(participantId)
     if removed and C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
 
+-- ── États appliqués ("+7 de Défense Magique pendant 4 tours") ───────────────
+-- Contrairement à un évènement (accroché ou général, réservé à l'hôte), un
+-- état peut être appliqué par N'IMPORTE QUEL joueur sur N'IMPORTE QUEL
+-- participant (joueur ou PNJ) — voir UI_Initiative.lua, popup "Ajouter un
+-- état" accessible à tous. Toujours ponctuel (pas de `repeatable`) : dure
+-- `turns` tours de CETTE cible, point. Décompte (voir TickStatusesFor) une
+-- fois par tour de table complet, comme un évènement — jamais simplement
+-- parce qu'on retombe sur sa cible, il faut qu'une boucle complète se soit
+-- écoulée depuis la dernière fois. Seule l'ANNONCE (voir NotifyStatusTurn),
+-- elle, reste propre à sa cible : déclenchée pile quand le bandeau arrive sur
+-- elle, jamais sur le tour de quelqu'un d'autre. Synchronisé à tout le monde
+-- (PackInitiative / UnpackInitiative) pour le badge "E" + infobulle sur la
+-- bannière, mais l'annonce elle-même est purement privée : print local si la
+-- cible c'est nous, chuchotement sinon (jamais un message de groupe,
+-- contrairement à AnnounceToGroup pour les évènements).
+local nextStatusSeq = 0
+
+-- N'importe qui peut demander l'ajout d'un état, mais seul l'hôte peut
+-- réellement l'enregistrer (même schéma que _ApplyInitiativeInput) : appelé
+-- soit directement si on est l'hôte, soit via réception du message réseau
+-- "SA" envoyé par C:RequestAddStatus.
+function C:AddStatus(targetId, text, turns, source)
+    if not C.initiative.isHost or not C.initiative.active then return false end
+    if not targetId or targetId == "" then return false end
+    if not FindParticipant(targetId) then return false end
+    text = tostring(text or ""):match("^%s*(.-)%s*$") or ""
+    turns = math.floor(tonumber(turns) or 0)
+    if text == "" or turns < 1 then return false end
+    nextStatusSeq = nextStatusSeq + 1
+    table.insert(C.initiative.statuses, {
+        id        = "st" .. nextStatusSeq,
+        targetId  = targetId,
+        text      = text,
+        turnsLeft = turns,
+        source    = tostring(source or MyName()),
+    })
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
+end
+
+-- Point d'entrée côté UI (popup "Ajouter un état") : `targetIds` peut être
+-- une cible unique (chaîne) ou une liste (plusieurs cibles sélectionnées).
+-- Diffusé à tout le groupe comme "II" (pas chuchoté à l'hôte en particulier :
+-- on ne sait pas forcément qui il est) ; chaque client reçoit le message
+-- mais seul C:AddStatus, gardé côté hôte, l'applique pour de vrai.
+function C:RequestAddStatus(targetIds, text, turns)
+    if type(targetIds) == "string" then targetIds = { targetIds } end
+    if not targetIds or #targetIds == 0 then return false end
+    turns = math.floor(tonumber(turns) or 0)
+    local source = MyName()
+    local ct = GroupChat()
+    for _, targetId in ipairs(targetIds) do
+        if targetId and targetId ~= "" then
+            if ct then
+                SendAddon("SA|" .. Enc(targetId) .. SEP .. Enc(text) .. SEP .. tostring(turns) .. SEP .. Enc(source), ct)
+            end
+            if C.initiative.isHost then C:AddStatus(targetId, text, turns, source) end
+        end
+    end
+    return true
+end
+
+-- Retire les états en attente accrochés à ce participant (appelé quand il
+-- quitte l'initiative) — même logique que RemoveEventsFor, mais sans
+-- broadcast/OnInitiativeChanged ici : les deux appelants (RemoveNPC,
+-- PruneDisconnectedPlayers) le font déjà juste après.
+function C:RemoveStatusesFor(participantId)
+    if not C.initiative.isHost or not participantId then return end
+    local statuses = C.initiative.statuses
+    for i = #statuses, 1, -1 do
+        if statuses[i].targetId == participantId then table.remove(statuses, i) end
+    end
+end
+
+-- Annonce localement le décompte d'un état à sa cible, jamais au reste du
+-- groupe : print direct si la cible c'est nous, chuchotement sinon (reçu et
+-- juste réaffiché en local par l'autre client, voir HandlePayload "SP"). Un
+-- PNJ n'ayant pas de client à qui parler, c'est l'hôte (seul à le gérer) qui
+-- reçoit le rappel à sa place.
+local function NotifyStatusTurn(p, st)
+    local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source
+    local turnWord = (st.turnsLeft == 1) and "tour" or "tours"
+    local msg = sourceLabel .. " vous a appliqué : " .. st.text .. ". Il reste " .. st.turnsLeft .. " " .. turnWord .. "."
+    if p.kind == "npc" then
+        OmegaHub.Print("|cff33CCFF[" .. (p.name or p.id) .. "]|r " .. msg)
+        return
+    end
+    if p.id == MyName() then
+        OmegaHub.Print(msg)
+    else
+        -- Pas d'Enc() ici : contrairement à "SA" (plusieurs champs joints
+        -- par SEP), "SP" ne transporte qu'un seul message déjà mis en forme,
+        -- jamais re-scindé à la réception (voir HandlePayload) — l'encoder
+        -- irait juste bousiller la ponctuation du message ("_" à la place
+        -- des ":").
+        SendAddon("SP|" .. msg, "WHISPER", p.id)
+    end
+end
+
+-- Même principe à deux étapes que TickEventsFor pour les évènements :
+--
+-- 1) Décompte : le compteur de CHAQUE état en attente descend de 1 dès
+--    qu'un tour de table complet vient de s'achever (`roundAdvanced`, vrai
+--    quand ce tour de jeu boucle sur la position 1, voir NextTurn) — donc une
+--    fois par tour de table, jamais simplement parce qu'on retombe sur sa
+--    cible (sinon rien n'empêchait un état "pendant 3 tours" appliqué juste
+--    avant le tour de sa cible de décompter dès ce tour-là, sans qu'une
+--    boucle complète se soit écoulée).
+--
+-- 2) Annonce (voir NotifyStatusTurn) : reste déclenchée pile au moment où le
+--    bandeau arrive sur la cible de l'état — jamais avant, jamais sur le
+--    tour de quelqu'un d'autre — et reflète le compteur déjà décompté cette
+--    fois-ci (les participants jouant dans l'ordre d'initiative décroissant,
+--    la position 1 — donc le décompte — passe toujours avant n'importe quelle
+--    autre cible dans le même tour de table). Retire l'état une fois à 0.
+--
+-- Purement côté hôte, appelé depuis NextTurn juste après avoir désigné le
+-- nouveau participant courant (avant BroadcastInitiative, pour que le
+-- décompte parte dans la même diffusion).
+local function TickStatusesFor(p, roundAdvanced)
+    if not p then return end
+    local statuses = C.initiative.statuses
+
+    if roundAdvanced then
+        for _, st in ipairs(statuses) do
+            st.turnsLeft = st.turnsLeft - 1
+        end
+    end
+
+    for i = #statuses, 1, -1 do
+        local st = statuses[i]
+        if st.targetId == p.id then
+            NotifyStatusTurn(p, st)
+            if st.turnsLeft <= 0 then table.remove(statuses, i) end
+        end
+    end
+end
+
 -- Retire de l'initiative les joueurs déconnectés (UnitIsConnected faux) :
 -- sans ça ils restent affichés dans la bannière / tour par tour bien
 -- qu'injoignables. Ne touche pas aux joueurs ayant simplement quitté le
@@ -750,6 +924,7 @@ local function PruneDisconnectedPlayers()
                     C.initiative.currentIndex = C.initiative.currentIndex - 1
                 end
                 C:RemoveEventsFor(p.id)
+                C:RemoveStatusesFor(p.id)
                 removed = true
             end
         end
@@ -789,42 +964,51 @@ function C:AnnounceCurrentTurn()
     AnnounceToGroup("Au tour de " .. label .. " !")
 end
 
--- Décrémente les évènements accrochés à ce participant quand c'est (de
--- nouveau) son tour — donc une fois par tour de table, chaque participant ne
--- jouant qu'une fois par tour. Un évènement général (participantId nil) est
--- ancré au participant qui était en cours à sa création (`anchorId`, voir
--- AddEvent) et suit exactement la même règle sur SES tours à lui : jamais au
--- moment de la création (ce n'est pas encore "son" tour suivant), une fois
--- par tour de table ensuite. Si ce participant a depuis quitté le combat
--- (PNJ supprimé, joueur déconnecté), on retombe sur `roundAdvanced` (vrai
--- quand ce tour de jeu boucle sur un nouveau tour de table, voir NextTurn)
--- pour ne pas rester bloqué indéfiniment. Annonce/retire ceux qui atteignent
--- 0, sauf s'ils sont `repeatable` : ils se relancent alors pour `interval`
--- tours de plus (l'annonce, elle, a bien lieu à chaque déclenchement).
+-- Deux étapes bien distinctes, dans cet ordre :
+--
+-- 1) Décompte : le compteur de CHAQUE évènement en attente descend de 1 dès
+--    qu'un tour de table complet vient de s'achever (`roundAdvanced`, vrai
+--    quand ce tour de jeu boucle sur la position 1, voir NextTurn) — donc une
+--    fois par tour de table, pour tous les évènements sans exception, peu
+--    importe à qui ils sont accrochés ni de qui c'est le tour maintenant.
+--
+-- 2) Déclenchement : un évènement dont le compteur est à 0 (ou moins) ne se
+--    déclenche PAS immédiatement pour autant — il patiente jusqu'à ce que le
+--    bandeau d'initiative arrive effectivement sur sa cible (le participant
+--    accroché, ou l'ancre pour un évènement général — `anchorId`, retenu à
+--    la création, voir AddEvent). Si cette cible a depuis quitté le combat
+--    (PNJ supprimé, joueur déconnecté), on retombe sur `roundAdvanced` pour
+--    ne pas rester bloqué indéfiniment en attendant un tour qui ne revient
+--    plus. Au déclenchement : annonce, puis retrait, sauf si `repeatable` —
+--    il se relance alors pour `interval` tours de plus.
+--
 -- Appelé depuis NextTurn juste après avoir désigné le nouveau participant
 -- courant.
 local function TickEventsFor(p, roundAdvanced)
     if not p then return end
     local events = C.initiative.events
+
+    if roundAdvanced then
+        for _, e in ipairs(events) do
+            e.turnsLeft = e.turnsLeft - 1
+        end
+    end
+
     for i = #events, 1, -1 do
         local e = events[i]
-        local ticks
-        if e.participantId ~= nil then
-            ticks = (e.participantId == p.id)
-        elseif e.anchorId and FindParticipant(e.anchorId) then
-            ticks = (e.anchorId == p.id)
+        local target = e.participantId or e.anchorId
+        local fires
+        if target and FindParticipant(target) then
+            fires = (target == p.id)
         else
-            ticks = roundAdvanced
+            fires = roundAdvanced
         end
-        if ticks then
-            e.turnsLeft = e.turnsLeft - 1
-            if e.turnsLeft <= 0 then
-                AnnounceToGroup(e.description)
-                if e.repeatable then
-                    e.turnsLeft = e.interval
-                else
-                    table.remove(events, i)
-                end
+        if fires and e.turnsLeft <= 0 then
+            AnnounceToGroup(e.description)
+            if e.repeatable then
+                e.turnsLeft = e.interval
+            else
+                table.remove(events, i)
             end
         end
     end
@@ -864,6 +1048,7 @@ function C:NextTurn()
         local p = C.initiative.participants[idx]
         if p and IsParticipantAlive(p) then
             C.initiative.currentIndex = idx
+            TickStatusesFor(p, roundAdvanced)
             BroadcastInitiative()
             C:AnnounceCurrentTurn()
             TickEventsFor(p, roundAdvanced)
@@ -928,6 +1113,28 @@ local function HandlePayload(payload, sender)
     local iiBody = payload:match("^II%|(.*)$")
     if iiBody then
         if IsGroupMember(name) then C:_ApplyInitiativeInput(name, tonumber(iiBody) or 0) end
+        return true
+    end
+
+    -- "Ajouter un état" (n'importe qui peut demander, seul l'hôte applique
+    -- réellement — voir C:RequestAddStatus / C:AddStatus).
+    local saBody = payload:match("^SA%|(.*)$")
+    if saBody then
+        if IsGroupMember(name) then
+            local targetId, text, turnsStr, source = strsplit(SEP, saBody, 4)
+            if targetId and text and turnsStr then
+                C:AddStatus(targetId, text, tonumber(turnsStr) or 0, source or name)
+            end
+        end
+        return true
+    end
+
+    -- Annonce privée du décompte d'un état (voir NotifyStatusTurn) : un
+    -- chuchotement adressé directement à sa cible, jamais rediffusé — on se
+    -- contente de le réafficher tel quel en local.
+    local spBody = payload:match("^SP%|(.*)$")
+    if spBody then
+        if IsGroupMember(name) then OmegaHub.Print(spBody) end
         return true
     end
 
