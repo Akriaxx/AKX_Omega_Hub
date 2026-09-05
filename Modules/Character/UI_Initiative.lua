@@ -24,6 +24,10 @@ local eventCards = {}
 -- ressources), jamais depuis cette bannière elle-même.
 local OpenEventPopup
 
+-- Idem pour le popup "États actifs" (retirer un état) : référencé depuis le
+-- OnClick du badge "E" d'une carte (MakeCard), avant sa définition plus bas.
+local OpenStatusManagePopup
+
 -- Idem pour le panneau "Cibles" et le compteur de sélection du popup "État" :
 -- référencés depuis MakeStatusTargetRow (une ligne cliquée doit ouvrir/fermer
 -- l'un et rafraîchir l'autre) avant leur définition respective plus bas.
@@ -71,6 +75,16 @@ local function FindParticipantById(id)
     for _, p in ipairs(C.initiative.participants) do
         if p.id == id then return p end
     end
+end
+
+-- Texte de décompte d'un état pour l'infobulle du badge "E" / le popup
+-- "États actifs" : "(terminé)" une fois `expired` (voir TickStatusesFor côté
+-- Core.lua — l'état reste affiché jusqu'à la fin du tour de sa cible plutôt
+-- que d'être retiré instantanément à 0), sinon "(N tour[s])".
+local function StatusCountdownText(s)
+    if s.expired then return "(terminé)" end
+    local turnWord = (s.turnsLeft > 1) and "tours" or "tour"
+    return "(" .. s.turnsLeft .. " " .. turnWord .. ")"
 end
 
 -- ── Bannière ──────────────────────────────────────────────────────────────────
@@ -301,7 +315,11 @@ local function MakeCard(parent)
     -- Petit "E" en haut à gauche DE L'ICONE tant que ce participant a au
     -- moins un état actif (voir C.initiative.statuses, synchronisé à tout le
     -- monde contrairement aux évènements) : visible pour tous, pas seulement
-    -- l'hôte. L'infobulle liste chaque état et qui l'a appliqué.
+    -- l'hôte. L'infobulle liste chaque état et qui l'a appliqué ; un clic
+    -- ouvre le popup "États actifs" (voir OpenStatusManagePopup plus bas) qui
+    -- permet, si on y est autorisé, de les retirer (bouton × sur chaque
+    -- ligne) : la cible elle-même peut se "soigner", l'hôte du combat peut
+    -- retirer l'état de n'importe qui.
     local statusBadge = CreateFrame("Frame", nil, card)
     statusBadge:SetSize(14, 12)
     statusBadge:SetPoint("TOPLEFT", card, "TOPLEFT", -2, 2)
@@ -320,14 +338,20 @@ local function MakeCard(parent)
         for _, s in ipairs(C.initiative.statuses or {}) do
             if s.targetId == card.participantId then
                 local sourceLabel = (C.GetDisplayName and C:GetDisplayName(s.source, C.groupData[s.source])) or s.source
-                local turnWord = (s.turnsLeft > 1) and "tours" or "tour"
-                GameTooltip:AddLine(s.text .. "  (" .. s.turnsLeft .. " " .. turnWord .. ")", unpack(UI.colors.textMuted))
+                GameTooltip:AddLine(s.text .. "  " .. StatusCountdownText(s), unpack(UI.colors.textMuted))
                 GameTooltip:AddLine("— par " .. sourceLabel, unpack(UI.colors.textMuted))
             end
         end
+        GameTooltip:AddLine("Clic pour retirer un état", unpack(UI.colors.textMuted))
         GameTooltip:Show()
     end)
     statusBadge:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Simple Frame (pas un Button) : OnMouseUp plutôt que OnClick, qui n'a
+    -- d'effet que sur les widgets de type Button.
+    statusBadge:SetScript("OnMouseUp", function(self)
+        if not card.participantId then return end
+        if OpenStatusManagePopup then OpenStatusManagePopup(card.participantId, self) end
+    end)
     statusBadge:Hide()
     card.statusBadge = statusBadge
 
@@ -919,6 +943,139 @@ function C:OpenStatusPopup()
     return true
 end
 
+-- ── Popup "États actifs" (retirer un état) ──────────────────────────────────
+-- Ouvert en cliquant le badge "E" d'une carte : liste les états accrochés à
+-- CE participant, avec un bouton × pour les retirer — visible seulement si on
+-- y est autorisé (voir C:RemoveStatus côté Core.lua) : la cible elle-même
+-- peut se "soigner" (ex. retirer un -5 Défense Physique), et l'hôte du combat
+-- peut retirer n'importe quel état à n'importe qui. Un simple spectateur voit
+-- la liste (comme l'infobulle du badge) mais aucun bouton ×.
+
+local statusManagePopup = CreateFrame("Frame", nil, banner)
+statusManagePopup:SetSize(190, 50)
+statusManagePopup:SetFrameStrata("DIALOG")
+statusManagePopup:SetMovable(true)
+statusManagePopup:SetClampedToScreen(true)
+statusManagePopup:EnableMouse(true)
+statusManagePopup:Hide()
+
+local statusManageBg = statusManagePopup:CreateTexture(nil, "BACKGROUND")
+statusManageBg:SetAllPoints()
+UI.ApplyWindowBackground(statusManageBg, 0.95)
+UI.ApplyBorder(statusManagePopup)
+
+local statusManageBar = CreateFrame("Frame", nil, statusManagePopup)
+statusManageBar:SetPoint("TOPLEFT"); statusManageBar:SetPoint("TOPRIGHT")
+statusManageBar:SetHeight(20)
+statusManageBar:EnableMouse(true)
+statusManageBar:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then statusManagePopup:StartMoving() end end)
+statusManageBar:SetScript("OnMouseUp", function() statusManagePopup:StopMovingOrSizing() end)
+
+local statusManageBarBg = statusManageBar:CreateTexture(nil, "BACKGROUND")
+statusManageBarBg:SetAllPoints()
+statusManageBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+
+local statusManageTitle = statusManageBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+statusManageTitle:SetPoint("LEFT", statusManageBar, "LEFT", 8, 0)
+statusManageTitle:SetText("États actifs")
+UI.ApplyTitle(statusManageTitle)
+
+local statusManageCloseBtn = UI.CreateCloseButton(statusManagePopup, function() statusManagePopup:Hide() end)
+statusManageCloseBtn:ClearAllPoints()
+statusManageCloseBtn:SetPoint("TOPRIGHT", statusManagePopup, "TOPRIGHT", -3, -3)
+statusManageCloseBtn:SetSize(18, 16)
+statusManageCloseBtn:SetFrameLevel(statusManagePopup:GetFrameLevel() + 50)
+
+local STATUS_MANAGE_ROW_H = 26
+
+local function MakeStatusManageRow(parent)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(STATUS_MANAGE_ROW_H)
+
+    local removeBtn = UI.CreateCloseButton(row, nil)
+    removeBtn:ClearAllPoints()
+    removeBtn:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 0)
+    removeBtn:SetSize(14, 14)
+    row.removeBtn = removeBtn
+
+    local textFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    textFS:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    textFS:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
+    textFS:SetJustifyH("LEFT")
+    textFS:SetWordWrap(false)
+    UI.ApplyBodyText(textFS)
+
+    local sourceFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sourceFS:SetPoint("TOPLEFT", textFS, "BOTTOMLEFT", 0, -1)
+    sourceFS:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    sourceFS:SetJustifyH("LEFT")
+    UI.ApplyMutedText(sourceFS)
+
+    function row:Refresh(st, canRemove)
+        textFS:SetText(st.text .. "  " .. StatusCountdownText(st))
+        local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source
+        sourceFS:SetText("— par " .. sourceLabel)
+        removeBtn:SetShown(canRemove)
+        removeBtn:SetScript("OnClick", function() C:RequestRemoveStatus(st.id) end)
+    end
+
+    return row
+end
+
+local statusManageRows   = {}
+local statusManageTarget = nil  -- id du participant actuellement affiché
+
+local function GetStatusManageRow(i)
+    if not statusManageRows[i] then statusManageRows[i] = MakeStatusManageRow(statusManagePopup) end
+    return statusManageRows[i]
+end
+
+local function RefreshStatusManagePopup()
+    if not statusManageTarget or not statusManagePopup:IsShown() then return end
+
+    local list = {}
+    for _, st in ipairs(C.initiative.statuses or {}) do
+        if st.targetId == statusManageTarget then table.insert(list, st) end
+    end
+
+    -- Plus aucun état sur cette cible (tous retirés/expirés pendant que le
+    -- popup était ouvert) : on ferme, sinon une fenêtre vide resterait là.
+    if #list == 0 then
+        statusManagePopup:Hide()
+        return
+    end
+
+    local canRemove = C.initiative.isHost or statusManageTarget == UnitName("player")
+    local y = -24
+    for i, st in ipairs(list) do
+        local row = GetStatusManageRow(i)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", statusManagePopup, "TOPLEFT", 8, y)
+        row:SetPoint("RIGHT", statusManagePopup, "RIGHT", -8, 0)
+        row:Refresh(st, canRemove)
+        row:Show()
+        y = y - (STATUS_MANAGE_ROW_H + 2)
+    end
+    for i = #list + 1, #statusManageRows do statusManageRows[i]:Hide() end
+
+    statusManagePopup:SetHeight(math.max(50, -y + 8))
+end
+
+-- Appelé depuis le OnClick du badge "E" (voir MakeCard) : `anchorFrame` est
+-- le badge lui-même, pour ouvrir le popup juste en dessous.
+OpenStatusManagePopup = function(participantId, anchorFrame)
+    if not participantId then return end
+    statusManageTarget = participantId
+    statusManagePopup:ClearAllPoints()
+    if anchorFrame then
+        statusManagePopup:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, -4)
+    else
+        statusManagePopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    statusManagePopup:Show()
+    RefreshStatusManagePopup()
+end
+
 -- ── Rendu ─────────────────────────────────────────────────────────────────────
 
 -- HP courants d'un participant : lus directement sur le PNJ (hp embarqué
@@ -1008,12 +1165,17 @@ local function Refresh()
     if C.initiative.active then
         Rebuild()
         banner:Show()
+        -- Reflète en direct un retrait/décompte pendant que le popup est
+        -- ouvert (ex. l'hôte le retire pendant qu'un joueur le regardait) ;
+        -- ne fait rien si le popup n'est pas affiché.
+        RefreshStatusManagePopup()
     else
         -- Sinon un popup laissé ouvert en fin de combat resurgirait tel
         -- quel (visible, ciblant un participant qui n'existe plus) au
         -- prochain combat démarré.
         CloseEventPopup()
         CloseStatusPopup()
+        statusManagePopup:Hide()
         banner:Hide()
     end
 end

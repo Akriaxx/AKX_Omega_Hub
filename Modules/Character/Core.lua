@@ -356,7 +356,7 @@ C.initiative = {
     currentIndex = 1,
     participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
     events       = {},  -- { {id, participantId, description, turnsLeft, interval, repeatable}, ... } — voir AddEvent
-    statuses     = {},  -- { {id, targetId, text, turnsLeft, source}, ... } — voir AddStatus, synchronisé (contrairement à events)
+    statuses     = {},  -- { {id, targetId, text, turnsLeft, source, expired}, ... } — voir AddStatus, synchronisé (contrairement à events)
 }
 
 local nextNpcSeq = 0
@@ -429,6 +429,7 @@ local function PackInitiative()
         table.insert(parts, Enc(s.text))
         table.insert(parts, math.floor(tonumber(s.turnsLeft) or 0))
         table.insert(parts, Enc(s.source))
+        table.insert(parts, s.expired and 1 or 0)
     end
     return table.concat(parts, SEP)
 end
@@ -485,15 +486,16 @@ local function UnpackInitiative(payload)
     idx = idx + 1
     local statuses = {}
     for i = 1, nStatuses do
-        if not AllPresent(t[idx], t[idx + 1], t[idx + 2], t[idx + 3], t[idx + 4]) then return false end
+        if not AllPresent(t[idx], t[idx + 1], t[idx + 2], t[idx + 3], t[idx + 4], t[idx + 5]) then return false end
         statuses[i] = {
             id        = t[idx],
             targetId  = t[idx + 1],
             text      = t[idx + 2],
             turnsLeft = tonumber(t[idx + 3]) or 0,
             source    = t[idx + 4],
+            expired   = tonumber(t[idx + 5]) == 1,
         }
-        idx = idx + 5
+        idx = idx + 6
     end
 
     C.initiative.active       = active
@@ -800,6 +802,7 @@ function C:AddStatus(targetId, text, turns, source)
         text      = text,
         turnsLeft = turns,
         source    = tostring(source or MyName()),
+        expired   = false,  -- voir TickStatusesFor/ExpireStatusesFor
     })
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
@@ -828,6 +831,45 @@ function C:RequestAddStatus(targetIds, text, turns)
     return true
 end
 
+-- Retire manuellement UN état (bouton × dans le popup "États actifs", voir
+-- UI_Initiative.lua) : autorisé pour la cible elle-même (se "soigner" d'un
+-- effet, ex. un -5 Défense Physique qu'on retire) OU pour l'hôte du combat
+-- (le MJ peut retirer un état à n'importe qui, joueur ou PNJ). `requester`
+-- est le nom brut du demandeur — VÉRIFIÉ côté réseau (voir HandlePayload
+-- "SR", qui passe l'expéditeur réel du message, jamais un champ du payload
+-- qu'un client pourrait falsifier), jamais fourni par l'appelant lui-même.
+function C:RemoveStatus(id, requester)
+    if not C.initiative.isHost or not id then return false end
+    local statuses = C.initiative.statuses
+    for i = #statuses, 1, -1 do
+        local st = statuses[i]
+        if st.id == id then
+            if requester and requester ~= st.targetId and requester ~= MyName() then
+                return false
+            end
+            table.remove(statuses, i)
+            BroadcastInitiative()
+            if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+            return true
+        end
+    end
+    return false
+end
+
+-- Point d'entrée côté UI : appelable par n'importe qui (la cible elle-même,
+-- ou l'hôte). Comme C:RequestAddStatus, diffusé à tout le groupe plutôt que
+-- chuchoté à l'hôte en particulier (on ne sait pas forcément qui il est) ;
+-- seul C:RemoveStatus, gardé côté hôte, l'applique pour de vrai.
+function C:RequestRemoveStatus(id)
+    if not id or id == "" then return false end
+    if C.initiative.isHost then
+        return C:RemoveStatus(id, MyName())
+    end
+    local ct = GroupChat()
+    if ct then SendAddon("SR|" .. Enc(id), ct) end
+    return true
+end
+
 -- Retire les états en attente accrochés à ce participant (appelé quand il
 -- quitte l'initiative) — même logique que RemoveEventsFor, mais sans
 -- broadcast/OnInitiativeChanged ici : les deux appelants (RemoveNPC,
@@ -840,15 +882,21 @@ function C:RemoveStatusesFor(participantId)
     end
 end
 
--- Annonce localement le décompte d'un état à sa cible, jamais au reste du
--- groupe : print direct si la cible c'est nous, chuchotement sinon (reçu et
--- juste réaffiché en local par l'autre client, voir HandlePayload "SP"). Un
--- PNJ n'ayant pas de client à qui parler, c'est l'hôte (seul à le gérer) qui
--- reçoit le rappel à sa place.
+-- Annonce localement le décompte (ou la fin) d'un état à sa cible, jamais au
+-- reste du groupe : print direct si la cible c'est nous, chuchotement sinon
+-- (reçu et juste réaffiché en local par l'autre client, voir HandlePayload
+-- "SP"). Un PNJ n'ayant pas de client à qui parler, c'est l'hôte (seul à le
+-- gérer) qui reçoit le rappel à sa place. `st.expired` (voir TickStatusesFor)
+-- distingue l'annonce de fin ("plus que ce tour-ci") du simple décompte.
 local function NotifyStatusTurn(p, st)
-    local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source
-    local turnWord = (st.turnsLeft == 1) and "tour" or "tours"
-    local msg = sourceLabel .. " vous a appliqué : " .. st.text .. ". Il reste " .. st.turnsLeft .. " " .. turnWord .. "."
+    local msg
+    if st.expired then
+        msg = st.text .. " — L'état est terminé. Retrait de l'état à la fin de votre tour."
+    else
+        local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source
+        local turnWord = (st.turnsLeft > 1) and "tours" or "tour"
+        msg = sourceLabel .. " vous a appliqué : " .. st.text .. ". Il reste " .. st.turnsLeft .. " " .. turnWord .. "."
+    end
     if p.kind == "npc" then
         OmegaHub.Print("|cff33CCFF[" .. (p.name or p.id) .. "]|r " .. msg)
         return
@@ -867,20 +915,24 @@ end
 
 -- Même principe à deux étapes que TickEventsFor pour les évènements :
 --
--- 1) Décompte : le compteur de CHAQUE état en attente descend de 1 dès
---    qu'un tour de table complet vient de s'achever (`roundAdvanced`, vrai
---    quand ce tour de jeu boucle sur la position 1, voir NextTurn) — donc une
---    fois par tour de table, jamais simplement parce qu'on retombe sur sa
---    cible (sinon rien n'empêchait un état "pendant 3 tours" appliqué juste
---    avant le tour de sa cible de décompter dès ce tour-là, sans qu'une
---    boucle complète se soit écoulée).
+-- 1) Décompte : le compteur de CHAQUE état encore actif (pas déjà `expired`,
+--    voir plus bas) descend de 1 dès qu'un tour de table complet vient de
+--    s'achever (`roundAdvanced`, vrai quand ce tour de jeu boucle sur la
+--    position 1, voir NextTurn) — donc une fois par tour de table, jamais
+--    simplement parce qu'on retombe sur sa cible (sinon rien n'empêchait un
+--    état "pendant 3 tours" appliqué juste avant le tour de sa cible de
+--    décompter dès ce tour-là, sans qu'une boucle complète se soit écoulée).
 --
 -- 2) Annonce (voir NotifyStatusTurn) : reste déclenchée pile au moment où le
 --    bandeau arrive sur la cible de l'état — jamais avant, jamais sur le
 --    tour de quelqu'un d'autre — et reflète le compteur déjà décompté cette
 --    fois-ci (les participants jouant dans l'ordre d'initiative décroissant,
 --    la position 1 — donc le décompte — passe toujours avant n'importe quelle
---    autre cible dans le même tour de table). Retire l'état une fois à 0.
+--    autre cible dans le même tour de table). Un état qui tombe à 0 n'est PAS
+--    retiré tout de suite : il reste affiché (badge, infobulle) jusqu'à la
+--    fin du tour de sa cible — annoncé comme `expired`, retiré seulement au
+--    tour suivant (voir ExpireStatusesFor, appelé depuis NextTurn juste avant
+--    de désigner le nouveau participant courant).
 --
 -- Purement côté hôte, appelé depuis NextTurn juste après avoir désigné le
 -- nouveau participant courant (avant BroadcastInitiative, pour que le
@@ -891,15 +943,31 @@ local function TickStatusesFor(p, roundAdvanced)
 
     if roundAdvanced then
         for _, st in ipairs(statuses) do
-            st.turnsLeft = st.turnsLeft - 1
+            if not st.expired then st.turnsLeft = st.turnsLeft - 1 end
         end
     end
 
+    for _, st in ipairs(statuses) do
+        if st.targetId == p.id and not st.expired then
+            if st.turnsLeft <= 0 then st.expired = true end
+            NotifyStatusTurn(p, st)
+        end
+    end
+end
+
+-- Retire les états déjà `expired` (tombés à 0 lors d'un tour PRÉCÉDENT de ce
+-- participant, voir TickStatusesFor) : appelé pile quand son tour se termine
+-- — juste avant de désigner le nouveau participant courant dans NextTurn —
+-- pour que "à la fin de votre tour" (annoncé par NotifyStatusTurn) soit
+-- exact : l'état reste visible (badge, infobulle) jusqu'à cet instant, pas
+-- avant.
+local function ExpireStatusesFor(p)
+    if not p then return end
+    local statuses = C.initiative.statuses
     for i = #statuses, 1, -1 do
         local st = statuses[i]
-        if st.targetId == p.id then
-            NotifyStatusTurn(p, st)
-            if st.turnsLeft <= 0 then table.remove(statuses, i) end
+        if st.targetId == p.id and st.expired then
+            table.remove(statuses, i)
         end
     end
 end
@@ -1040,6 +1108,11 @@ function C:NextTurn()
     local n = #C.initiative.participants
     if n == 0 then return false end
 
+    -- Le tour de CE participant se termine à l'instant où on avance : c'est
+    -- lui qu'ExpireStatusesFor doit nettoyer (voir TickStatusesFor), pas le
+    -- nouveau participant courant.
+    local ending = C.initiative.participants[C.initiative.currentIndex]
+
     local idx = C.initiative.currentIndex
     local roundAdvanced = false
     for _ = 1, n do
@@ -1048,6 +1121,7 @@ function C:NextTurn()
         local p = C.initiative.participants[idx]
         if p and IsParticipantAlive(p) then
             C.initiative.currentIndex = idx
+            ExpireStatusesFor(ending)
             TickStatusesFor(p, roundAdvanced)
             BroadcastInitiative()
             C:AnnounceCurrentTurn()
@@ -1126,6 +1200,16 @@ local function HandlePayload(payload, sender)
                 C:AddStatus(targetId, text, tonumber(turnsStr) or 0, source or name)
             end
         end
+        return true
+    end
+
+    -- Retrait d'un état (voir C:RequestRemoveStatus / C:RemoveStatus) : le
+    -- demandeur autorisé, c'est `name` — l'expéditeur RÉEL du message
+    -- (vérifié par le jeu), jamais une valeur du payload qu'un client
+    -- pourrait falsifier pour se faire passer pour la cible ou l'hôte.
+    local srId = payload:match("^SR%|(.*)$")
+    if srId then
+        if IsGroupMember(name) then C:RemoveStatus(srId, name) end
         return true
     end
 

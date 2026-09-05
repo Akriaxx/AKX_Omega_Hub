@@ -2,7 +2,7 @@
 ## Title: Omega Hub
 ## Notes: Gestionnaire central et conteneur monolithique des addons Omega
 ## Author: Lorkk
-## Version: 1.1.22
+## Version: 1.1.24
 ## OptionalDeps: SpellCreator
 ## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB
 ## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
