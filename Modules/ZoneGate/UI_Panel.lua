@@ -14,7 +14,7 @@ local UI = OS2.UI
 local function MyName() return UnitName("player") or "" end
 
 local PANEL_W  = 700
-local PANEL_H  = 760   -- assez haut pour région (points) + action perso + octroi sans se chevaucher
+local PANEL_H  = 800   -- assez haut pour région (points) + action perso + octroi + sélecteur de thème sans se chevaucher
 local PAD      = 12
 local HEADER_H = 40
 local LIST_W   = 220
@@ -65,6 +65,12 @@ local titleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 titleText:SetPoint("LEFT", header, "LEFT", PAD, 0)
 titleText:SetText("Zone Gate")
 UI.ApplyTitle(titleText)
+
+local themesBtn = UI.CreatePanelButton(header, 150, 22, "Atelier des entrées")
+themesBtn:SetPoint("RIGHT", header, "RIGHT", -30, 0)
+themesBtn:SetScript("OnClick", function()
+    if ZoneGateThemePanel then ZoneGateThemePanel:Toggle() end
+end)
 
 UI.CreateCloseButton(panel, function() panel:Hide() end)
 
@@ -400,8 +406,55 @@ local zfAuthorFS = zoneForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmal
 zfAuthorFS:SetPoint("TOPLEFT", zfNameEB, "BOTTOMLEFT", 2, -8)
 UI.ApplyMutedText(zfAuthorFS)
 
+-- Thème hérité par TOUTES les Sous-zones de cette Zone qui n'ont rien
+-- choisi elles-mêmes (voir ZG:ResolveTheme). "" = thème par défaut.
+local zfThemeLabel = zoneForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+zfThemeLabel:SetPoint("TOPLEFT", zfAuthorFS, "BOTTOMLEFT", -2, -12)
+zfThemeLabel:SetText("Thème (hérité par les sous-zones) :")
+UI.ApplyLabel(zfThemeLabel)
+
+local zfThemeDropdown = CreateFrame("Frame", "ZoneGateZoneThemeDropdown", zoneForm, "UIDropDownMenuTemplate")
+zfThemeDropdown:SetPoint("TOPLEFT", zfThemeLabel, "BOTTOMLEFT", -16, -4)
+UIDropDownMenu_SetWidth(zfThemeDropdown, 200)
+UI.StyleDropdown(zfThemeDropdown)
+
+local zfEditThemeBtn = UI.CreatePanelButton(zoneForm, 60, 22, "Éditer")
+zfEditThemeBtn:SetPoint("LEFT", zfThemeDropdown, "RIGHT", 26, 2)
+zfEditThemeBtn:SetScript("OnClick", function()
+    local zone = panel.selectedZoneId and ZG:GetZone(panel.selectedZoneId)
+    if zone and ZoneGateThemePanel then
+        if zone.themeId then ZoneGateThemePanel:EditTheme(zone.themeId)
+        else ZoneGateThemePanel:Toggle() end
+    end
+end)
+
+UIDropDownMenu_Initialize(zfThemeDropdown, function(self, level)
+    local zone = panel.selectedZoneId and ZG:GetZone(panel.selectedZoneId)
+    if not zone then return end
+
+    local info = UIDropDownMenu_CreateInfo()
+    info.text = "(Thème par défaut)"
+    info.notCheckable = true
+    info.func = function()
+        ZG:SetZoneTheme(zone.id, "")
+        UIDropDownMenu_SetText(zfThemeDropdown, "(Thème par défaut)")
+    end
+    UIDropDownMenu_AddButton(info, level)
+
+    for _, theme in ipairs(ZG:GetThemeList()) do
+        local themeInfo = UIDropDownMenu_CreateInfo()
+        themeInfo.text = theme.name
+        themeInfo.notCheckable = true
+        themeInfo.func = function()
+            ZG:SetZoneTheme(zone.id, theme.id)
+            UIDropDownMenu_SetText(zfThemeDropdown, theme.name)
+        end
+        UIDropDownMenu_AddButton(themeInfo, level)
+    end
+end)
+
 local zfHintFS = zoneForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-zfHintFS:SetPoint("TOPLEFT", zfAuthorFS, "BOTTOMLEFT", 0, -10)
+zfHintFS:SetPoint("TOPLEFT", zfThemeDropdown, "BOTTOMLEFT", 16, -12)
 zfHintFS:SetText("Utilisez le \"+\" sur cette zone dans la liste de\ngauche pour y planter un checkpoint ici.")
 zfHintFS:SetJustifyH("LEFT")
 UI.ApplyMutedText(zfHintFS)
@@ -467,8 +520,55 @@ sfActiveCB:SetScript("OnClick", function(self)
     end
 end)
 
+-- Thème de CETTE sous-zone précisément : l'emporte sur celui de la Zone si
+-- choisi (voir ZG:ResolveTheme). "" = hérite du thème de la Zone.
+local sfThemeLabel = subForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+sfThemeLabel:SetPoint("TOPLEFT", sfNameEB, "BOTTOMLEFT", 2, -10)
+sfThemeLabel:SetText("Thème de cette sous-zone :")
+UI.ApplyLabel(sfThemeLabel)
+
+local sfThemeDropdown = CreateFrame("Frame", "ZoneGateSubThemeDropdown", subForm, "UIDropDownMenuTemplate")
+sfThemeDropdown:SetPoint("TOPLEFT", sfThemeLabel, "BOTTOMLEFT", -16, -4)
+UIDropDownMenu_SetWidth(sfThemeDropdown, 180)
+UI.StyleDropdown(sfThemeDropdown)
+
+local sfEditThemeBtn = UI.CreatePanelButton(subForm, 60, 22, "Éditer")
+sfEditThemeBtn:SetPoint("LEFT", sfThemeDropdown, "RIGHT", 26, 2)
+sfEditThemeBtn:SetScript("OnClick", function()
+    local sub = panel.selectedSubZoneId and ZG:FindSubZone(panel.selectedSubZoneId)
+    if sub and ZoneGateThemePanel then
+        if sub.themeId then ZoneGateThemePanel:EditTheme(sub.themeId)
+        else ZoneGateThemePanel:Toggle() end
+    end
+end)
+
+UIDropDownMenu_Initialize(sfThemeDropdown, function(self, level)
+    local sub = panel.selectedSubZoneId and ZG:FindSubZone(panel.selectedSubZoneId)
+    if not sub then return end
+
+    local info = UIDropDownMenu_CreateInfo()
+    info.text = "(Hérite de la Zone)"
+    info.notCheckable = true
+    info.func = function()
+        ZG:SetSubZoneTheme(sub.id, "")
+        UIDropDownMenu_SetText(sfThemeDropdown, "(Hérite de la Zone)")
+    end
+    UIDropDownMenu_AddButton(info, level)
+
+    for _, theme in ipairs(ZG:GetThemeList()) do
+        local themeInfo = UIDropDownMenu_CreateInfo()
+        themeInfo.text = theme.name
+        themeInfo.notCheckable = true
+        themeInfo.func = function()
+            ZG:SetSubZoneTheme(sub.id, theme.id)
+            UIDropDownMenu_SetText(sfThemeDropdown, theme.name)
+        end
+        UIDropDownMenu_AddButton(themeInfo, level)
+    end
+end)
+
 local sfStatusFS = subForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-sfStatusFS:SetPoint("TOPLEFT", sfNameEB, "BOTTOMLEFT", 2, -8)
+sfStatusFS:SetPoint("TOPLEFT", sfThemeDropdown, "BOTTOMLEFT", 16, -10)
 
 -- Forme : ligne (porte), cercle (village) ou région (N points, zone fermée)
 local shapeLineBtn = UI.CreatePanelButton(subForm, 50, 20, "Ligne")
@@ -767,6 +867,14 @@ function panel:RefreshSubZoneForm()
 
     sfActiveCB:SetChecked(sub.enabled)
 
+    sfThemeLabel:SetShown(mine)
+    sfThemeDropdown:SetShown(mine)
+    sfEditThemeBtn:SetShown(mine)
+    if mine then
+        local subTheme = sub.themeId and ZG:GetTheme(sub.themeId)
+        UIDropDownMenu_SetText(sfThemeDropdown, subTheme and subTheme.name or "(Hérite de la Zone)")
+    end
+
     if mine then
         sfStatusFS:SetText("|cff66e673Vous êtes l'auteur — texte toujours visible pour vous.|r")
     else
@@ -873,6 +981,13 @@ function panel:RefreshForm()
         zfNameEB:SetText(zoneKnown and (zone.name or "") or "Zone inconnue")
         panel.suppressEvents = false
         zfAuthorFS:SetText(mine and "Auteur : vous" or ("Auteur : " .. zone.creator))
+        zfThemeLabel:SetShown(mine)
+        zfThemeDropdown:SetShown(mine)
+        zfEditThemeBtn:SetShown(mine)
+        if mine then
+            local zoneTheme = zone.themeId and ZG:GetTheme(zone.themeId)
+            UIDropDownMenu_SetText(zfThemeDropdown, zoneTheme and zoneTheme.name or "(Thème par défaut)")
+        end
         zfHintFS:SetShown(mine)
         zfGrantFrame:SetShown(mine)
         if mine then RefreshGrantList(zfGrantFrame, zone.id, GetZoneGrantList, RevokeZoneGrantFn) end

@@ -28,6 +28,86 @@ local DEFAULT_WIDTH   = 6
 local MAX_WIDTH        = 500  -- yards — de quoi couvrir l'entrée d'un village entier
 local MAX_REGION_POINTS = 20  -- de quoi dessiner un contour détaillé sans payload réseau démesuré
 
+-- ── Thèmes de bannière ──────────────────────────────────────────────────────
+-- Trois polices Blizzard natives ("classique", "abîmé/combat" Skurri,
+-- "fantastique/parchemin" Morpheus — les seules du dossier Fonts\ du client
+-- utilisables pour du texte français ; les autres fichiers sont des jeux de
+-- glyphes cyrillique/chinois/coréen, inutilisables ici) + quatre polices
+-- externes embarquées dans Modules/ZoneGate/Fonts/ (Google Fonts, licence
+-- SIL Open Font License — voir les fichiers OFL-*.txt à côté), choisies pour
+-- leur registre "épique RPG" et vérifiées "latin-ext" (couvre les accents
+-- français). "custom" (voir customFont) permet en plus de pointer vers
+-- n'importe quel autre fichier de police déjà présent chez vous.
+local ADDON_FONT_DIR = "Interface\\AddOns\\Omega_Hub\\Modules\\ZoneGate\\Fonts\\"
+
+ZG.FontPaths = {
+    frizqt        = "Fonts\\FRIZQT__.TTF",
+    skurri        = "Fonts\\SKURRI.TTF",
+    morpheus      = "Fonts\\MORPHEUS.TTF",
+    cinzel        = ADDON_FONT_DIR .. "Cinzel-Regular.ttf",
+    metamorphous  = ADDON_FONT_DIR .. "Metamorphous-Regular.ttf",
+    pirataone     = ADDON_FONT_DIR .. "PirataOne-Regular.ttf",
+    medievalsharp = ADDON_FONT_DIR .. "MedievalSharp-Regular.ttf",
+}
+ZG.FontLabels = {
+    frizqt        = "Standard (FrizQT)",
+    skurri        = "Rugueux (Skurri)",
+    morpheus      = "Fantastique (Morpheus)",
+    cinzel        = "Épique (Cinzel)",
+    metamorphous  = "Runique (Metamorphous)",
+    pirataone     = "Gothique (Pirata One)",
+    medievalsharp = "Manuscrit (MedievalSharp)",
+    custom        = "Personnalisée (chemin de fichier)",
+}
+ZG.FontOrder = {
+    "frizqt", "skurri", "morpheus",
+    "cinzel", "metamorphous", "pirataone", "medievalsharp",
+    "custom",
+}
+
+ZG.SepStyles = { "single", "double", "none" }
+ZG.SepLabels = { single = "Simple", double = "Double", ["none"] = "Aucun" }
+
+-- Cadre autour de toute la bannière — indépendant des séparateurs
+-- (sepStyle/midSepEnabled) et du bandeau de fond (bgEnabled) : les trois se
+-- cumulent librement. "box" = rectangle plein (aucune image, juste des
+-- traits colorés — toujours disponible). "ornate" = coins en filigrane
+-- (Media/FrameCorner.tga, dessiné pour ce thème — voir la section "Cadre"
+-- dans UI_Theme.lua) reliés par les mêmes traits.
+ZG.FrameStyles = { "none", "box", "ornate" }
+ZG.FrameLabels = { ["none"] = "Aucun", box = "Simple", ornate = "Orné" }
+
+-- ── Musiques (dossier Music/) ──────────────────────────────────────────────
+-- WoW ne permet à aucun addon de lister le contenu d'un dossier au moment de
+-- l'exécution (pas d'API Lua pour ça) — la liste vient donc d'un fichier
+-- généré à l'avance, Music/Manifest.lua (ZoneGateMusicManifest, un nom de
+-- fichier par entrée), à régénérer quand le contenu du dossier change (voir
+-- Music/README.txt). GetMusicList() se contente d'y accoler le chemin.
+ZG.MusicDir = "Interface\\AddOns\\Omega_Hub\\Modules\\ZoneGate\\Music\\"
+
+function ZG:GetMusicList()
+    local list = {}
+    for _, fileName in ipairs(ZoneGateMusicManifest or {}) do
+        table.insert(list, { name = fileName, path = ZG.MusicDir .. fileName })
+    end
+    return list
+end
+
+-- Thème appliqué quand une Zone/Sous-zone n'a rien choisi — reproduit
+-- exactement l'ancienne bannière codée en dur (aucune régression visuelle
+-- pour qui n'utilise jamais les thèmes).
+ZG.DefaultTheme = {
+    id = nil, name = "Défaut", creator = nil,
+    font = "frizqt", customFont = "", titleSize = 28,
+    titleColor = { 1.00, 0.90, 0.55 }, subColor = { 0.72, 0.68, 0.55 },
+    outline = false, uppercase = false, letterSpacing = false,
+    sepStyle = "single", sepColor = { 0.25, 0.25, 0.25, 1.00 }, midSepEnabled = false,
+    bgEnabled = false, bgColor = { 0, 0, 0, 0.55 },
+    frameStyle = "none", frameColor = { 0.82, 0.66, 0.20, 0.90 },
+    fadeIn = 0.4, hold = 2.5, fadeOut = 0.8,
+    soundEnter = "", soundExit = "",
+}
+
 local PREFIX     = "OmegaZoneGate"
 local SEP        = ":"
 local CHUNK_SIZE  = 200      -- comme INITIATIVE_CHUNK_SIZE dans Character/Core.lua
@@ -105,6 +185,7 @@ local netFrame = CreateFrame("Frame")
 local function EnsureDB()
     ZoneGateDB = ZoneGateDB or {}
     ZoneGateDB.zones = ZoneGateDB.zones or {}
+    ZoneGateDB.themes = ZoneGateDB.themes or {}
     for _, zone in pairs(ZoneGateDB.zones) do
         zone.subZones = zone.subZones or {}
     end
@@ -465,6 +546,214 @@ function ZG:RenameSubZone(id, name)
     ZG:ScheduleBroadcast()
 end
 
+-- ── CRUD Thèmes ──────────────────────────────────────────────────────────────
+-- Un thème est autonome et réutilisable : posé sur une Zone (hérité par
+-- TOUTES ses Sous-zones qui n'ont rien choisi elles-mêmes) et/ou sur une
+-- Sous-zone précise (l'emporte alors sur celui de la Zone — voir
+-- ResolveTheme). Personnel au créateur, comme les Zones — GetThemeList ne
+-- renvoie que les miens, les autres arrivent par sync et restent utilisables
+-- sur les Zones/Sous-zones qui les référencent déjà (voir ApplyStateLine).
+
+function ZG:CreateTheme(name)
+    name = (name or ""):match("^%s*(.-)%s*$") or ""
+    if name == "" then name = "Nouveau thème" end
+
+    local db = EnsureDB()
+    local id = "th_" .. time() .. "_" .. math.random(1000, 9999)
+    local theme = {}
+    for k, v in pairs(ZG.DefaultTheme) do
+        theme[k] = (type(v) == "table") and { unpack(v) } or v
+    end
+    theme.id, theme.name, theme.creator = id, name, MyName()
+    db.themes[id] = theme
+    ZG:ScheduleBroadcast()
+    return theme
+end
+
+function ZG:RemoveTheme(id)
+    local db = EnsureDB()
+    local theme = db.themes[id]
+    if not theme or theme.creator ~= MyName() then return end
+    db.themes[id] = nil
+    ZG:ScheduleBroadcast()
+    -- Pas de nettoyage en cascade des Zones/Sous-zones qui le référencent :
+    -- ResolveTheme retombe proprement sur ZG.DefaultTheme si l'id ne
+    -- résout plus rien (même logique que les checkpoints orphelins).
+end
+
+function ZG:GetTheme(id)
+    if not id then return nil end
+    return EnsureDB().themes[id]
+end
+
+function ZG:GetThemeList()
+    local db = EnsureDB()
+    local me = MyName()
+    local ids = {}
+    for tid, theme in pairs(db.themes) do
+        if theme.creator == me then table.insert(ids, tid) end
+    end
+    table.sort(ids)
+
+    local list = {}
+    for _, tid in ipairs(ids) do table.insert(list, db.themes[tid]) end
+    return list
+end
+
+function ZG:RenameTheme(id, name)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.name = (name or ""):match("^%s*(.-)%s*$") or theme.name
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeFont(id, font)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.font = (ZG.FontPaths[font] or font == "custom") and font or "frizqt"
+    ZG:ScheduleBroadcast()
+end
+
+-- Chemin utilisé quand font == "custom" — n'importe quel fichier de police
+-- déjà présent chez vous (fourni par un autre addon, par exemple), voir le
+-- commentaire sur ZG.FontPaths. Aucune vérification que le fichier existe
+-- réellement : un chemin invalide retombe silencieusement sur la police par
+-- défaut au rendu (voir ResolveFontPath dans UI_Banner.lua).
+function ZG:SetThemeCustomFont(id, path)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.customFont = (path or ""):match("^%s*(.-)%s*$") or ""
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeTitleSize(id, size)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.titleSize = math.max(10, math.min(60, math.floor((tonumber(size) or theme.titleSize) + 0.5)))
+    ZG:ScheduleBroadcast()
+end
+
+-- which = "title" | "sub" | "sep" | "bg" | "frame" — un seul setter couleur
+-- pour les 5 emplacements du thème plutôt que 5 fonctions quasi identiques.
+-- sepColor/bgColor/frameColor ont un canal alpha (a peut être nil →
+-- conservé tel quel).
+local THEME_COLOR_FIELDS = {
+    title = "titleColor", sub = "subColor", sep = "sepColor", bg = "bgColor", frame = "frameColor",
+}
+function ZG:SetThemeColor(id, which, r, g, b, a)
+    local theme = ZG:GetTheme(id)
+    local field = THEME_COLOR_FIELDS[which]
+    if not theme or not field or theme.creator ~= MyName() then return end
+    local c = theme[field] or {}
+    c[1], c[2], c[3] = r or c[1] or 1, g or c[2] or 1, b or c[3] or 1
+    if a ~= nil then c[4] = a end
+    theme[field] = c
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeOutline(id, enabled)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.outline = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeUppercase(id, enabled)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.uppercase = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeLetterSpacing(id, enabled)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.letterSpacing = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeSeparatorStyle(id, style)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.sepStyle = ZG.SepLabels[style] and style or "single"
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeFrameStyle(id, style)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.frameStyle = ZG.FrameLabels[style] and style or "none"
+    ZG:ScheduleBroadcast()
+end
+
+-- Ligne entre le titre et le sous-titre (indépendante des lignes haut/bas,
+-- qui restent gérées par sepStyle) — même couleur (sepColor), toujours en
+-- trait simple quel que soit sepStyle.
+function ZG:SetThemeMidSeparator(id, enabled)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.midSepEnabled = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeBackgroundEnabled(id, enabled)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    theme.bgEnabled = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetThemeTiming(id, fadeIn, hold, fadeOut)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    if fadeIn  then theme.fadeIn  = math.max(0, math.min(5,  tonumber(fadeIn)  or theme.fadeIn)) end
+    if hold    then theme.hold    = math.max(0, math.min(30, tonumber(hold)    or theme.hold)) end
+    if fadeOut then theme.fadeOut = math.max(0, math.min(5,  tonumber(fadeOut) or theme.fadeOut)) end
+    ZG:ScheduleBroadcast()
+end
+
+-- value : soit un ID numérique (SoundKit Blizzard, via PlaySound), soit un
+-- chemin de fichier ("Sound\..." natif OU un .ogg/.mp3 déposé par vous dans
+-- le dossier de l'addon, via PlaySoundFile) — voir ResolveSoundValue.
+-- direction : "enter" (franchissement "avant") ou "exit" ("arrière").
+function ZG:SetThemeSound(id, direction, value)
+    local theme = ZG:GetTheme(id)
+    if not theme or theme.creator ~= MyName() then return end
+    local field = (direction == "exit") and "soundExit" or "soundEnter"
+    theme[field] = (value or ""):match("^%s*(.-)%s*$") or ""
+    ZG:ScheduleBroadcast()
+end
+
+-- Zone/Sous-zone → thème choisi ("" ou nil = aucun/hérite, voir ResolveTheme).
+function ZG:SetZoneTheme(zoneId, themeId)
+    local zone = ZG:GetZone(zoneId)
+    if not zone or zone.creator ~= MyName() then return end
+    zone.themeId = (themeId ~= "" and themeId) or nil
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetSubZoneTheme(subZoneId, themeId)
+    local sub, zone = ZG:FindSubZone(subZoneId)
+    if not sub or not zone or zone.creator ~= MyName() then return end
+    sub.themeId = (themeId ~= "" and themeId) or nil
+    ZG:ScheduleBroadcast()
+end
+
+-- Résout le thème effectif d'un franchissement : la Sous-zone l'emporte si
+-- elle a choisi le sien, sinon celui de la Zone (tous ses enfants en
+-- héritent), sinon le thème par défaut (comportement d'avant les thèmes).
+function ZG:ResolveTheme(sub, zone)
+    if sub and sub.themeId then
+        local t = ZG:GetTheme(sub.themeId)
+        if t then return t end
+    end
+    if zone and zone.themeId then
+        local t = ZG:GetTheme(zone.themeId)
+        if t then return t end
+    end
+    return ZG.DefaultTheme
+end
+
 -- ── Migration de l'ancien schéma (checkpoints séparés + liaison manuelle) ──
 
 -- Ancien schéma (une itération précédente) : Sous-zones "texte seul" liées
@@ -552,6 +841,38 @@ function ZG:MaskText(text)
         i = i + n
     end
     return table.concat(out)
+end
+
+-- Découpe en unités "un caractère affiché" en respectant les séquences
+-- UTF-8 (même logique que MaskText ci-dessus — pas de librairie utf8.* en
+-- Lua 5.1/WoW).
+local function SplitChars(text)
+    local out = {}
+    local i, len = 1, #text
+    while i <= len do
+        local b = text:byte(i)
+        local n = 1
+        if b >= 240 then n = 4
+        elseif b >= 224 then n = 3
+        elseif b >= 192 then n = 2
+        end
+        table.insert(out, text:sub(i, i + n - 1))
+        i = i + n
+    end
+    return out
+end
+
+-- Applique majuscule/espacement d'un thème à un texte de bannière. La
+-- majuscule est un "best effort" : string.upper() de Lua 5.1 ne connaît que
+-- l'ASCII, donc un caractère accentué (é, è, à…) reste inchangé au lieu
+-- d'être cassé — visuellement imparfait sur du français, jamais corrompu.
+function ZG:StyleThemeText(text, theme)
+    if not text or text == "" then return text end
+    if theme.uppercase then text = text:upper() end
+    if theme.letterSpacing then
+        text = table.concat(SplitChars(text), " ")
+    end
+    return text
 end
 
 -- Connaissance du NOM DE LA ZONE, indépendante de celle de la Sous-zone.
@@ -747,12 +1068,40 @@ function ZG:RunCrossingAction(sub, zone, direction)
     end
 end
 
+-- Son de franchissement : value est soit un ID SoundKit Blizzard (nombre),
+-- soit un chemin de fichier ("Sound\..." natif ou un .ogg/.mp3 déposé par
+-- vous dans le dossier de l'addon) — testé dans cet ordre, silencieux si
+-- vide ou si rien ne joue. Toujours protégé (pcall) : un chemin invalide ne
+-- doit jamais casser le franchissement.
+local function ResolveSoundValue(value)
+    value = (value or ""):match("^%s*(.-)%s*$") or ""
+    if value == "" then return end
+
+    local asId = tonumber(value)
+    if asId and PlaySound then
+        local ok, played = pcall(PlaySound, asId, "Master")
+        if ok and played then return end
+    end
+    if PlaySoundFile then
+        pcall(PlaySoundFile, value, "Master")
+    end
+end
+
+function ZG:PlayCrossingSound(theme, direction)
+    if not theme then return end
+    local value = (direction == "forward") and theme.soundEnter or theme.soundExit
+    ResolveSoundValue(value)
+end
+
 function ZG:TriggerCrossing(sub, zone, direction)
+    local theme = ZG:ResolveTheme(sub, zone)
+
     if (direction == "forward" and sub.forwardEnabled) or (direction == "backward" and sub.backwardEnabled) then
         local title, subtitle = ZG:ResolveBannerText(sub, zone)
         if title and ZG.ShowBanner then
-            ZG:ShowBanner(title, subtitle)
+            ZG:ShowBanner(title, subtitle, theme)
         end
+        ZG:PlayCrossingSound(theme, direction)
     end
 
     ZG:RunCrossingAction(sub, zone, direction)
@@ -787,16 +1136,57 @@ local function UnpackPoints(str)
     return points
 end
 
--- Sérialise tout ce que CE personnage possède (zones + leurs sous-zones,
--- dont il est l'auteur) en un seul bloc, une ligne par enregistrement.
+-- Une couleur, encodée "r,g,b" (ou "r,g,b,a" si withAlpha) — mêmes chiffres
+-- que PackPoints, pas de Enc() nécessaire non plus.
+local function PackColor(c, withAlpha)
+    c = c or {}
+    if withAlpha then
+        return string.format("%.3f,%.3f,%.3f,%.3f", c[1] or 1, c[2] or 1, c[3] or 1, c[4] or 1)
+    end
+    return string.format("%.3f,%.3f,%.3f", c[1] or 1, c[2] or 1, c[3] or 1)
+end
+
+local function UnpackColor(str, withAlpha)
+    local r, g, b, a
+    if withAlpha then
+        r, g, b, a = (str or ""):match("^([%-%d.]+),([%-%d.]+),([%-%d.]+),([%-%d.]+)$")
+    else
+        r, g, b = (str or ""):match("^([%-%d.]+),([%-%d.]+),([%-%d.]+)$")
+    end
+    r, g, b = tonumber(r), tonumber(g), tonumber(b)
+    if not r then return { 1, 1, 1, 1 } end
+    return { r, g, b, withAlpha and (tonumber(a) or 1) or nil }
+end
+
+-- Sérialise tout ce que CE personnage possède (thèmes, zones + leurs
+-- sous-zones, dont il est l'auteur) en un seul bloc, une ligne par
+-- enregistrement. Les thèmes d'abord : purement informatif pour l'ordre de
+-- lecture (ResolveTheme ne résout qu'au moment du franchissement, donc
+-- l'ordre d'arrivée des lignes n'a pas d'incidence réelle).
 local function PackState()
     local me = MyName()
     local db = EnsureDB()
     local lines = {}
 
+    for thid, theme in pairs(db.themes) do
+        if theme.creator == me then
+            table.insert(lines, table.concat({
+                "THEME", Enc(thid), Enc(theme.name), Enc(theme.font), theme.titleSize,
+                PackColor(theme.titleColor), PackColor(theme.subColor),
+                theme.outline and 1 or 0, theme.uppercase and 1 or 0, theme.letterSpacing and 1 or 0,
+                Enc(theme.sepStyle), PackColor(theme.sepColor, true),
+                theme.bgEnabled and 1 or 0, PackColor(theme.bgColor, true),
+                theme.fadeIn, theme.hold, theme.fadeOut,
+                Enc(theme.soundEnter or ""), Enc(theme.soundExit or ""),
+                Enc(theme.customFont or ""), theme.midSepEnabled and 1 or 0,
+                Enc(theme.frameStyle or "none"), PackColor(theme.frameColor, true),
+            }, SEP))
+        end
+    end
+
     for zid, zone in pairs(db.zones) do
         if zone.creator == me then
-            table.insert(lines, table.concat({ "ZONE", Enc(zid), Enc(zone.name) }, SEP))
+            table.insert(lines, table.concat({ "ZONE", Enc(zid), Enc(zone.name), Enc(zone.themeId or "") }, SEP))
             for sid, sub in pairs(zone.subZones) do
                 table.insert(lines, table.concat({
                     "SUB", Enc(sid), Enc(zid), Enc(sub.name), sub.enabled and 1 or 0,
@@ -806,6 +1196,7 @@ local function PackState()
                     sub.regionReady and 1 or 0, PackPoints(sub.points),
                     Enc(sub.actionMessage or ""), Enc(sub.actionCommand or ""),
                     sub.actionForwardEnabled and 1 or 0, sub.actionBackwardEnabled and 1 or 0,
+                    Enc(sub.themeId or ""),
                 }, SEP))
             end
         end
@@ -818,8 +1209,30 @@ local function ApplyStateLine(line, sender)
     local fields = { strsplit(SEP, line) }
     local tag = fields[1]
 
-    if tag == "ZONE" then
-        local id, name = fields[2], fields[3]
+    if tag == "THEME" then
+        local id, name, font, titleSize = fields[2], fields[3], fields[4], fields[5]
+        if id and id ~= "" then
+            ZoneGateDB.themes[id] = {
+                id = id, name = name, creator = sender,
+                font = (ZG.FontPaths[font] or font == "custom") and font or "frizqt",
+                titleSize = tonumber(titleSize) or ZG.DefaultTheme.titleSize,
+                titleColor = UnpackColor(fields[6]), subColor = UnpackColor(fields[7]),
+                outline = fields[8] == "1", uppercase = fields[9] == "1", letterSpacing = fields[10] == "1",
+                sepStyle = ZG.SepLabels[fields[11]] and fields[11] or "single",
+                sepColor = UnpackColor(fields[12], true),
+                bgEnabled = fields[13] == "1",
+                bgColor = UnpackColor(fields[14], true),
+                fadeIn = tonumber(fields[15]) or ZG.DefaultTheme.fadeIn,
+                hold = tonumber(fields[16]) or ZG.DefaultTheme.hold,
+                fadeOut = tonumber(fields[17]) or ZG.DefaultTheme.fadeOut,
+                soundEnter = fields[18] or "", soundExit = fields[19] or "",
+                customFont = fields[20] or "", midSepEnabled = fields[21] == "1",
+                frameStyle = ZG.FrameLabels[fields[22]] and fields[22] or "none",
+                frameColor = UnpackColor(fields[23], true),
+            }
+        end
+    elseif tag == "ZONE" then
+        local id, name, themeId = fields[2], fields[3], fields[4]
         if id and id ~= "" then
             local zone = ZoneGateDB.zones[id]
             if not zone then
@@ -827,14 +1240,15 @@ local function ApplyStateLine(line, sender)
                 ZoneGateDB.zones[id] = zone
             end
             zone.name, zone.creator = name, sender
+            zone.themeId = (themeId and themeId ~= "") and themeId or nil
             zone.subZones = zone.subZones or {}
         end
     elseif tag == "SUB" then
         local id, zoneId, name, enabled, mapID, x, y, facing, width, shape, fwdEn, backEn, regionReady, pointsStr,
-              actionMessage, actionCommand, actFwdEn, actBackEn =
+              actionMessage, actionCommand, actFwdEn, actBackEn, themeId =
             fields[2], fields[3], fields[4], fields[5], fields[6],
             fields[7], fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
-            fields[14], fields[15], fields[16], fields[17], fields[18], fields[19]
+            fields[14], fields[15], fields[16], fields[17], fields[18], fields[19], fields[20]
         local zone = ZoneGateDB.zones[zoneId]
         if zone and id and id ~= "" then
             zone.subZones[id] = {
@@ -851,6 +1265,7 @@ local function ApplyStateLine(line, sender)
                 actionCommand = actionCommand or "",
                 actionForwardEnabled  = actFwdEn == "1",
                 actionBackwardEnabled = actBackEn == "1",
+                themeId = (themeId and themeId ~= "") and themeId or nil,
             }
         end
     end
@@ -863,6 +1278,9 @@ local function ApplyState(payload, sender)
     local db = EnsureDB()
     for zid, zone in pairs(db.zones) do
         if zone.creator == sender then db.zones[zid] = nil end
+    end
+    for thid, theme in pairs(db.themes) do
+        if theme.creator == sender then db.themes[thid] = nil end
     end
     for line in payload:gmatch("[^\n]+") do
         ApplyStateLine(line, sender)

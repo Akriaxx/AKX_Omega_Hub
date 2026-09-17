@@ -498,6 +498,106 @@ local function GetEventCard(i)
     return eventCards[i]
 end
 
+-- ── Cadre "Tour" ──────────────────────────────────────────────────────────────
+-- Nombre de tours de table complets écoulés depuis le début du combat
+-- (C.initiative.round, synchronisé — voir NextTurn côté Core.lua). Affiché
+-- chez tout le monde, pas seulement l'hôte. Panneau à PART ENTIÈRE, en dehors
+-- du bandeau, accroché à sa droite (pas une carte de plus dans la rangée) —
+-- suit donc automatiquement la largeur variable du bandeau (SetWidth dans
+-- Rebuild) via son ancre TOPRIGHT. Enfant de `banner` : se montre/cache et se
+-- redimensionne (SetScale, voir Settings.lua) avec lui automatiquement.
+
+local ROUND_BOX_W = 54
+
+local roundBox = CreateFrame("Frame", nil, banner)
+roundBox:SetSize(ROUND_BOX_W, BANNER_H)
+roundBox:SetPoint("TOPLEFT", banner, "TOPRIGHT", 6, 0)
+
+local roundBoxBg = roundBox:CreateTexture(nil, "BACKGROUND")
+roundBoxBg:SetAllPoints()
+UI.ApplyWindowBackground(roundBoxBg)
+roundBox.bg = roundBoxBg
+UI.ApplyBorder(roundBox)
+banner.roundBox = roundBox
+
+local roundLabel = roundBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+roundLabel:SetPoint("TOP", roundBox, "TOP", 0, -8)
+roundLabel:SetText("Tour")
+UI.ApplyLabel(roundLabel)
+
+local roundValue = roundBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+roundValue:SetPoint("CENTER", roundBox, "CENTER", 0, -6)
+UI.ApplyBodyText(roundValue)
+
+-- Voile cyan (même teinte que la surbrillance "tour en cours" des cartes,
+-- voir MakeCard) qui flashe puis s'éteint en fondu quand le compteur avance —
+-- le côté "s'illumine" demandé, distinct d'un simple changement de texte.
+local roundGlow = roundBox:CreateTexture(nil, "ARTWORK")
+roundGlow:SetAllPoints()
+roundGlow:SetColorTexture(unpack(UI.colors.turnHighlight))
+roundGlow:SetAlpha(0)
+
+local roundGlowAnim = roundGlow:CreateAnimationGroup()
+local roundGlowFade = roundGlowAnim:CreateAnimation("Alpha")
+roundGlowFade:SetFromAlpha(0.85)
+roundGlowFade:SetToAlpha(0)
+roundGlowFade:SetDuration(0.7)
+roundGlowFade:SetSmoothing("OUT")
+roundGlowAnim:SetScript("OnPlay", function() roundGlow:SetAlpha(0.85) end)
+roundGlowAnim:SetScript("OnFinished", function() roundGlow:SetAlpha(0) end)
+
+-- Fondu enchaîné de la valeur elle-même (l'ancienne s'efface, la nouvelle
+-- apparaît) plutôt qu'un SetText() instantané.
+local roundValueFadeOut = roundValue:CreateAnimationGroup()
+local roundValueFadeOutAlpha = roundValueFadeOut:CreateAnimation("Alpha")
+roundValueFadeOutAlpha:SetFromAlpha(1)
+roundValueFadeOutAlpha:SetToAlpha(0)
+roundValueFadeOutAlpha:SetDuration(0.25)
+
+local roundValueFadeIn = roundValue:CreateAnimationGroup()
+local roundValueFadeInAlpha = roundValueFadeIn:CreateAnimation("Alpha")
+roundValueFadeInAlpha:SetFromAlpha(0)
+roundValueFadeInAlpha:SetToAlpha(1)
+roundValueFadeInAlpha:SetDuration(0.35)
+
+local pendingRoundText
+roundValueFadeOut:SetScript("OnFinished", function()
+    roundValue:SetText(pendingRoundText or "")
+    roundValueFadeIn:Play()
+end)
+
+-- Valeur affichée au dernier Refresh, pour ne déclencher l'animation QUE
+-- quand le compteur change réellement (pas à chaque Rebuild) — et jamais au
+-- tout premier affichage du bandeau (sinon ça "flashe" dès l'ouverture).
+local lastKnownRound
+
+function roundBox:Refresh()
+    local newRound = C.initiative.round or 0
+    local text = tostring(newRound)
+    if lastKnownRound == nil or newRound == lastKnownRound then
+        if roundValueFadeOut:IsPlaying() then roundValueFadeOut:Stop() end
+        if roundValueFadeIn:IsPlaying() then roundValueFadeIn:Stop() end
+        roundValue:SetAlpha(1)
+        roundValue:SetText(text)
+    else
+        pendingRoundText = text
+        roundGlowAnim:Play()
+        if roundValueFadeOut:IsPlaying() then roundValueFadeOut:Stop() end
+        if roundValueFadeIn:IsPlaying() then roundValueFadeIn:Stop() end
+        roundValue:SetAlpha(1)
+        roundValueFadeOut:Play()
+    end
+    lastKnownRound = newRound
+end
+
+-- Le bandeau repart de zéro visuellement à chaque nouvelle apparition (fin
+-- de combat précédent puis nouveau combat) : sans ça, le premier Refresh du
+-- combat suivant comparerait au dernier round vu AVANT la fin du combat
+-- précédent et déclencherait une animation parasite.
+function roundBox:ResetTracking()
+    lastKnownRound = nil
+end
+
 -- ── Popup "Ajouter un évènement" ─────────────────────────────────────────────
 -- Ouverte soit via le "+" d'une carte (évènement accroché à ce participant,
 -- décompté sur SES tours), soit via le "+ Évt" du header (évènement général,
@@ -1101,6 +1201,7 @@ local function Rebuild()
     local current = participants[st.currentIndex]
 
     addGlobalEventBtn:SetShown(st.isHost)
+    roundBox:Refresh()
 
     for _, card in ipairs(cards) do card:Hide() end
     for _, ec in ipairs(eventCards) do ec:Hide() end
@@ -1163,6 +1264,7 @@ end
 
 local function Refresh()
     if C.initiative.active then
+        if not banner:IsShown() then roundBox:ResetTracking() end
         Rebuild()
         banner:Show()
         -- Reflète en direct un retrait/décompte pendant que le popup est

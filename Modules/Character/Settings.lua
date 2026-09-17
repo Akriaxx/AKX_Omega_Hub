@@ -6,7 +6,7 @@
 local C  = Character
 local UI = OS2.UI
 
-local PANEL_W, PANEL_H = 240, 346
+local PANEL_W, PANEL_H = 240, 450
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
@@ -16,6 +16,11 @@ local DEFAULTS = {
     mjScale          = 1.00,
     groupScale       = 1.00,
     initiativeScale  = 1.00,
+    -- Phrases farfelues par défaut : voir HandleRaidWarningTrigger dans
+    -- Core.lua — chacun doit garder des phrases DIFFÉRENTES des autres pour
+    -- que seul l'expéditeur d'un /rw démarre/termine le combat chez lui.
+    rwTrigger        = "Akriax a un gros chibre",
+    rwEndTrigger     = "Akriax a un petit chibre",
 }
 
 local function Clamp(value, minValue, maxValue)
@@ -33,7 +38,19 @@ function C:GetSettings()
     if s.mjScale         == nil then s.mjScale         = DEFAULTS.mjScale         end
     if s.groupScale      == nil then s.groupScale      = DEFAULTS.groupScale      end
     if s.initiativeScale == nil then s.initiativeScale = DEFAULTS.initiativeScale end
+    if s.rwTrigger        == nil then s.rwTrigger        = DEFAULTS.rwTrigger        end
+    if s.rwEndTrigger     == nil then s.rwEndTrigger     = DEFAULTS.rwEndTrigger     end
     return s
+end
+
+function C:SetRWTrigger(text)
+    local s = C:GetSettings()
+    s.rwTrigger = tostring(text or ""):match("^%s*(.-)%s*$") or ""
+end
+
+function C:SetRWEndTrigger(text)
+    local s = C:GetSettings()
+    s.rwEndTrigger = tostring(text or ""):match("^%s*(.-)%s*$") or ""
 end
 
 function C:SetWindowOpacity(value)
@@ -42,6 +59,7 @@ function C:SetWindowOpacity(value)
     for _, frame in ipairs({
         CharacterPlayerPanel, CharacterMJPanel, CharacterMJImpactPanel, CharacterMJPnjPanel,
         CharacterGroupViewPanel, CharacterInitiativeBanner,
+        CharacterInitiativeBanner and CharacterInitiativeBanner.roundBox,
     }) do
         if frame and frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
     end
@@ -255,6 +273,41 @@ local refreshInitiative = MakeScaleControl(
     function(v) C:SetInitiativeScale(v) end
 )
 
+-- ── Phrases déclencheuses /rw ────────────────────────────────────────────────
+-- Envoyer ces textes en /rw démarre/termine le combat chez SOI (voir
+-- HandleRaidWarningTrigger, Core.lua). Garder des phrases différentes des
+-- autres joueurs pour ne pas déclencher leur combat en même temps.
+
+local rwTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+rwTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -334)
+rwTriggerLbl:SetText("Phrase déclencheuse /rw")
+UI.ApplyLabel(rwTriggerLbl)
+
+local rwTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
+rwTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -350)
+rwTriggerEB:SetScript("OnEnterPressed", function(self)
+    C:SetRWTrigger(self:GetText())
+    self:ClearFocus()
+end)
+rwTriggerEB:SetScript("OnEditFocusLost", function(self)
+    C:SetRWTrigger(self:GetText())
+end)
+
+local rwEndTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+rwEndTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -386)
+rwEndTriggerLbl:SetText("Phrase de fin /rw")
+UI.ApplyLabel(rwEndTriggerLbl)
+
+local rwEndTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
+rwEndTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -402)
+rwEndTriggerEB:SetScript("OnEnterPressed", function(self)
+    C:SetRWEndTrigger(self:GetText())
+    self:ClearFocus()
+end)
+rwEndTriggerEB:SetScript("OnEditFocusLost", function(self)
+    C:SetRWEndTrigger(self:GetText())
+end)
+
 -- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
 local function SyncControls()
@@ -265,6 +318,8 @@ local function SyncControls()
     refreshMJ()
     refreshGroup()
     refreshInitiative()
+    rwTriggerEB:SetText(s.rwTrigger or "")
+    rwEndTriggerEB:SetText(s.rwEndTrigger or "")
 end
 
 panel:SetScript("OnShow", SyncControls)

@@ -1,0 +1,9 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- Les enfants sont construits en Lua pour garder les composants réutilisables. -->
+    <Frame name="QuestBookTemplate" inherits="BackdropTemplate" virtual="true" hidden="true" movable="true" enableMouse="true" clampedToScreen="true">
+        <Size x="940" y="650"/>
+    </Frame>
+    <Frame name="QuestMJTemplate" inherits="BackdropTemplate" virtual="true" hidden="true" movable="true" enableMouse="true" clampedToScreen="true">
+        <Size x="1080" y="780"/>
+    </Frame>
+</Ui>

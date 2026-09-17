@@ -380,3 +380,85 @@ function UI.CreateAddButton(parent, onClick)
 
     return btn
 end
+
+-- Petit carré de couleur cliquable qui ouvre le sélecteur Blizzard.
+-- hasAlpha : expose aussi le curseur d'opacité (ColorPickerFrame). onChanged
+-- (optionnel, réglable via btn.onColorChanged) reçoit r, g, b, a à chaque
+-- confirmation ET pendant l'ajustement en direct (aperçu live). L'API
+-- moderne (SetupColorPickerAndShow, depuis la refonte du sélecteur) est
+-- utilisée en priorité ; repli sur l'ancienne API (func/opacityFunc/
+-- ShowUIPanel) si absente — non testé, vieux client uniquement.
+function UI.CreateColorSwatch(parent, size, hasAlpha)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(size or 20, size or 20)
+
+    local border = btn:CreateTexture(nil, "BACKGROUND")
+    border:SetAllPoints()
+    border:SetColorTexture(unpack(UI.colors.border))
+
+    local swatch = btn:CreateTexture(nil, "ARTWORK")
+    swatch:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+    swatch:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    swatch:SetColorTexture(1, 1, 1, 1)
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.15)
+
+    btn.r, btn.g, btn.b, btn.a = 1, 1, 1, 1
+
+    function btn:SetColor(r, g, b, a)
+        self.r = r or self.r
+        self.g = g or self.g
+        self.b = b or self.b
+        self.a = hasAlpha and (a or self.a or 1) or 1
+        swatch:SetColorTexture(self.r, self.g, self.b, self.a)
+    end
+
+    btn:SetScript("OnClick", function(self)
+        if ColorPickerFrame.SetupColorPickerAndShow then
+            -- API moderne : l'opacité se lit directement via GetColorAlpha().
+            local function Apply()
+                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+                local na = hasAlpha and ColorPickerFrame:GetColorAlpha() or 1
+                self:SetColor(nr, ng, nb, na)
+                if self.onColorChanged then self.onColorChanged(nr, ng, nb, na) end
+            end
+            ColorPickerFrame:SetupColorPickerAndShow({
+                r = self.r, g = self.g, b = self.b,
+                hasOpacity = hasAlpha, opacity = self.a or 1,
+                swatchFunc = Apply, opacityFunc = Apply,
+                cancelFunc = function(prev)
+                    if prev then self:SetColor(prev.r, prev.g, prev.b, prev.opacity) end
+                    if self.onColorChanged then self.onColorChanged(self.r, self.g, self.b, self.a) end
+                end,
+            })
+        else
+            -- API classique : pas de GetColorAlpha() — l'opacité se lit sur
+            -- OpacitySliderFrame, dont la valeur est INVERSÉE (0 = opaque,
+            -- 1 = transparent), d'où le "1 - valeur" dans les deux sens.
+            local prevR, prevG, prevB, prevA = self.r, self.g, self.b, self.a
+            local function Apply()
+                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+                local na = 1
+                if hasAlpha and OpacitySliderFrame then
+                    na = 1 - OpacitySliderFrame:GetValue()
+                end
+                self:SetColor(nr, ng, nb, na)
+                if self.onColorChanged then self.onColorChanged(nr, ng, nb, na) end
+            end
+            ColorPickerFrame.hasOpacity = hasAlpha
+            ColorPickerFrame.opacity = 1 - (self.a or 1)
+            ColorPickerFrame.func = Apply
+            ColorPickerFrame.opacityFunc = Apply
+            ColorPickerFrame.cancelFunc = function()
+                self:SetColor(prevR, prevG, prevB, prevA)
+                if self.onColorChanged then self.onColorChanged(self.r, self.g, self.b, self.a) end
+            end
+            ColorPickerFrame:SetColorRGB(self.r, self.g, self.b)
+            ShowUIPanel(ColorPickerFrame)
+        end
+    end)
+
+    return btn
+end

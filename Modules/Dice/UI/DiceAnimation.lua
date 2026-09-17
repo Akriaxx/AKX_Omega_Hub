@@ -13,8 +13,6 @@ local FadeGlow     = function(...) return OmegaDice.FadeGlow(...)     end
 
 -- ─── Layout indexed by die count ─────────────────────────────────────────────
 local MAX_DICE  = 6
-local MAX_EDGES = 30   -- enough for D20 / D12
-local MAX_FACES = 20   -- enough for D20
 
 local DIE_CFG = {
     [1] = { die=210, scale=72, gap=0,  edge=2.1, lbl=18, res=58 },
@@ -25,58 +23,63 @@ local DIE_CFG = {
     [6] = { die=88,  scale=30, gap=6,  edge=1.0, lbl=9,  res=24 },
 }
 
-local FRAME_H       = 230
+local FRAME_H       = 260
 local ANIM_DURATION = 2.4
 local HOLD_DURATION = 3.0
-local FOV           = 3.5
-local LINE_EXT      = 1.1
 local STAGGER       = 0.4
 
 local SEQ_SHOW_MOD = 0.7
 local SEQ_FADE_DUR = 0.28
 local SEQ_HOLD_MOD = 0.9
 
--- ─── Math ─────────────────────────────────────────────────────────────────────
-local function RotFast(vx, vy, vz, cx, sx, cy, sy)
-    local y2 = vy*cx - vz*sx
-    local z2 = vy*sx + vz*cx
-    return vx*cy + z2*sy, y2, -vx*sy + z2*cy
+-- Images calculées hors jeu : aucune projection ni arête Lua par image.
+local BLP_PATH="Interface\\AddOns\\Omega_Hub\\Modules\\Dice\\Media\\Flight\\Atlas\\"
+
+local function PickRollVariant(previous, neighbour)
+    local candidates={}
+    for variant=1,4 do
+        if variant~=previous and variant~=neighbour then candidates[#candidates+1]=variant end
+    end
+    return candidates[math.random(1,#candidates)]
 end
 
-local function Project(x, y, z, scale)
-    local w = FOV / (FOV + z)
-    return x*w*scale, y*w*scale
+function OmegaDice.WarmDiceTextures()
+    if OmegaDice.textureWarmup then return end
+    local f=CreateFrame("Frame",nil,UIParent)
+    OmegaDice.textureWarmup=f;f:SetSize(1,1);f:SetPoint("CENTER");f:EnableMouse(false)
+    f.images={};f.elapsed=0;f.frames=0
+    for _,sides in ipairs({4,6,8,10,12,20,100}) do
+        local image=f:CreateTexture(nil,"ARTWORK");image:SetAllPoints()
+        image:SetTexture(BLP_PATH.."d"..sides.."-face-1-p1.blp")
+        image:SetTexCoord(.25/2048,.75/2048,.25/2048,.75/2048)
+        f.images[#f.images+1]=image
+    end
+    f:SetScript("OnUpdate",function(self,dt)
+        self.elapsed=self.elapsed+dt
+        local ready=true
+        for _,image in ipairs(self.images) do
+            if image.IsObjectLoaded and not image:IsObjectLoaded() then ready=false;break end
+        end
+        self.frames=ready and self.frames+1 or 0
+        if (self.frames>=8 and self.elapsed>=.5) or self.elapsed>15 then
+            self:SetScript("OnUpdate",nil);self:Hide()
+        end
+    end)
 end
 
-local function FaceToCamera(n)
-    local rx = math.atan2(n[2], n[3])
-    local z1 = math.sqrt(n[2]*n[2] + n[3]*n[3])
-    return rx, math.atan2(n[1], -z1)
-end
-
-local function EaseOut(t) return 1 - (1-t)^3 end
-
--- ─── Wireframe slot pool (added lazily to shared frame) ───────────────────────
-local function EnsureWireframeSlots(frame)
+-- ─── BLP slot pool (added lazily to shared frame) ───────────────────────
+local function EnsureBLPSlots(frame)
     if frame.dice then return end
     frame.dice = {}
     for di = 1, MAX_DICE do
         local slot = {}
-        slot.lines = {}
-        for i = 1, MAX_EDGES do
-            local ln = frame:CreateLine(nil, "ARTWORK")
-            ln:SetColorTexture(0.8, 0.68, 0.35, 1)
-            slot.lines[i] = ln
-        end
+        slot.lines = {} -- Conservées vides pour les anciennes extensions.
         slot.labels = {}
-        for i = 1, MAX_FACES do
-            local fs = frame:CreateFontString(nil, "OVERLAY")
-            fs:SetFont(STANDARD_TEXT_FONT, 14, "OUTLINE")
-            fs:SetTextColor(1, 0.92, 0.55, 0.9)
-            fs:SetText(tostring(i))
-            fs:Hide()
-            slot.labels[i] = fs
-        end
+        slot.rollImage=frame:CreateTexture(nil,"ARTWORK");slot.rollImage:Hide()
+        slot.landImage=frame:CreateTexture(nil,"ARTWORK");slot.landImage:Hide()
+        slot.middleImage=frame:CreateTexture(nil,"ARTWORK");slot.middleImage:Hide()
+        slot.pages={slot.rollImage,slot.middleImage,slot.landImage};slot.pagePaths={}
+        slot.image=slot.rollImage
         slot.result = frame:CreateFontString(nil, "OVERLAY")
         slot.result:SetFont(STANDARD_TEXT_FONT, 56, "OUTLINE")
         slot.result:SetTextColor(1, 0.88, 0.35)
@@ -90,14 +93,15 @@ local function EnsureWireframeSlots(frame)
     end
 end
 
-local function GetWireframeFrame()
+local function GetBLPFrame()
     local f = OmegaDice.GetDiceFrame()
-    EnsureWireframeSlots(f)
+    EnsureBLPSlots(f)
     return f
 end
 
 -- ─── Full frame reset (exported so D20Animation can call it too) ──────────────
 local function HideSlot(slot)
+    for _,image in ipairs(slot.pages) do image:Hide() end
     for _, ln in ipairs(slot.lines)  do ln:Hide() end
     for _, fs in ipairs(slot.labels) do fs:Hide() end
     slot.result:Hide()
@@ -111,7 +115,7 @@ function OmegaDice.ResetDiceFrame()
     frame.sumDisplay:Hide()
     frame.modDisplay:Hide()
     GlowHide(frame.sumGlow)
-    -- Hide wireframe slots
+    -- Hide BLP slots
     if frame.dice then
         for di = 1, MAX_DICE do HideSlot(frame.dice[di]) end
     end
@@ -126,90 +130,29 @@ function OmegaDice.ResetDiceFrame()
 end
 
 -- ─── Rendering ────────────────────────────────────────────────────────────────
-local function DrawDie(frame, slot, geo, xOff, rx, ry, cfg, isFinished)
-    local cx, sx = math.cos(rx), math.sin(rx)
-    local cy, sy = math.cos(ry), math.sin(ry)
-
-    -- meshFaces/meshNormals let D100 use icosahedron topology for edge visibility
-    -- while its own normals table holds the 100 Fibonacci landing targets
-    local visFaces   = geo.meshFaces   or geo.faces
-    local visNormals = geo.meshNormals or geo.normals
-
-    local proj = {}
-    for i, v in ipairs(geo.verts) do
-        local x, y, z = RotFast(v[1], v[2], v[3], cx, sx, cy, sy)
-        local px, py  = Project(x, y, z, cfg.scale)
-        proj[i] = { px=px+xOff, py=py, z=z }
+local function DrawDie(frame,slot,xOff,cfg,t)
+    -- Une seule trajectoire de 144 poses. Les trois planches ne sont que
+    -- du stockage : aucun changement de mouvement à leurs frontières.
+    local progress=1-(1-t)^(slot.motionPower or 1)
+    local index=math.min(143,math.floor(progress*143+.5))
+    local page=math.floor(index/64)+1
+    local image=slot.pages[page]
+    if image~=slot.image then slot.image:Hide();slot.image=image;slot.imageIndex=nil end
+    if slot.imageIndex~=index then
+        local cell=index%64
+        local rows=page==3 and 2 or 8
+        local x,y=cell%8,math.floor(cell/8)
+        image:SetTexCoord(x/8,(x+1)/8,y/rows,(y+1)/rows)
+        slot.imageIndex=index
     end
-
-    -- Face labels (only for visible back-facing faces; geo.faces may be empty for D100)
-    local numFaces = #geo.faces
-    for i = 1, MAX_FACES do
-        local fs = slot.labels[i]
-        if i <= numFaces then
-            local fn = geo.normals[i]
-            local _, _, rnz = RotFast(fn[1], fn[2], fn[3], cx, sx, cy, sy)
-            if not isFinished and rnz < -0.55 then
-                local face = geo.faces[i]
-                local px, py = 0, 0
-                for _, vi in ipairs(face) do px=px+proj[vi].px; py=py+proj[vi].py end
-                local nv = #face
-                fs:ClearAllPoints()
-                fs:SetPoint("CENTER", frame, "CENTER", px/nv, py/nv)
-                fs:SetAlpha(math.min(((-rnz-0.55)/0.45)^2, 1))
-                fs:Show()
-            else
-                fs:Hide()
-            end
-        else
-            fs:Hide()
-        end
-    end
-
-    -- Edges (visibility determined by visFaces / visNormals)
-    local numEdges = #geo.edges
-    for i = 1, MAX_EDGES do
-        local ln = slot.lines[i]
-        if i <= numEdges then
-            local edge = geo.edges[i]
-            local a, b = proj[edge[1]], proj[edge[2]]
-            local isVis = false
-            for fi, fVerts in ipairs(visFaces) do
-                local fn = visNormals[fi]
-                local _, _, rnz = RotFast(fn[1], fn[2], fn[3], cx, sx, cy, sy)
-                if rnz < -0.05 then
-                    local hasA, hasB = false, false
-                    for _, vi in ipairs(fVerts) do
-                        if vi == edge[1] then hasA = true end
-                        if vi == edge[2] then hasB = true end
-                    end
-                    if hasA and hasB then isVis = true; break end
-                end
-            end
-            if isVis then
-                local dx, dy = b.px-a.px, b.py-a.py
-                local len    = math.sqrt(dx*dx+dy*dy)
-                if len > 0 then
-                    local ux, uy = (dx/len)*LINE_EXT, (dy/len)*LINE_EXT
-                    local bright = 1 - ((a.z+b.z)*0.5+1)*0.35
-                    ln:SetThickness(cfg.edge)
-                    ln:SetColorTexture(0.8*bright, 0.68*bright, 0.35*bright, 1)
-                    ln:SetStartPoint("CENTER", frame, a.px-ux, a.py-uy)
-                    ln:SetEndPoint("CENTER",   frame, b.px+ux, b.py+uy)
-                    ln:Show()
-                else ln:Hide() end
-            else ln:Hide() end
-        else
-            ln:Hide()
-        end
-    end
+    image:Show()
 end
 
 local function ShowResult(slot, frame, xOff, text, r, g, b, fontSize)
     local res = slot.result
     res:ClearAllPoints()
-    res:SetPoint("CENTER", frame, "CENTER", xOff, 0)
-    res:SetFont(STANDARD_TEXT_FONT, fontSize, "OUTLINE")
+    res:SetPoint("CENTER", frame, "CENTER", xOff, -slot.dieSize*.48)
+    res:SetFont(STANDARD_TEXT_FONT, math.floor(fontSize*.55), "OUTLINE")
     res:SetTextColor(r, g, b)
     res:SetText(text)
     res:SetAlpha(1)
@@ -226,7 +169,7 @@ local function PlayModifierMerge(frame, sumFS, sumGlow, modFS, modifier, total, 
     C_Timer.After(SEQ_HOLD_MOD, function()
         if OmegaDice.animId ~= animId then return end
         local shift = modSz * 1.15
-        sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", -shift, 0)
+        sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", -shift, frame.resultY)
         local sign = modifier > 0 and "+" or ""
         modFS:SetFont(STANDARD_TEXT_FONT, modSz, "OUTLINE")
         modFS:SetText(sign..tostring(modifier))
@@ -240,7 +183,7 @@ local function PlayModifierMerge(frame, sumFS, sumGlow, modFS, modifier, total, 
             FadeAlpha(modFS, 1, 0, SEQ_FADE_DUR, function()
                 if OmegaDice.animId ~= animId then return end
                 modFS:Hide()
-                sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", 0, 0)
+                sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", 0, frame.resultY)
                 sumFS:SetText(tostring(total)); sumFS:SetTextColor(cr, cg, cb)
                 local sz = sumFS:GetStringHeight()
                 GlowAttach(sumGlow, sumFS, sz*3.2, sz*2.1)
@@ -257,14 +200,14 @@ local function PlaySingleDieSequence(frame, slot, xOff, rv, total, modifier, cfg
     local res   = slot.result
     local modFS = frame.modDisplay
     local modSz = math.floor(cfg.res * 0.62)
-    res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff, 0)
+    res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff, frame.resultY)
     res:SetAlpha(1); res:Show()
     GlowSetAlpha(slot.glow, 1); GlowShow(slot.glow)
     modFS:Hide()
     C_Timer.After(SEQ_SHOW_MOD, function()
         if OmegaDice.animId ~= animId then return end
         local shift = modSz * 1.1
-        res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff-shift, 0)
+        res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff-shift, frame.resultY)
         local sign = modifier > 0 and "+" or ""
         modFS:SetFont(STANDARD_TEXT_FONT, modSz, "OUTLINE")
         modFS:SetText(sign..tostring(modifier))
@@ -278,7 +221,7 @@ local function PlaySingleDieSequence(frame, slot, xOff, rv, total, modifier, cfg
             FadeAlpha(modFS, 1, 0, SEQ_FADE_DUR, function()
                 if OmegaDice.animId ~= animId then return end
                 modFS:Hide()
-                res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff, 0)
+                res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOff, frame.resultY)
                 res:SetText(tostring(total))
                 GlowAttach(slot.glow, res, cfg.res*3.2, cfg.res*2.1)
                 FadeAlpha(res, 0, 1, SEQ_FADE_DUR)
@@ -299,7 +242,7 @@ local function PlayMergeToCenter(frame, slots, xOffsets, n, duration, animId, on
         for i = 1, n do
             local curX = xOffsets[i] * (1-ep)
             slots[i].result:ClearAllPoints()
-            slots[i].result:SetPoint("CENTER", frame, "CENTER", curX, 0)
+            slots[i].result:SetPoint("CENTER", frame, "CENTER", curX, frame.resultY)
             slots[i].result:SetAlpha(1-ep)
             GlowSetAlpha(slots[i].glow, 1-ep)
         end
@@ -323,7 +266,7 @@ local function PlayMultiDieSequence(frame, slots, xOffsets, n, rollSum, total, m
             sumFS:SetFont(STANDARD_TEXT_FONT, sumSz, "OUTLINE")
             sumFS:SetTextColor(sr, sg, sb)
             sumFS:SetText(tostring(rollSum))
-            sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", 0, 0)
+            sumFS:ClearAllPoints(); sumFS:SetPoint("CENTER", frame, "CENTER", 0, frame.resultY)
             sumFS:SetAlpha(0); sumFS:Show()
             GlowAttach(sumGlow, sumFS, sumSz*3.2, sumSz*2.1)
             GlowColor(sumGlow, sr, sg, sb)
@@ -366,7 +309,7 @@ local function PlaySeparateModifierSequence(frame, slots, xOffsets, n, rolls, pe
             local res  = slots[i].result
             local fs   = slots[i].modDisplay
             local dmod = perDieMods[i]
-            res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i]-shift, 0)
+            res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i]-shift, frame.resultY)
             local sign = dmod > 0 and "+" or ""
             fs:SetFont(STANDARD_TEXT_FONT, modSz, "OUTLINE")
             fs:SetText(sign..tostring(dmod))
@@ -387,7 +330,7 @@ local function PlaySeparateModifierSequence(frame, slots, xOffsets, n, rolls, pe
                 FadeAlpha(fs, 1, 0, SEQ_FADE_DUR, function()
                     if OmegaDice.animId ~= animId then return end
                     fs:Hide()
-                    res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i], 0)
+                    res:ClearAllPoints(); res:SetPoint("CENTER", frame, "CENTER", xOffsets[i], frame.resultY)
                     res:SetText(tostring(rolls[i] + dmod))
                     GlowAttach(slot.glow, res, cfg.res*3.2, cfg.res*2.1)
                     FadeAlpha(res, 0, 1, SEQ_FADE_DUR)
@@ -399,7 +342,7 @@ local function PlaySeparateModifierSequence(frame, slots, xOffsets, n, rolls, pe
 end
 
 -- ─── Entry point ──────────────────────────────────────────────────────────────
-function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate, perDieMods, description, minVal, maxVal, onComplete)
+function OmegaDice.PlayBLPAnimation(geo, rolls, total, modifier, separate, perDieMods, description, minVal, maxVal, onComplete)
     local n        = math.min(#rolls, MAX_DICE)
     local isSingle = (n == 1)
     local trimDesc = OmegaDice.Trim(description)
@@ -411,8 +354,9 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate,
     local animId = OmegaDice.animId
     OmegaDice.ResetDiceFrame()
 
-    local frame = GetWireframeFrame()
-    frame:SetSize(totalW + 20, FRAME_H)
+    local frame = GetBLPFrame()
+    frame:SetSize(totalW + 20, math.max(FRAME_H, cfg.die + 90))
+    frame.resultY = -cfg.die * .48
     frame:SetScale(1)
     frame.topLabel:SetText(n..(separate and "x" or "").."D"..geo.sides)
     frame.footer:SetText("Lancement...")
@@ -425,14 +369,25 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate,
     end
     frame:Show()
 
-    local startRx, startRy, targetRx, targetRy = {}, {}, {}, {}
-    for i = 1, n do
-        startRx[i]  = (math.random()+1) * 18
-        startRy[i]  = (math.random()+1) * 18
-        local fi    = rolls[i]
-        targetRx[i], targetRy[i] = FaceToCamera(geo.normals[fi])
+    OmegaDice.WarmDiceTextures()
+    for i=1,n do
+        local slot=frame.dice[i]
+        slot.rollVariant=PickRollVariant(slot.rollVariant,i>1 and frame.dice[i-1].rollVariant or nil)
+        slot.motionPower=({.94,.98,1.02,1.06})[slot.rollVariant]
+        local base=BLP_PATH.."d"..geo.sides.."-face-"..rolls[i].."-p"
+        slot.rawResult=rolls[i];slot.dieSize=cfg.die;slot.imageIndex=nil;slot.image=slot.rollImage
+        for page,image in ipairs(slot.pages) do
+            local path=base..page..".blp"
+            if slot.pagePaths[page]~=path then image:SetTexture(path);slot.pagePaths[page]=path end
+            image:SetSize(1,1);image:ClearAllPoints()
+            image:SetPoint("CENTER",frame,"CENTER",xOffsets[i],0)
+            image:SetTexCoord(.25/2048,.75/2048,.25/2048,.75/2048);image:Show()
+        end
+        slot.rollPath=slot.pagePaths[1];slot.landPath=slot.pagePaths[3]
     end
 
+    local warmFrames=0
+    local texturesReady=false
     local startTime   = GetTime()
     local totalDur    = ANIM_DURATION + (n-1) * STAGGER
     local dieFinished = {}
@@ -458,20 +413,36 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate,
     end
 
     frame:SetScript("OnUpdate", function(self)
+        if not texturesReady then
+            for i=1,n do
+                local slot=self.dice[i]
+                for _,image in ipairs(slot.pages) do
+                    if image.IsObjectLoaded and not image:IsObjectLoaded() then
+                        startTime=GetTime();return
+                    end
+                end
+            end
+            texturesReady=true
+        end
+        if warmFrames<8 then
+            warmFrames=warmFrames+1;startTime=GetTime()
+            if warmFrames<8 then return end
+            for i=1,n do
+                for _,image in ipairs(self.dice[i].pages) do
+                    image:Hide();image:SetSize(cfg.die,cfg.die)
+                end
+            end
+        end
         local elapsed = GetTime() - startTime
         local allDone = true
 
         for i = 1, n do
-            local dieDur = ANIM_DURATION + (i-1) * STAGGER
-            local ti     = math.min(elapsed / dieDur, 1)
+            local ti = math.min(math.max(elapsed-(i-1)*STAGGER,0) / ANIM_DURATION, 1)
             if ti < 1 then
-                local tei = EaseOut(ti)
-                DrawDie(self, self.dice[i], geo, xOffsets[i],
-                    (1-tei)*startRx[i]+tei*targetRx[i],
-                    (1-tei)*startRy[i]+tei*targetRy[i], cfg, false)
+                DrawDie(self,self.dice[i],xOffsets[i],cfg,ti)
                 allDone = false
             else
-                DrawDie(self, self.dice[i], geo, xOffsets[i], targetRx[i], targetRy[i], cfg, true)
+                DrawDie(self,self.dice[i],xOffsets[i],cfg,1)
                 if not dieFinished[i] then
                     dieFinished[i] = true
                     local rv = rolls[i]
@@ -522,6 +493,8 @@ function OmegaDice.PlayWireframeAnimation(geo, rolls, total, modifier, separate,
         end
     end)
 end
+
+OmegaDice.PlayWireframeAnimation=OmegaDice.PlayBLPAnimation -- Compatibilité réseau/extensions
 
 -- ─── Geometry router ──────────────────────────────────────────────────────────
 function OmegaDice.GeoForSides(sides)

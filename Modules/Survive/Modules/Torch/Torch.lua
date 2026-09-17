@@ -604,7 +604,9 @@ end
 ------------------------------------------------------------------------
 -- UI
 ------------------------------------------------------------------------
-local R = 0
+local R = PANEL_W
+local torchVisual = OS2.CreateTorchVisual(panel)
+torchVisual:SetPoint("CENTER", panel, "LEFT", PANEL_W / 2, -17)
 
 local modelLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 modelLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -52)
@@ -644,34 +646,13 @@ stateText:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -236)
 stateText:SetJustifyH("LEFT")
 UI.ApplyStrongLabel(stateText)
 
-local chargeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-chargeLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -250)
-chargeLabel:SetText("Charge restante")
-UI.ApplyLabel(chargeLabel)
-
-local chargeBar = CreateFrame("StatusBar", nil, panel)
-chargeBar:SetSize(PANEL_W - 28, 18)
-chargeBar:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -266)
-chargeBar:SetMinMaxValues(0, 100)
-chargeBar:SetValue(0)
-chargeBar:SetStatusBarTexture("Interface/TargetingFrame/UI-StatusBar")
-chargeBar:GetStatusBarTexture():SetHorizTile(false)
-chargeBar:SetStatusBarColor(0.84, 0.72, 0.28, 1)
-
-local chargeBarBg = chargeBar:CreateTexture(nil, "BACKGROUND")
-chargeBarBg:SetAllPoints()
-chargeBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
-
-local chargeBarText = chargeBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-chargeBarText:SetPoint("CENTER", chargeBar, "CENTER", 0, 0)
-
 local powerBtn = CreatePanelButton(panel, PANEL_W - 28, 22, "Allumer")
-powerBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -298)
+powerBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -268)
 
 local rechargeBtn = CreatePanelButton(panel, PANEL_W - 28, 22, "Recharger")
-rechargeBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -326)
+rechargeBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", R + 14, -296)
 
-OS2.SetPanelAutoHeight(panel, 348, 16, 352)
+OS2.SetPanelAutoHeight(panel, 318, 16, 352)
 
 ------------------------------------------------------------------------
 -- Bouton activation rapide
@@ -719,6 +700,13 @@ quickToggleHL:SetAllPoints()
 quickToggleHL:SetBlendMode("ADD")
 
 AttachQuickReveal(quickToggleBtn)
+
+-- Same renderer and same fuel reserve as the full panel, no second timer.
+local quickTorchVisual = OS2.CreateTorchVisual(quickToggleBtn)
+quickTorchVisual:SetScale(.5)
+quickTorchVisual:SetFrameStrata("DIALOG")
+quickTorchVisual:SetClampedToScreen(true)
+quickTorchVisual:Hide()
 
 local quickRateDropdown = CreateFrame("Frame", "OS2_TorchQuickRateDropdown", UIParent, "UIDropDownMenuTemplate")
 quickRateDropdown:SetFrameStrata("DIALOG")
@@ -1269,8 +1257,7 @@ local function RefreshStatus()
     else
         stateText:SetText("État : " .. (db.mode or "OFF"))
     end
-    chargeBar:SetValue(percent)
-    chargeBarText:SetText(string.format("%.0f%%", percent))
+    torchVisual:SetState(percent/100, IsPausedActive())
 end
 
 local function RefreshPowerButton()
@@ -1352,6 +1339,26 @@ function OS2.RefreshTorchQuickControls()
         ShowQuickFrame(quickRateDropdown)
     else
         HideQuickFrame(quickRateDropdown)
+    end
+    local maxCharge=GetMaxCharge()
+    local ratio=maxCharge>0 and math.max(0,math.min(1,(db.remainingCharge or 0)/maxCharge)) or 0
+    local active=IsPausedActive() and ratio>0
+    torchVisual:SetState(ratio,active)
+    quickTorchVisual:SetState(ratio,active)
+    if ShouldShowQuickToggle() and active then
+        local position=GetQuickActivationPosition()
+        if quickTorchVisual.anchorPosition~=position then
+            quickTorchVisual:ClearAllPoints()
+            quickTorchVisual:SetPoint("BOTTOM",quickToggleBtn,"TOP",0,8)
+            quickTorchVisual.anchorPosition=position
+        end
+        if not quickTorchVisual:IsShown() then
+            quickTorchVisual.phase=torchVisual.phase
+            quickTorchVisual.heat=torchVisual.heat
+            quickTorchVisual:Show()
+        end
+    else
+        quickTorchVisual:Hide()
     end
 end
 
@@ -1825,7 +1832,7 @@ do
         end
 
         elapsedSinceRuntimeRefresh = elapsedSinceRuntimeRefresh + 0.25
-        if elapsedSinceRuntimeRefresh >= 1 then
+        if quickTorchVisual:IsShown() or elapsedSinceRuntimeRefresh >= 1 then
             elapsedSinceRuntimeRefresh = 0
             RefreshTorchRuntime()
         end
@@ -1893,7 +1900,12 @@ end
 ------------------------------------------------------------------------
 -- Largeur du panneau
 ------------------------------------------------------------------------
-panel:SetWidth(PANEL_W)
+panel:SetWidth(PANEL_W * 2)
+local vertSep = panel:CreateTexture(nil, "ARTWORK")
+UI.ApplySeparator(vertSep)
+vertSep:SetWidth(1)
+vertSep:SetPoint("TOP", panel, "TOPLEFT", PANEL_W, -35)
+vertSep:SetPoint("BOTTOM", panel, "BOTTOMLEFT", PANEL_W, 0)
 
 CurrentDB()
 RefreshConfigPanel()

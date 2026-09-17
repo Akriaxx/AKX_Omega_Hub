@@ -66,16 +66,18 @@ Hub:RegisterModule({
     desc    = "Tablette RP : notes, inventaire, store et communications",
 })
 
-Hub:RegisterModule({
-    name    = "ItemCreator",
-    title   = "Item Creator",
-    desc    = "Créateur d'items RP avec calcul de points et paliers de qualité",
-})
+-- Item Creator désactivé : absent du chargement et du panneau du Hub.
 
 Hub:RegisterModule({
     name    = "ZoneGate",
     title   = "Zone Gate",
     desc    = "Bannières d'entrée/sortie de zone (checkpoints RP)",
+})
+
+Hub:RegisterModule({
+    name    = "Quest",
+    title   = "Journal de quête",
+    desc    = "Journal RP et écritoire MJ — /jq",
 })
 
 -- Omega_Weather est commenté dans le TOC (usage privé, non chargé)
@@ -141,7 +143,9 @@ initFrame:SetScript("OnEvent", function(_, _, addonName)
     if addonName == "Omega_Hub" then
         OmegaHubDB     = OmegaHubDB     or { showHidden = false, modules = {} }
         OmegaHubDB.modules = OmegaHubDB.modules or {}
-        ItemCreatorDB  = ItemCreatorDB  or {}
+        if OmegaHubDB.modules.ItemCreator then
+            OmegaHubDB.modules.ItemCreator.enabled = false
+        end
         ZoneGateDB     = ZoneGateDB     or {}
         initFrame:UnregisterAllEvents()
     end

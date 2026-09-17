@@ -42,6 +42,7 @@ end
 -- ── Enable / Disable (API Hub) ─────────────────────────────────────────────
 
 function OmegaDice:Enable()
+    if OmegaDice.WarmDiceTextures then OmegaDice.WarmDiceTextures() end
     OmegaDice.RegisterCommands()
     if OmegaDice.RegisterNetwork then OmegaDice.RegisterNetwork() end
     OmegaHub:SetModuleLoaded("Omega_Dice", true)
@@ -51,6 +52,12 @@ function OmegaDice:Enable()
 end
 
 function OmegaDice:Disable()
+    OmegaDice.animId=(OmegaDice.animId or 0)+1
+    if OmegaDice.ResetDiceFrame then OmegaDice.ResetDiceFrame();OmegaDice.GetDiceFrame():Hide() end
+    if OmegaDice.textureWarmup then
+        OmegaDice.textureWarmup:SetScript("OnUpdate",nil);OmegaDice.textureWarmup:Hide()
+        OmegaDice.textureWarmup=nil
+    end
     OmegaDice.UnregisterCommands()
     if OmegaDice.UnregisterNetwork then OmegaDice.UnregisterNetwork() end
     OmegaHub:SetModuleLoaded("Omega_Dice", false)

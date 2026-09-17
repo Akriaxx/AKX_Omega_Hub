@@ -2,7 +2,7 @@
 ## Title: Omega Hub
 ## Notes: Gestionnaire central et conteneur monolithique des addons Omega
 ## Author: Lorkk
-## Version: 1.1.24
+## Version: 1.1.25
 ## OptionalDeps: SpellCreator
 ## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB
 ## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
@@ -80,6 +80,7 @@ Modules\Survive\Core\Launcher.lua
 Modules\Survive\Modules\Lantern\Lantern.lua
 Modules\Survive\Modules\Canteen\Canteen.lua
 Modules\Survive\Modules\Canteen\HumanBody.lua
+Modules\Survive\Modules\Torch\TorchVisual.lua
 Modules\Survive\Modules\Torch\Torch.lua
 Modules\Survive\Modules\Dive\Dive.lua
 Modules\Survive\Core\DB\Database.lua
@@ -107,19 +108,39 @@ Modules\Tech\UI_Comm.lua
 Modules\Tech\UI_Settings.lua
 Modules\Tech\Launcher.lua
 
-## -- Item Creator --
-Modules\Item\Version.lua
-Modules\Item\Data.lua
-Modules\Item\Core.lua
-Modules\Item\UI_Creator.lua
-Modules\Item\UI_Balance.lua
+## -- Item Creator désactivé : aucun fichier chargé --
+## Modules\Item\Version.lua
+## Modules\Item\Data.lua
+## Modules\Item\Core.lua
+## Modules\Item\UI_Creator.lua
+## Modules\Item\UI_Balance.lua
 
 ## -- Zone Gate --
 Modules\ZoneGate\Version.lua
+Modules\ZoneGate\Music\Manifest.lua
 Modules\ZoneGate\Core.lua
 Modules\ZoneGate\UI_Radar.lua
 Modules\ZoneGate\UI_Banner.lua
+Modules\ZoneGate\UI_Theme.lua
+Modules\ZoneGate\Studio.lua
+Modules\ZoneGate\UI_Studio.lua
 Modules\ZoneGate\UI_Panel.lua
+
+## -- Journal de quête --
+Modules\Quest\Version.lua
+Modules\Quest\Quest_Permissions.lua
+Modules\Quest\Quest_Data_MJ.lua
+Modules\Quest\Quest_Data_Joueur.lua
+Modules\Quest\Styles\parchemin.lua
+Modules\Quest\Quest.xml
+Modules\Quest\Quest_UI_Write.lua
+Modules\Quest\Quest_UI_Envelope.lua
+Modules\Quest\Quest_UI_Letter.lua
+Modules\Quest\Quest_UI_Book.lua
+Modules\Quest\Quest_UI_BookMotion.lua
+Modules\Quest\Quest_Panel_MJ.lua
+Modules\Quest\Quest_Comm.lua
+Modules\Quest\Quest.lua
 
 ## -- Omega Weather (désactivé — usage privé) --
 ## Modules\Weather\Version.lua

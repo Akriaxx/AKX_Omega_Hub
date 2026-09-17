@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="OMEGA_JOURNAL_TOGGLE" header="OMEGA_HUB" category="ADDONS">
+        if Quest then Quest:ToggleJournal() end
+    </Binding>
+</Bindings>

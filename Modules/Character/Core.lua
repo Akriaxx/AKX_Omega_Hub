@@ -20,6 +20,12 @@ local broadcastFrame
 local pendingBroadcast = false
 local broadcastAt = 0
 
+-- Délai (secondes) entre chaque étape des séquences temporisées de combat
+-- (début de combat, tour de table complet — voir StartCombat / NextTurn) :
+-- espacées dans le temps pour rester lisibles en jeu, plutôt que balancées
+-- d'un coup façon spam de TDC.
+local ROUND_STEP_DELAY = 1.2
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 local function MyName() return UnitName("player") or "" end
@@ -354,12 +360,25 @@ C.initiative = {
     active       = false,
     isHost       = false,
     currentIndex = 1,
+    round        = 0,   -- nombre de tours de table complets écoulés depuis StartCombat (voir NextTurn)
     participants = {},  -- { {kind="player"|"npc", id, name, initiative, creator}, ... } déjà trié
     events       = {},  -- { {id, participantId, description, turnsLeft, interval, repeatable}, ... } — voir AddEvent
     statuses     = {},  -- { {id, targetId, text, turnsLeft, source, expired}, ... } — voir AddStatus, synchronisé (contrairement à events)
 }
 
 local nextNpcSeq = 0
+
+-- Envoie un texte en /rw (raid warning), ou /p si pas en raid (silencieux
+-- hors groupe) : partagé par les séquences temporisées de début de combat /
+-- fin de tour (StartCombat, NextTurn), l'annonce de tour et le déclenchement
+-- d'un évènement différé.
+local function AnnounceToGroup(text)
+    if IsInRaid and IsInRaid() then
+        SendChatMessage(text, "RAID_WARNING")
+    elseif IsInGroup and IsInGroup() then
+        SendChatMessage(text, "PARTY")
+    end
+end
 
 local function SortParticipants(list)
     table.sort(list, function(a, b)
@@ -395,7 +414,7 @@ end
 
 local function PackInitiative()
     local st = C.initiative
-    local parts = { st.active and 1 or 0, st.currentIndex, #st.participants }
+    local parts = { st.active and 1 or 0, st.currentIndex, st.round or 0, #st.participants }
     for _, p in ipairs(st.participants) do
         table.insert(parts, p.kind)
         table.insert(parts, Enc(p.id))
@@ -452,9 +471,10 @@ local function UnpackInitiative(payload)
     local t = { strsplit(SEP, payload) }
     local active       = tonumber(t[1]) == 1
     local currentIndex = tonumber(t[2]) or 1
-    local n             = tonumber(t[3]) or 0
+    local round         = tonumber(t[3]) or 0
+    local n             = tonumber(t[4]) or 0
     local participants = {}
-    local idx = 4
+    local idx = 5
     for i = 1, n do
         local kind, id, initRaw = t[idx], t[idx + 1], t[idx + 2]
         if not AllPresent(kind, id, initRaw) then return false end
@@ -500,6 +520,7 @@ local function UnpackInitiative(payload)
 
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
+    C.initiative.round        = round
     C.initiative.participants = participants
     C.initiative.statuses     = statuses
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
@@ -566,16 +587,31 @@ local function HandleInitiativeChunk(sender, msgIdStr, indexStr, totalStr, chunk
     end
 end
 
+-- Comme la fin d'un tour de table (voir C:NextTurn), le début de combat est
+-- une séquence temporisée plutôt qu'instantanée : round mis à 1 +
+-- "Début du tour : 1" (/rw) → tempo → SEULEMENT ALORS le combat devient actif
+-- (bandeau affiché, participant en tête de liste en surbrillance, saisie
+-- d'initiative/ajout de PNJ débloqués).
 function C:StartCombat()
     C.initiative.isHost       = true
-    C.initiative.active       = true
+    C.initiative.active       = false
     C.initiative.currentIndex = 1
+    C.initiative.round        = 1
+    C.initiative._roundTransition = true
     C.initiative.participants = {}
     C.initiative.events       = {}
     C.initiative.statuses     = {}
     nextNpcSeq = 0
-    BroadcastInitiative()
-    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+
+    AnnounceToGroup("Début du tour : 1")
+
+    C_Timer.After(ROUND_STEP_DELAY, function()
+        if not C.initiative.isHost then return end
+        C.initiative._roundTransition = nil
+        C.initiative.active = true
+        BroadcastInitiative()
+        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    end)
 end
 
 function C:EndCombat()
@@ -585,6 +621,8 @@ function C:EndCombat()
     C.initiative.events       = {}
     C.initiative.statuses     = {}
     C.initiative.currentIndex = 1
+    C.initiative.round        = 0
+    C.initiative._roundTransition = nil
     BroadcastInitiative()
     C.initiative.isHost = false
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
@@ -1003,17 +1041,6 @@ local function PruneDisconnectedPlayers()
     end
 end
 
--- Envoie un texte en /rw (raid warning), ou /p si pas en raid (silencieux
--- hors groupe) : partagé par l'annonce de tour et le déclenchement d'un
--- évènement différé.
-local function AnnounceToGroup(text)
-    if IsInRaid and IsInRaid() then
-        SendChatMessage(text, "RAID_WARNING")
-    elseif IsInGroup and IsInGroup() then
-        SendChatMessage(text, "PARTY")
-    end
-end
-
 -- Annonce en /rw (raid warning, ou /p si pas en raid) le nom/prénom RP (TRP3)
 -- du joueur dont c'est le tour, ou juste son nom brut si c'est un PNJ.
 function C:AnnounceCurrentTurn()
@@ -1097,14 +1124,39 @@ local function IsParticipantAlive(p)
     return not hp or hp > 0
 end
 
+-- Applique effectivement le changement de participant courant (déplace la
+-- surbrillance, annonce "Au tour de X", décompte états/évènements). Extrait
+-- de NextTurn pour pouvoir être DIFFÉRÉ à la fin de la séquence temporisée
+-- de fin/début de tour (voir plus bas) sans dupliquer cette logique.
+local function ApplyTurnAdvance(idx, ending, roundAdvanced)
+    local p = C.initiative.participants[idx]
+    if not p then return end
+    C.initiative.currentIndex = idx
+    ExpireStatusesFor(ending)
+    TickStatusesFor(p, roundAdvanced)
+    BroadcastInitiative()
+    C:AnnounceCurrentTurn()
+    TickEventsFor(p, roundAdvanced)
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+end
+
 -- Passe au participant vivant suivant dans l'ordre d'initiative, en sautant
 -- ceux à 0 HP (qui n'apparaissent plus dans la bannière non plus). Si
 -- personne n'est vivant, le tour ne bouge pas (évite une boucle infinie).
 -- `roundAdvanced` devient vrai dès que la boucle repasse par la position 1
 -- de l'ordre d'initiative, c'est-à-dire qu'un tour de table complet s'est
 -- écoulé (peu importe le nombre de participants) — voir TickEventsFor.
+--
+-- Si c'est le cas, le changement de participant n'est PAS immédiat : on
+-- déroule d'abord la séquence "Fin du tour : X" (/rw) → incrément du cadre
+-- "Tour" (glow + fondu enchaîné côté UI_Initiative.lua, déclenché par le
+-- changement de C.initiative.round rebroadcasté) → "Début du tour : X" (/rw)
+-- → puis SEULEMENT ALORS le participant courant passe en tête de bandeau.
+-- `C.initiative._roundTransition` bloque tout nouveau clic "Joueur suivant"
+-- tant que cette séquence n'est pas terminée.
 function C:NextTurn()
     if not C.initiative.isHost or not C.initiative.active then return false end
+    if C.initiative._roundTransition then return false end
     local n = #C.initiative.participants
     if n == 0 then return false end
 
@@ -1115,22 +1167,51 @@ function C:NextTurn()
 
     local idx = C.initiative.currentIndex
     local roundAdvanced = false
+    local nextIdx
     for _ = 1, n do
         idx = (idx % n) + 1
         if idx == 1 then roundAdvanced = true end
         local p = C.initiative.participants[idx]
         if p and IsParticipantAlive(p) then
-            C.initiative.currentIndex = idx
-            ExpireStatusesFor(ending)
-            TickStatusesFor(p, roundAdvanced)
-            BroadcastInitiative()
-            C:AnnounceCurrentTurn()
-            TickEventsFor(p, roundAdvanced)
-            if C.OnInitiativeChanged then C.OnInitiativeChanged() end
-            return true
+            nextIdx = idx
+            break
         end
     end
-    return false
+    if not nextIdx then return false end
+
+    if not roundAdvanced then
+        ApplyTurnAdvance(nextIdx, ending, false)
+        return true
+    end
+
+    C.initiative._roundTransition = true
+    AnnounceToGroup("Fin du tour : " .. (C.initiative.round or 0))
+
+    C_Timer.After(ROUND_STEP_DELAY, function()
+        if not C.initiative.active or not C.initiative.isHost then
+            C.initiative._roundTransition = nil
+            return
+        end
+        C.initiative.round = (C.initiative.round or 0) + 1
+        BroadcastInitiative()
+        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+
+        C_Timer.After(ROUND_STEP_DELAY, function()
+            if not C.initiative.active or not C.initiative.isHost then
+                C.initiative._roundTransition = nil
+                return
+            end
+            AnnounceToGroup("Début du tour : " .. C.initiative.round)
+
+            C_Timer.After(ROUND_STEP_DELAY, function()
+                C.initiative._roundTransition = nil
+                if not C.initiative.active or not C.initiative.isHost then return end
+                ApplyTurnAdvance(nextIdx, ending, true)
+            end)
+        end)
+    end)
+
+    return true
 end
 
 function C:_ApplyInitiativeInput(name, value)
@@ -1288,17 +1369,47 @@ local function Filter(_, _, msg, sender)
     if Handle(msg, sender) then return true end
 end
 
+-- Déclenchement / fin du combat via /rw (voir Settings : "Phrase
+-- déclencheuse /rw" et "Phrase de fin /rw", propres à chaque joueur, avec
+-- des valeurs par défaut farfelues). Un /rw est entendu par tout le monde —
+-- on ne peut pas s'appuyer sur l'expéditeur pour filtrer — donc chacun
+-- compare le texte reçu à SES PROPRES phrases configurées : seul celui dont
+-- une phrase correspond démarre/termine le combat chez lui (EndCombat ne
+-- fait de toute façon rien si on n'est pas l'hôte). Tant que tout le monde
+-- garde des phrases différentes (les défauts y suffisent déjà), un /rw
+-- quelconque d'un joueur ne déclenche rien chez les autres.
+local function HandleRaidWarningTrigger(msg)
+    if not msg then return end
+    local settings = C.GetSettings and C:GetSettings()
+    if not settings then return end
+    local trimmed = msg:match("^%s*(.-)%s*$")
+
+    if not C.initiative.active then
+        local startTrigger = settings.rwTrigger
+        if startTrigger and startTrigger ~= "" and trimmed == startTrigger:match("^%s*(.-)%s*$") then
+            C:StartCombat()
+        end
+    else
+        local endTrigger = settings.rwEndTrigger
+        if endTrigger and endTrigger ~= "" and trimmed == endTrigger:match("^%s*(.-)%s*$") then
+            C:EndCombat()
+        end
+    end
+end
+
 local EVENTS = {
     "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_PARTY",
     "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM",
 }
 local eventFrame = CreateFrame("Frame")
 
-eventFrame:SetScript("OnEvent", function(_, event, prefix, payload, channel, sender)
-    if event == "CHAT_MSG_ADDON" and prefix == PREFIX then
-        HandlePayload(payload, sender)
+eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
+    if event == "CHAT_MSG_ADDON" and arg1 == PREFIX then
+        HandlePayload(arg2, arg4)
     elseif event == "GROUP_ROSTER_UPDATE" then
         PruneDisconnectedPlayers()
+    elseif event == "CHAT_MSG_RAID_WARNING" then
+        HandleRaidWarningTrigger(arg1)
     end
 end)
 
@@ -1359,6 +1470,7 @@ function C:Enable()
     end
     eventFrame:RegisterEvent("CHAT_MSG_ADDON")
     eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
     for _, ev in ipairs(EVENTS) do ChatFrame_AddMessageEventFilter(ev, Filter) end
     if C._resetLauncherOnNextEnable and C.ResetLauncherPosition then
         C:ResetLauncherPosition(true)
@@ -1376,6 +1488,7 @@ end
 function C:Disable()
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
     eventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
+    eventFrame:UnregisterEvent("CHAT_MSG_RAID_WARNING")
     for _, ev in ipairs(EVENTS) do ChatFrame_RemoveMessageEventFilter(ev, Filter) end
     C._resetLauncherOnNextEnable = true
     -- Si je suis l'hôte du combat, le clore proprement referme la bannière
