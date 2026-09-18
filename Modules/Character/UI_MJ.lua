@@ -661,7 +661,9 @@ local function RefreshCombatControls()
     local hasParticipants = #C.initiative.participants > 0
 
     combatToggleBtn:SetText(active and "Fin de combat" or "Début de combat")
-    nextTurnBtn:SetEnabled(active and hasParticipants)
+    local phase = C.initiative.phase
+    nextTurnBtn:SetText(phase == "resolve_start" and "Valider les états / Jouer" or phase == "transition" and "Changement de tour…" or "Joueur suivant")
+    nextTurnBtn:SetEnabled(active and hasParticipants and not C.initiative._roundTransition)
     nextTurnBtn:SetAlpha((active and hasParticipants) and 1 or 0.45)
     addNpcBtn:SetAlpha(active and 1 or 0.45)
     if not active then npcPopup:Hide() end

@@ -17,3 +17,9 @@ L'ATH remplace entièrement l'ancienne fiche personnelle et reste affiché tant 
 Les vues alliés, MJ, initiative et paramètres partagent un habillage sombre à bordures bronze, propre à Character. La vue des compagnons affiche uniquement une jauge de PV sans chiffres, sans bonus affichés et sans infobulle de valeurs, en deux colonnes avec huit membres visibles et un défilement à la molette pour les groupes plus grands. Les ressources et actions se sélectionnent directement dans deux rangées de boutons, sans menu déroulant. Le choix actif est coloré. La hauteur de la liste MJ suit son contenu jusqu’à la limite défilante. Les commandes de combat MJ sont incluses dans leur cadre. Les cartes d’initiative sont plus compactes, avec un repère doré pour le tour actif. Les réglages de taille et d’opacité restent disponibles.
 
 `Tests/views-test.js` vérifie le chargement des vues, une liste de treize alliés, les limites du défilement et une action de ressource via les contrôles réels.
+
+## Résolution des états entre deux tours
+
+Après le dernier participant vivant, Joueur suivant avance le compteur et lance son animation. La résolution des états de début de tour apparaît ensuite : le MJ valide le E placé avant les participants pour reprendre le jeu. Il n’y a plus de résolution ni de validation en fin de tour. Les annonces de changement de tour sont affichées au centre de l’écran, sans RW. Les phases sont synchronisées avec le groupe et les clics pendant la transition sont bloqués.
+
+`Tests/initiative-test.js` vérifie la résolution unique, l’incrément unique, le verrou pendant l’animation et les droits du MJ.

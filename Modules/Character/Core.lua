@@ -450,6 +450,7 @@ local function PackInitiative()
         table.insert(parts, Enc(s.source))
         table.insert(parts, s.expired and 1 or 0)
     end
+    table.insert(parts, st.phase or "play")
     return table.concat(parts, SEP)
 end
 
@@ -518,6 +519,8 @@ local function UnpackInitiative(payload)
         idx = idx + 6
     end
 
+    local phase = t[idx]
+    C.initiative.phase = (phase == "resolve_start" or phase == "transition") and phase or "play"
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
     C.initiative.round        = round
@@ -596,6 +599,8 @@ function C:StartCombat()
     C.initiative.isHost       = true
     C.initiative.active       = false
     C.initiative.currentIndex = 1
+    C.initiative.phase = "play"
+    C.initiative._pendingRound = nil
     C.initiative.round        = 1
     C.initiative._roundTransition = true
     C.initiative.participants = {}
@@ -603,7 +608,6 @@ function C:StartCombat()
     C.initiative.statuses     = {}
     nextNpcSeq = 0
 
-    AnnounceToGroup("Début du tour : 1")
 
     C_Timer.After(ROUND_STEP_DELAY, function()
         if not C.initiative.isHost then return end
@@ -621,6 +625,8 @@ function C:EndCombat()
     C.initiative.events       = {}
     C.initiative.statuses     = {}
     C.initiative.currentIndex = 1
+    C.initiative.phase = "play"
+    C.initiative._pendingRound = nil
     C.initiative.round        = 0
     C.initiative._roundTransition = nil
     BroadcastInitiative()
@@ -1179,38 +1185,32 @@ function C:NextTurn()
     end
     if not nextIdx then return false end
 
-    if not roundAdvanced then
-        ApplyTurnAdvance(nextIdx, ending, false)
+    if C.initiative.phase ~= "resolve_start" then
+        if not roundAdvanced then
+            ApplyTurnAdvance(nextIdx, ending, false)
+            return true
+        end
+        -- Pause between rounds: keep the completed round on the counter.
+        C.initiative.phase = "resolve_start"
+        BroadcastInitiative()
+        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
         return true
     end
 
+    local token = {}
+    C.initiative._pendingRound = token
+    C.initiative.phase = "transition"
     C.initiative._roundTransition = true
-    AnnounceToGroup("Fin du tour : " .. (C.initiative.round or 0))
-
+    C.initiative.round = (C.initiative.round or 0) + 1
+    BroadcastInitiative()
+    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
     C_Timer.After(ROUND_STEP_DELAY, function()
-        if not C.initiative.active or not C.initiative.isHost then
-            C.initiative._roundTransition = nil
-            return
-        end
-        C.initiative.round = (C.initiative.round or 0) + 1
-        BroadcastInitiative()
-        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
-
-        C_Timer.After(ROUND_STEP_DELAY, function()
-            if not C.initiative.active or not C.initiative.isHost then
-                C.initiative._roundTransition = nil
-                return
-            end
-            AnnounceToGroup("Début du tour : " .. C.initiative.round)
-
-            C_Timer.After(ROUND_STEP_DELAY, function()
-                C.initiative._roundTransition = nil
-                if not C.initiative.active or not C.initiative.isHost then return end
-                ApplyTurnAdvance(nextIdx, ending, true)
-            end)
-        end)
+        if C.initiative._pendingRound ~= token or not C.initiative.active or not C.initiative.isHost then return end
+        C.initiative._roundTransition = nil
+        C.initiative._pendingRound = nil
+        C.initiative.phase = "play"
+        ApplyTurnAdvance(nextIdx, ending, true)
     end)
-
     return true
 end
 

@@ -154,6 +154,51 @@ end)
 addGlobalEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 addGlobalEventBtn:Hide()
 
+-- The start-of-round resolution precedes the participant row.
+local function MakeResolutionStep(phase,label)
+    local button=UI.CreatePanelButton(banner,30,CARD_H,"E")
+    local selected=button:CreateTexture(nil,"ARTWORK")
+    selected:SetAllPoints();selected:SetColorTexture(.78,.59,.24,.28)
+    selected:Hide()
+    local activeBorder={}
+    for _,edge in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
+        local line=button:CreateTexture(nil,"BORDER")
+        line:SetColorTexture(unpack(UI.colors.turnHighlight))
+        if edge=="TOP" or edge=="BOTTOM" then
+            local y=edge=="TOP" and 2 or -2
+            line:SetPoint(edge.."LEFT",button,edge.."LEFT",-2,y)
+            line:SetPoint(edge.."RIGHT",button,edge.."RIGHT",2,y)
+            line:SetHeight(2)
+        else
+            local x=edge=="LEFT" and -2 or 2
+            line:SetPoint("TOP"..edge,button,"TOP"..edge,x,2)
+            line:SetPoint("BOTTOM"..edge,button,"BOTTOM"..edge,x,-2)
+            line:SetWidth(2)
+        end
+        line:Hide();activeBorder[#activeBorder+1]=line
+    end
+    button:SetScript("OnClick",function()
+        if C.initiative.isHost and C.initiative.phase==phase then C:NextTurn() end
+    end)
+    button:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine("Résolution d'états — "..label,unpack(UI.colors.title))
+        if C.initiative.phase==phase then
+            GameTooltip:AddLine(C.initiative.isHost and "Cliquer pour valider." or "En attente de la validation du MJ.",unpack(UI.colors.text))
+        end
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    function button:Refresh()
+        local active=C.initiative.phase==phase
+        selected:SetShown(active)
+        for _,line in ipairs(activeBorder) do line:SetShown(active) end
+        self:SetAlpha(active and 1 or .55)
+    end
+    return button
+end
+local startResolution=MakeResolutionStep("resolve_start","entre deux tours")
+
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
 local inputLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1207,6 +1252,8 @@ local function Rebuild()
 
     addGlobalEventBtn:SetShown(st.isHost)
     roundBox:Refresh()
+    local phase=C.initiative.phase
+    startResolution:Refresh()
 
     for _, card in ipairs(cards) do card:Hide() end
     for _, ec in ipairs(eventCards) do ec:Hide() end
@@ -1219,6 +1266,9 @@ local function Rebuild()
     -- (référence de table), pas leur position, pour rester correcte même
     -- quand des cartes sont sautées.
     local x = INPUT_W + 24
+    startResolution:ClearAllPoints()
+    startResolution:SetPoint("TOPLEFT",header,"BOTTOMLEFT",x,-5)
+    x=x+30+CARD_GAP
     local cardIndex = 0
     for _, p in ipairs(participants) do
         if IsAlive(p) then
@@ -1226,7 +1276,7 @@ local function Rebuild()
             local card = GetCard(cardIndex)
             card:ClearAllPoints()
             card:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
-            card:Refresh(p, p == current)
+            card:Refresh(p, p == current and (not phase or phase == "play"))
             card:Show()
             x = x + CARD_W + CARD_GAP
         end
@@ -1267,7 +1317,56 @@ function C:RefreshBannerSelection()
     end
 end
 
+-- Local presentation of synchronized phases: no chat messages or extra network traffic.
+local phaseNotice=CreateFrame("Frame",nil,UIParent)
+phaseNotice:SetSize(440,76)
+phaseNotice:SetPoint("CENTER",UIParent,"CENTER",0,90)
+phaseNotice:SetFrameStrata("DIALOG")
+phaseNotice:EnableMouse(false)
+local noticeBg=phaseNotice:CreateTexture(nil,"BACKGROUND")
+noticeBg:SetAllPoints();noticeBg:SetColorTexture(.025,.03,.035,.88)
+UI.ApplyBorder(phaseNotice)
+local noticeTitle=phaseNotice:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
+noticeTitle:SetPoint("TOPLEFT",12,-14);noticeTitle:SetPoint("TOPRIGHT",-12,-14)
+noticeTitle:SetJustifyH("CENTER");UI.ApplyTitle(noticeTitle)
+local noticeDetail=phaseNotice:CreateFontString(nil,"OVERLAY","GameFontNormal")
+noticeDetail:SetPoint("TOPLEFT",12,-43);noticeDetail:SetPoint("TOPRIGHT",-12,-43)
+noticeDetail:SetJustifyH("CENTER");UI.ApplyBodyText(noticeDetail)
+phaseNotice:Hide()
+local lastNoticeKey
+local function RefreshPhaseNotice()
+    local st=C.initiative
+    if not st.active then
+        lastNoticeKey=nil;phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil)
+        return
+    end
+    local phase=st.phase or "play"
+    local key=tostring(st.round)..":"..phase
+    if key==lastNoticeKey then return end
+    local first=lastNoticeKey==nil
+    lastNoticeKey=key
+    local title,detail
+    if phase=="transition" then
+        title="Début du tour "..st.round;detail=""
+    elseif phase=="resolve_start" then
+        title="Fin du tour "..st.round;detail="Résolution d'états · Validation du MJ"
+    elseif first then
+        title="Début du tour "..st.round;detail="Le combat commence"
+    else
+        phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil);return
+    end
+    noticeTitle:SetText(title);noticeDetail:SetText(detail)
+    phaseNotice:SetAlpha(0);phaseNotice:Show()
+    local elapsed=0
+    phaseNotice:SetScript("OnUpdate",function(self,dt)
+        elapsed=elapsed+dt
+        self:SetAlpha(math.max(0,math.min(1,elapsed/.2,(4-elapsed)/.5)))
+        if elapsed>=4 then self:Hide();self:SetScript("OnUpdate",nil) end
+    end)
+end
+
 local function Refresh()
+    RefreshPhaseNotice()
     if C.initiative.active then
         if not banner:IsShown() then roundBox:ResetTracking() end
         Rebuild()
