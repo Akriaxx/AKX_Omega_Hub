@@ -456,8 +456,17 @@ local function ShowMusicMenu(anchorBtn, targetEB)
     if #files == 0 then
         table.insert(menu, { text = "(dossier Music vide — voir Music/README.txt)", notCheckable = true, isTitle = true })
     else
+        local families={}
         for _, entry in ipairs(files) do
-            table.insert(menu, {
+            local destination=menu
+            if entry.family then
+                if not families[entry.family] then
+                    families[entry.family]={}
+                    table.insert(menu,{text=entry.family,notCheckable=true,hasArrow=true,menuList=families[entry.family]})
+                end
+                destination=families[entry.family]
+            end
+            table.insert(destination, {
                 text = entry.name, notCheckable = true,
                 func = function() targetEB:SetText(entry.path) end,
             })
@@ -479,7 +488,7 @@ soundEnterEB:SetScript("OnTextChanged", function(self)
     ZG:SetThemeSound(panel.selectedId, "enter", self:GetText())
 end)
 
-local musicEnterBtn = UI.CreatePanelButton(editForm, 40, 20, "Mus.")
+local musicEnterBtn = UI.CreatePanelButton(editForm, 40, 20, "Sons")
 musicEnterBtn:SetPoint("LEFT", soundEnterEB, "RIGHT", 4, 0)
 musicEnterBtn:SetScript("OnClick", function() ShowMusicMenu(musicEnterBtn, soundEnterEB) end)
 
@@ -503,7 +512,7 @@ soundExitEB:SetScript("OnTextChanged", function(self)
     ZG:SetThemeSound(panel.selectedId, "exit", self:GetText())
 end)
 
-local musicExitBtn = UI.CreatePanelButton(editForm, 40, 20, "Mus.")
+local musicExitBtn = UI.CreatePanelButton(editForm, 40, 20, "Sons")
 musicExitBtn:SetPoint("LEFT", soundExitEB, "RIGHT", 4, 0)
 musicExitBtn:SetScript("OnClick", function() ShowMusicMenu(musicExitBtn, soundExitEB) end)
 

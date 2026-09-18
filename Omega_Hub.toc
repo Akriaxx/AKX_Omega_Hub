@@ -89,12 +89,12 @@ Modules\Survive\Core\Settings.lua
 ## -- Character --
 Modules\Character\Version.lua
 Modules\Character\Core.lua
-Modules\Character\UI_Player.lua
+Modules\Character\UI_Style.lua
 Modules\Character\UI_MJ.lua
 Modules\Character\UI_Group.lua
 Modules\Character\UI_Initiative.lua
-Modules\Character\Launcher.lua
 Modules\Character\Settings.lua
+Modules\Character\UI_HUD.lua
 
 ## -- Tech --
 Modules\Tech\Version.lua

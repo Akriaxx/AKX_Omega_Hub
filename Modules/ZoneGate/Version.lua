@@ -5,4 +5,4 @@
 --  dans Core.lua, en bas du fichier).
 -- ============================================================
 
-ZONEGATE_VERSION = "1.2.0"
+ZONEGATE_VERSION = "1.5.0"

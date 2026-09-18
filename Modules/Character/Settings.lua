@@ -1,21 +1,23 @@
 -- ============================================================
 --  Character - Paramètres d'affichage
---  Shift + clic droit sur le bouton Character
+--  Clic molette sur le portrait permanent
 -- ============================================================
 
 local C  = Character
-local UI = OS2.UI
+local UI = C.RPGUI or OS2.UI
 
-local PANEL_W, PANEL_H = 240, 450
+local PANEL_W, PANEL_H = 260, 416
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
     windowOpacity    = 0.65,
-    launcherSize     = 44,
-    playerScale      = 1.00,
+
+
     mjScale          = 1.00,
     groupScale       = 1.00,
     initiativeScale  = 1.00,
+
+    resourceHUDScale = 1.00,
     -- Phrases farfelues par défaut : voir HandleRaidWarningTrigger dans
     -- Core.lua — chacun doit garder des phrases DIFFÉRENTES des autres pour
     -- que seul l'expéditeur d'un /rw démarre/termine le combat chez lui.
@@ -33,13 +35,15 @@ function C:GetSettings()
     CharacterDB.settings = CharacterDB.settings or {}
     local s = CharacterDB.settings
     if s.windowOpacity   == nil then s.windowOpacity   = DEFAULTS.windowOpacity   end
-    if s.launcherSize    == nil then s.launcherSize    = DEFAULTS.launcherSize    end
-    if s.playerScale     == nil then s.playerScale     = DEFAULTS.playerScale     end
+
+
     if s.mjScale         == nil then s.mjScale         = DEFAULTS.mjScale         end
     if s.groupScale      == nil then s.groupScale      = DEFAULTS.groupScale      end
     if s.initiativeScale == nil then s.initiativeScale = DEFAULTS.initiativeScale end
     if s.rwTrigger        == nil then s.rwTrigger        = DEFAULTS.rwTrigger        end
     if s.rwEndTrigger     == nil then s.rwEndTrigger     = DEFAULTS.rwEndTrigger     end
+    s.resourceHUDEnabled = nil -- Permanent personal HUD replaces the optional display.
+    if s.resourceHUDScale == nil then s.resourceHUDScale = s.playerScale or DEFAULTS.resourceHUDScale end
     return s
 end
 
@@ -57,19 +61,12 @@ function C:SetWindowOpacity(value)
     local s = C:GetSettings()
     s.windowOpacity = Clamp(value, 0.05, 1.00)
     for _, frame in ipairs({
-        CharacterPlayerPanel, CharacterMJPanel, CharacterMJImpactPanel, CharacterMJPnjPanel,
+        CharacterMJPanel, CharacterMJImpactPanel, CharacterMJPnjPanel,
         CharacterGroupViewPanel, CharacterInitiativeBanner,
         CharacterInitiativeBanner and CharacterInitiativeBanner.roundBox,
     }) do
         if frame and frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
     end
-end
-
-function C:SetPlayerScale(value)
-    local s = C:GetSettings()
-    local steps = math.floor(((Clamp(value, WINDOW_SCALE_MIN, WINDOW_SCALE_MAX) - WINDOW_SCALE_MIN) / WINDOW_SCALE_STEP) + 0.5)
-    s.playerScale = WINDOW_SCALE_MIN + steps * WINDOW_SCALE_STEP
-    if CharacterPlayerPanel then CharacterPlayerPanel:SetScale(s.playerScale) end
 end
 
 function C:SetMJScale(value)
@@ -98,11 +95,12 @@ end
 function C:ApplyDisplaySettings()
     local s = C:GetSettings()
     C:SetWindowOpacity(s.windowOpacity)
-    C:SetPlayerScale(s.playerScale)
+
     C:SetMJScale(s.mjScale)
     C:SetGroupScale(s.groupScale)
     C:SetInitiativeScale(s.initiativeScale)
-    if C.SetLauncherSize then C:SetLauncherSize(s.launcherSize, false) end
+
+    if C.ApplyResourceHUD then C:ApplyResourceHUD() end
 end
 
 -- ── Panneau ──────────────────────────────────────────────────────────────────
@@ -188,13 +186,6 @@ local opacitySlider = MakeSlider(
     function(v) C:SetWindowOpacity(v) end
 )
 
-local launcherSlider = MakeSlider(
-    "Taille de l'icône", -104,
-    28, 72, 2,
-    function(v) return string.format("%d px", math.floor(v + 0.5)) end,
-    function(v) if C.SetLauncherSize then C:SetLauncherSize(v, true) end end
-)
-
 -- ── Contrôles de taille (3 fenêtres séparées) ────────────────────────────────
 
 local function MakeScaleControl(labelText, y, getScale, setScale)
@@ -250,25 +241,25 @@ local function MakeScaleControl(labelText, y, getScale, setScale)
 end
 
 local refreshPlayer = MakeScaleControl(
-    "Taille — Fiche personnage", -158,
-    function() return C:GetSettings().playerScale end,
-    function(v) C:SetPlayerScale(v) end
+    "Taille — Portrait et ressources", -104,
+    function() return C:GetSettings().resourceHUDScale end,
+    function(v) if C.SetResourceHUDScale then C:SetResourceHUDScale(v) end end
 )
 
 local refreshMJ = MakeScaleControl(
-    "Taille — Vue MJ", -202,
+    "Taille — Vue MJ", -148,
     function() return C:GetSettings().mjScale end,
     function(v) C:SetMJScale(v) end
 )
 
 local refreshGroup = MakeScaleControl(
-    "Taille — Vue Joueur", -246,
+    "Taille — Vue Joueur", -192,
     function() return C:GetSettings().groupScale end,
     function(v) C:SetGroupScale(v) end
 )
 
 local refreshInitiative = MakeScaleControl(
-    "Taille — Bandeau Initiative", -290,
+    "Taille — Bandeau Initiative", -236,
     function() return C:GetSettings().initiativeScale end,
     function(v) C:SetInitiativeScale(v) end
 )
@@ -279,12 +270,12 @@ local refreshInitiative = MakeScaleControl(
 -- autres joueurs pour ne pas déclencher leur combat en même temps.
 
 local rwTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-rwTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -334)
+rwTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -280)
 rwTriggerLbl:SetText("Phrase déclencheuse /rw")
 UI.ApplyLabel(rwTriggerLbl)
 
 local rwTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
-rwTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -350)
+rwTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -296)
 rwTriggerEB:SetScript("OnEnterPressed", function(self)
     C:SetRWTrigger(self:GetText())
     self:ClearFocus()
@@ -294,12 +285,12 @@ rwTriggerEB:SetScript("OnEditFocusLost", function(self)
 end)
 
 local rwEndTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-rwEndTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -386)
+rwEndTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -332)
 rwEndTriggerLbl:SetText("Phrase de fin /rw")
 UI.ApplyLabel(rwEndTriggerLbl)
 
 local rwEndTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
-rwEndTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -402)
+rwEndTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -348)
 rwEndTriggerEB:SetScript("OnEnterPressed", function(self)
     C:SetRWEndTrigger(self:GetText())
     self:ClearFocus()
@@ -310,14 +301,21 @@ end)
 
 -- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
+local hudHint=panel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+hudHint:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-384)
+hudHint:SetText("Maintenir et glisser le portrait : déplacer")
+hudHint:SetWidth(PANEL_W-28);hudHint:SetJustifyH("LEFT");hudHint:SetWordWrap(true)
+UI.ApplyMutedText(hudHint)
 local function SyncControls()
     local s = C:GetSettings()
     opacitySlider:SetValue(s.windowOpacity)
-    launcherSlider:SetValue(s.launcherSize)
+
     refreshPlayer()
     refreshMJ()
     refreshGroup()
     refreshInitiative()
+
+
     rwTriggerEB:SetText(s.rwTrigger or "")
     rwEndTriggerEB:SetText(s.rwEndTrigger or "")
 end
@@ -329,8 +327,8 @@ function C:ToggleSettings()
         panel:Hide()
     else
         panel:ClearAllPoints()
-        if CharacterLauncherBtn then
-            panel:SetPoint("TOPLEFT", CharacterLauncherBtn, "TOPRIGHT", 8, 0)
+        if CharacterResourceHUD then
+            panel:SetPoint("TOPLEFT", CharacterResourceHUD, "TOPRIGHT", 8, 0)
         else
             panel:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
         end

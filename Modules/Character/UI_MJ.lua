@@ -4,7 +4,7 @@
 -- ============================================================
 
 local C  = Character
-local UI = OS2.UI
+local UI = C.RPGUI or OS2.UI
 
 -- Couleurs de barre (partagées depuis UI.lua)
 local COL_HP  = { fg = UI.colors.statHP.fg,   dim = UI.colors.statHP.bg   }
@@ -50,7 +50,7 @@ end
 -- d'une largeur fixe : avant, la barre + le texte gardaient toujours la même
 -- taille peu importe la largeur du panneau, laissant un grand vide à droite.
 
-local VAL_TXT_W = 70
+local VAL_TXT_W = 104
 
 local function MiniStatRow(parent, col)
     local row = CreateFrame("Frame", nil, parent)
@@ -72,13 +72,13 @@ local function MiniStatRow(parent, col)
     local fill = row:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("TOPLEFT", barBg)
     fill:SetHeight(9)
-    fill:SetColorTexture(col.fg[1], col.fg[2], col.fg[3], 1)
+    fill:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga");fill:SetVertexColor(col.fg[1], col.fg[2], col.fg[3], 1)
     fill:SetWidth(1)
 
     local tempFill = row:CreateTexture(nil, "ARTWORK")
     tempFill:SetPoint("TOPLEFT", barBg)
-    tempFill:SetHeight(9)
-    tempFill:SetColorTexture(unpack(UI.colors.tempFill))
+    tempFill:SetHeight(1)
+    tempFill:SetColorTexture(math.min(1,col.fg[1]+.35),math.min(1,col.fg[2]+.35),math.min(1,col.fg[3]+.35),1)
     tempFill:SetWidth(1)
     tempFill:Hide()
 
@@ -92,14 +92,14 @@ local function MiniStatRow(parent, col)
         temp = math.max(0, tonumber(temp) or 0)
         valTxt:SetText(Fmt(cur) .. "/" .. Fmt(max) .. (temp > 0 and (" (" .. Fmt(temp) .. ")") or ""))
         local barW = math.max(1, barBg:GetWidth() or 1)
-        local total = math.max(1, max + temp)
+        local total = math.max(1, max)
         local curW = math.max(1, barW * math.max(0, math.min(1, cur / total)))
-        fill:SetWidth(curW)
+        fill:SetWidth(curW);fill:SetShown(cur>0)
 
         if temp > 0 then
             tempFill:ClearAllPoints()
-            tempFill:SetPoint("TOPLEFT", barBg, "TOPLEFT", curW, 0)
-            tempFill:SetHeight(9)
+            tempFill:SetPoint("TOPLEFT", barBg, "TOPLEFT", 0, 0)
+            tempFill:SetHeight(1)
             tempFill:SetWidth(math.max(1, barW * math.max(0, math.min(1, temp / total))))
             tempFill:Show()
         else
@@ -136,7 +136,7 @@ end
 
 -- ── Ligne de joueur ───────────────────────────────────────────────────────────
 
-local ROW_H = 86
+local ROW_H = 76
 local PAD   = 8
 
 local function ApplyTargetAttribute(row, playerName)
@@ -265,7 +265,7 @@ end
 
 -- ── Panneau MJ ────────────────────────────────────────────────────────────────
 
-local MJ_W, MJ_H = 250, 380
+local MJ_W, MJ_H = 276, 364
 
 local mjPanel = CreateFrame("Frame", "CharacterMJPanel", UIParent)
 mjPanel:SetSize(MJ_W, MJ_H)
@@ -299,16 +299,8 @@ end
 -- ── Panneau d'impact MJ ──────────────────────────────────────────────────────
 
 impactPanel = CreateFrame("Frame", "CharacterMJImpactPanel", UIParent)
--- Hauteur = somme des offsets réels de la chaîne Valeur → Ressource → Action
--- → Multicible → "+ État" → Appliquer → statut (voir plus bas, tous ancrés
--- depuis le HAUT maintenant, "+ État" et Appliquer y compris) : ne peut donc
--- plus diverger de leur position réelle, contrairement à l'ancien calcul où
--- Appliquer restait ancré depuis le BAS d'une hauteur fixée à la main (source
--- de l'espace mort sous "Appliquer" signalé par l'utilisateur, même défaut
--- que la Vue joueur — voir UI_Group.lua). Tout ce qui est accroché EN DESSOUS
--- du panneau (combatToggleBtn et la suite, ancrés à BOTTOMLEFT) redescend
--- uniformément avec lui, sans chevauchement.
-impactPanel:SetSize(220, 281)
+-- Ressources et commandes de combat restent à l’intérieur du même cadre.
+impactPanel:SetSize(220, 346)
 impactPanel:SetPoint("TOPRIGHT", mjPanel, "TOPLEFT", -2, 0)
 impactPanel:SetFrameStrata("MEDIUM")
 impactPanel:SetFrameLevel(mjPanel:GetFrameLevel() + 5)
@@ -322,7 +314,7 @@ impactBg:SetAllPoints()
 UI.ApplyWindowBackground(impactBg)
 impactPanel.bg = impactBg
 
-local impactTitleBar = MakeTitleBar(impactPanel, "Gestionnaire de ressources")
+local impactTitleBar = MakeTitleBar(impactPanel, "Actions du MJ")
 impactTitleBar:SetFrameLevel(impactPanel:GetFrameLevel() + 1)
 
 local function ImpactLabel(text, x, y)
@@ -342,8 +334,8 @@ local function ImpactSeparator(y)
     return sep
 end
 
-local function CreateImpactDropdown(parent, width, labelText, items, getValue, setValue)
-    return UI.CreateDropdown(parent, width, labelText, items, getValue, setValue)
+local function CreateImpactChoice(parent, width, labelText, items, getValue, setValue)
+    return UI.CreateChoiceStrip(parent, width, labelText, items, getValue, setValue)
 end
 
 ImpactLabel("Valeur", 10, -34)
@@ -354,24 +346,24 @@ impactValueEB:SetMaxLetters(7)
 impactValueEB:SetText("1")
 ImpactSeparator(-77)
 
-local statDropdown = CreateImpactDropdown(impactPanel, 198, "Ressource", {
-    { value = "hp", label = "HP" },
+local statDropdown = CreateImpactChoice(impactPanel, 198, "Ressource", {
+    { value = "hp", label = "Vie" },
     { value = "mana", label = "Mana" },
-    { value = "endurance", label = "Endurance" },
+    { value = "endurance", label = "End." },
 }, function() return impactState.stat end, function(value) impactState.stat = value end)
 statDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -83)
-ImpactSeparator(-128)
 
-local actionDropdown = CreateImpactDropdown(impactPanel, 198, "Action", {
+
+local actionDropdown = CreateImpactChoice(impactPanel, 198, "Action", {
     { value = "damage", label = "Retrait" },
     { value = "heal", label = "Ajout" },
-    { value = "buff", label = "Buff Temp" },
+    { value = "buff", label = "Bonus" },
 }, function() return impactState.mode end, function(value) impactState.mode = value end)
-actionDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -134)
-ImpactSeparator(-179)
+actionDropdown:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -127)
+ImpactSeparator(-171)
 
 impactMultiCB = UI.CreateStyledCheckbox(impactPanel, "Multicible")
-impactMultiCB:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -185)
+impactMultiCB:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -178)
 impactMultiCB.label:SetPoint("LEFT", impactMultiCB, "RIGHT", 6, 0)
 impactMultiCB:SetScript("OnClick", function(self)
     if not self:GetChecked() then
@@ -384,7 +376,7 @@ end)
 -- les cibles (joueurs ET PNJ), nom + icone seulement. Le MJ a déjà le détail
 -- complet ailleurs dans cette vue, mais réutilise volontairement le même
 -- popup minimal que la Vue joueur plutôt qu'un ciblage dédié en plus.
-local addStatusBtn = UI.CreatePanelButton(impactPanel, 198, 20, "+ État")
+local addStatusBtn = UI.CreatePanelButton(impactPanel, 95, 22, "+ État")
 addStatusBtn:SetPoint("TOPLEFT", impactMultiCB, "BOTTOMLEFT", 0, -8)
 addStatusBtn:SetScript("OnClick", function()
     if not C.initiative.active then
@@ -394,8 +386,8 @@ addStatusBtn:SetScript("OnClick", function()
     if C.OpenStatusPopup then C:OpenStatusPopup() end
 end)
 
-local applyBtn = UI.CreatePanelButton(impactPanel, 72, 20, "Appliquer")
-applyBtn:SetPoint("TOPLEFT", addStatusBtn, "BOTTOMLEFT", 0, -8)
+local applyBtn = UI.CreatePanelButton(impactPanel, 95, 22, "Appliquer")
+applyBtn:SetPoint("TOPLEFT", addStatusBtn, "TOPRIGHT", 8, 0)
 applyBtn:SetScript("OnClick", function()
     local count = 0
     for name in pairs(selectedPlayers) do
@@ -437,7 +429,7 @@ impactStatus:Hide()
 -- Enfants d'impactPanel : ils apparaissent/disparaissent avec lui automatiquement.
 
 local combatToggleBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Début de combat")
-combatToggleBtn:SetPoint("TOPLEFT", impactPanel, "BOTTOMLEFT", 10, -4)
+combatToggleBtn:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -248)
 combatToggleBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 combatToggleBtn:SetScript("OnClick", function()
     if C.initiative.active then
@@ -490,7 +482,7 @@ UI.ApplyMutedText(hostStatus)
 -- l'écran : ancrée près du bouton elle recouvrait le reste du panneau MJ.
 -- Une fois validée, le PNJ apparaît dans la Vue MJ — PNJ.
 local npcPopup = CreateFrame("Frame", nil, impactPanel)
-npcPopup:SetSize(220, 172)
+npcPopup:SetSize(220, 154)
 npcPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 npcPopup:SetFrameStrata("DIALOG")
 npcPopup:SetMovable(true)
@@ -503,7 +495,7 @@ npcPopupBg:SetAllPoints()
 UI.ApplyWindowBackground(npcPopupBg, 0.95)
 UI.ApplyBorder(npcPopup)
 
-local npcPopupTitleBar = MakeTitleBar(npcPopup, "Rajouter un NPC")
+local npcPopupTitleBar = MakeTitleBar(npcPopup, "Créer un PNJ")
 npcPopupTitleBar:SetFrameLevel(npcPopup:GetFrameLevel() + 1)
 
 -- Icone du PNJ (à gauche du nom) : ouvre le navigateur d'icones déjà utilisé
@@ -511,7 +503,7 @@ npcPopupTitleBar:SetFrameLevel(npcPopup:GetFrameLevel() + 1)
 local selectedNpcIcon = nil
 
 local npcIconBtn = CreateFrame("Button", nil, npcPopup)
-npcIconBtn:SetSize(28, 28)
+npcIconBtn:SetSize(36, 36)
 npcIconBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -30)
 
 local npcIconTex = npcIconBtn:CreateTexture(nil, "ARTWORK")
@@ -522,7 +514,7 @@ npcIconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
 local npcIconBorder = npcIconBtn:CreateTexture(nil, "BORDER")
 npcIconBorder:SetPoint("TOPLEFT", npcIconBtn, "TOPLEFT", -1, 1)
 npcIconBorder:SetPoint("BOTTOMRIGHT", npcIconBtn, "BOTTOMRIGHT", 1, -1)
-npcIconBorder:SetColorTexture(unpack(UI.colors.panelButtonAccent))
+npcIconBorder:SetColorTexture(.52,.42,.25,.95)
 
 local npcIconHL = npcIconBtn:CreateTexture(nil, "HIGHLIGHT")
 npcIconHL:SetAllPoints()
@@ -549,16 +541,19 @@ npcNameLbl:SetPoint("TOPLEFT", npcIconBtn, "TOPRIGHT", 8, 0)
 npcNameLbl:SetText("Nom")
 UI.ApplyLabel(npcNameLbl)
 
-local npcNameEB = UI.CreateStyledEditBox(npcPopup, 164, 22)
+local npcNameEB = UI.CreateStyledEditBox(npcPopup, 156, 22)
 npcNameEB:SetPoint("TOPLEFT", npcIconBtn, "TOPRIGHT", 8, -14)
 npcNameEB:SetMaxLetters(32)
 
 -- Rangée compacte : Initiative / HP / MP / End., 4 petits champs numériques.
-local NPC_FIELD_W, NPC_FIELD_GAP = 44, 6
+local NPC_FIELD_W, NPC_FIELD_GAP = 47, 4
 local npcStatFields = {}
 
 local npcFieldsLbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-npcFieldsLbl:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -76)
+npcFieldsLbl:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -78)
+npcFieldsLbl:SetWidth(NPC_FIELD_W)
+npcFieldsLbl:SetHeight(12)
+npcFieldsLbl:SetJustifyH("CENTER")
 npcFieldsLbl:SetText("Init.")
 UI.ApplyLabel(npcFieldsLbl)
 
@@ -566,13 +561,14 @@ local function NpcFieldLabel(text, x)
     local lbl = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbl:SetPoint("TOPLEFT", npcFieldsLbl, "TOPLEFT", x, 0)
     lbl:SetWidth(NPC_FIELD_W)
-    lbl:SetJustifyH("LEFT")
+    lbl:SetJustifyH("CENTER")
+    lbl:SetHeight(12)
     lbl:SetText(text)
     UI.ApplyLabel(lbl)
     return lbl
 end
-NpcFieldLabel("HP",   NPC_FIELD_W + NPC_FIELD_GAP)
-NpcFieldLabel("MP",   (NPC_FIELD_W + NPC_FIELD_GAP) * 2)
+NpcFieldLabel("Vie",   NPC_FIELD_W + NPC_FIELD_GAP)
+NpcFieldLabel("Mana",   (NPC_FIELD_W + NPC_FIELD_GAP) * 2)
 NpcFieldLabel("End.", (NPC_FIELD_W + NPC_FIELD_GAP) * 3)
 
 for i = 1, 4 do
@@ -580,12 +576,13 @@ for i = 1, 4 do
     eb:SetNumeric(true)
     eb:SetMaxLetters(4)
     eb:SetPoint("TOPLEFT", npcFieldsLbl, "BOTTOMLEFT", (i - 1) * (NPC_FIELD_W + NPC_FIELD_GAP), -4)
+    eb:SetJustifyH("CENTER")
     npcStatFields[i] = eb
 end
 local npcInitEB, npcHpEB, npcMpEB, npcEndEB = npcStatFields[1], npcStatFields[2], npcStatFields[3], npcStatFields[4]
 
-local npcAddConfirmBtn = UI.CreatePanelButton(npcPopup, 200, 20, "Ajouter")
-npcAddConfirmBtn:SetPoint("TOPLEFT", npcFieldsLbl, "BOTTOMLEFT", 0, -40)
+local npcAddConfirmBtn = UI.CreatePanelButton(npcPopup, 200, 22, "Ajouter le PNJ")
+npcAddConfirmBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -124)
 
 local function CloseNpcPopup()
     npcPopup:Hide()
@@ -670,8 +667,10 @@ local function RefreshCombatControls()
     if not active then npcPopup:Hide() end
 
     if active then
+        impactPanel:SetHeight(362)
         hostStatus:SetText(C.initiative.isHost and "Hôte : vous" or "Hôte : un autre MJ")
     else
+        impactPanel:SetHeight(346)
         hostStatus:SetText("")
     end
 end
@@ -925,6 +924,7 @@ local function Rebuild()
     end
 
     content:SetHeight(math.max(1, totalH))
+    mjPanel:SetHeight(math.max(106, math.min(MJ_H, totalH + 30)))
     UpdateScrollRange()
     if RefreshTurnHighlights then RefreshTurnHighlights() end
 end
@@ -1034,7 +1034,7 @@ local function NpcRow(parent, npcId)
     local nameTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     UI.ApplyBodyText(nameTxt)
     nameTxt:SetPoint("TOPLEFT", iconTex, "TOPRIGHT", 4, 2)
-    nameTxt:SetPoint("RIGHT", row, "RIGHT", -20, 0)
+    nameTxt:SetPoint("RIGHT", row, "RIGHT", -90, 0)
     nameTxt:SetWordWrap(false)
 
     local function StatLabel(txt, col, yOff)
@@ -1074,7 +1074,7 @@ local function NpcRow(parent, npcId)
     -- PNJ (pas ses HP/Mana/Endu actuels — un clone part au complet) : il ne
     -- reste plus qu'à changer le nom et valider.
     local duplicateBtn = UI.CreatePanelButton(row, 62, 14, "Dupliquer")
-    duplicateBtn:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -2, 2)
+    duplicateBtn:SetPoint("TOPRIGHT", row, "TOPRIGHT", -22, -3)
     duplicateBtn:SetScript("OnClick", function()
         local p = row.npcId and FindNpcParticipant(row.npcId)
         if not p then return end

@@ -4,39 +4,31 @@
 -- ============================================================
 
 local C  = Character
-local UI = OS2.UI
+local UI = C.RPGUI or OS2.UI
 
-local W, PAD = 118, 4
-local ROW_H = 40
-local BAR_H = 9
+local W, PAD = 244, 6
+local ROW_H = 32
 
--- Zone des contrôles (Valeur → Appliquer), sous la liste. TOP_CHROME est la
--- distance fixe entre le haut du panneau et le haut de la liste ; CONTROLS_H
--- est la hauteur nécessaire à `controls` (valeur/ressource/action/multicible/
--- +État/Appliquer/statut), dérivée directement de la chaîne d'ancrage
--- ci-dessous (voir Build) — à mettre à jour ici si un élément y est
--- ajouté/retiré. `controls` est ancré au bas de la LISTE (pas du panneau,
--- voir Build) : la hauteur du panneau (Rebuild) en est la SOMME directe,
--- donc ne peut plus diverger de la position réelle des contrôles, contrairement
--- à l'ancien calcul (deux formules à recaler à la main à chaque changement,
--- source de l'espace mort sous "Appliquer" signalé par l'utilisateur).
+-- Les commandes suivent la zone visible de la liste (huit alliés au maximum).
+-- Leur hauteur inclut les deux menus côte à côte et les actions groupées.
 local TOP_CHROME    = 26
 local SEP_GAP       = 6
-local CONTROLS_H    = 232
+local CONTROLS_H    = 106
 local BOTTOM_MARGIN = 6
 
 local rows = {}
 local selectedPlayers = {}
 local selectedStat = "hp"
 local selectedAction = "gain"
+local viewport
 local panel, content, valueEB, statusFS, multiCB, applyBtn
 local ShowGroupStatus
-
-local COLORS = {
-    hp        = UI.colors.statHP,
-    mana      = UI.colors.statMana,
-    endurance = UI.colors.statEnd,
-}
+local function FitFooter()
+    if panel and viewport then
+        local messageHeight = statusFS and statusFS:IsShown() and statusFS:GetText() ~= "" and 16 or 0
+        panel:SetHeight(TOP_CHROME + viewport:GetHeight() + SEP_GAP * 2 + 1 + CONTROLS_H + BOTTOM_MARGIN + messageHeight)
+    end
+end
 
 local ACTIONS = {
     gain = { label = "Gain" },
@@ -160,24 +152,8 @@ local function MakeRow(parent, name)
     nameFS:SetWordWrap(false)
     UI.ApplyBodyText(nameFS)
 
-    local barBg = row:CreateTexture(nil, "BORDER")
-    barBg:SetPoint("LEFT", row, "LEFT", 6, -9)
-    barBg:SetPoint("RIGHT", row, "RIGHT", -6, -9)
-    barBg:SetHeight(BAR_H)
-    barBg:SetColorTexture(unpack(UI.colors.statHP.bg))
-
-    local fill = row:CreateTexture(nil, "ARTWORK")
-    fill:SetPoint("LEFT", barBg, "LEFT", 0, 0)
-    fill:SetHeight(BAR_H)
-    fill:SetColorTexture(unpack(UI.colors.statHP.fg))
-    fill:SetWidth(1)
-
-    local tempFill = row:CreateTexture(nil, "ARTWORK")
-    tempFill:SetHeight(BAR_H)
-    tempFill:SetColorTexture(unpack(UI.colors.tempFill))
-    tempFill:SetWidth(1)
-    tempFill:Hide()
-
+    -- Vue alliés : seulement la proportion de PV, jamais de valeurs chiffrées.
+    local healthBar = UI.HealthMini(row, -20)
     local sep = row:CreateTexture(nil, "ARTWORK")
     sep:SetPoint("BOTTOMLEFT")
     sep:SetPoint("BOTTOMRIGHT")
@@ -189,30 +165,7 @@ local function MakeRow(parent, name)
         ApplyTargetAttribute(row, playerName)
         local data = GetMemberData(playerName)
         nameFS:SetText(C.GetDisplayName and C:GetDisplayName(playerName, data) or playerName)
-        local hp = data and data.hp
-        if not hp then
-            fill:SetWidth(1)
-            tempFill:Hide()
-            row:SetSelected(selectedPlayers[playerName])
-            return
-        end
-
-        local cur = tonumber(hp.cur) or 0
-        local max = math.max(1, tonumber(hp.max) or 1)
-        local temp = math.max(0, tonumber(hp.temp) or 0)
-        local total = math.max(1, max + temp)
-        local width = math.max(1, barBg:GetWidth() or (W - 8))
-        local curW = math.max(1, width * math.max(0, math.min(1, cur / total)))
-        fill:SetWidth(curW)
-
-        if temp > 0 then
-            tempFill:ClearAllPoints()
-            tempFill:SetPoint("LEFT", barBg, "LEFT", curW, 0)
-            tempFill:SetWidth(math.max(1, width * math.max(0, math.min(1, temp / total))))
-            tempFill:Show()
-        else
-            tempFill:Hide()
-        end
+        healthBar:Refresh(data and data.hp)
         row:SetSelected(selectedPlayers[playerName])
     end
 
@@ -235,8 +188,8 @@ local function MakeRow(parent, name)
     return row
 end
 
-local function CreateMiniDropdown(parent, width, labelText, items, getValue, setValue)
-    return UI.CreateDropdown(parent, width, labelText, items, getValue, setValue)
+local function CreateChoiceStrip(parent, width, labelText, items, getValue, setValue)
+    return UI.CreateChoiceStrip(parent, width, labelText, items, getValue, setValue)
 end
 
 local function ApplyToSelected()
@@ -282,24 +235,27 @@ local function Rebuild()
     for _, row in pairs(rows) do row:Hide() end
 
     local members = GetVisibleMembers()
-    local y = -4
-    for _, name in ipairs(members) do
+    local columns = #members > 1 and 2 or 1
+    local cellW = (W - PAD * 2 - (columns - 1) * 6) / columns
+    for index, name in ipairs(members) do
         local row = rows[name] or MakeRow(content, name)
         rows[name] = row
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
-        row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, y)
+        row:SetPoint("TOPLEFT", content, "TOPLEFT", ((index-1)%columns)*(cellW+6), -4-math.floor((index-1)/columns)*(ROW_H+2))
+        row:SetWidth(cellW)
         row:Show()
         row:Refresh(name)
-        y = y - ROW_H - 2
     end
 
-    local listH = #members * (ROW_H + 2) + 2
+    local listH = math.ceil(#members/columns) * (ROW_H + 2) + 4
     content:SetHeight(listH)
+    local visibleH=math.min(listH,4*(ROW_H+2)+4)
+    viewport:SetHeight(visibleH)
+    viewport:SetVerticalScroll(math.min(viewport:GetVerticalScroll(),math.max(0,listH-visibleH)))
     -- Somme directe des mêmes constantes qui positionnent `controls` (voir
     -- Build) : ne peut plus diverger de sa position réelle, donc plus jamais
     -- d'espace mort entre la liste et les contrôles, ni sous "Appliquer".
-    panel:SetHeight(TOP_CHROME + listH + SEP_GAP + 1 + SEP_GAP + CONTROLS_H + BOTTOM_MARGIN)
+    FitFooter()
 end
 
 local function Build()
@@ -342,7 +298,7 @@ local function Build()
 
     local titleFS = title:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     titleFS:SetPoint("LEFT", title, "LEFT", 5, 0)
-    titleFS:SetText("Vue joueur")
+    titleFS:SetText("Compagnons")
     UI.ApplyTitle(titleFS)
 
     local refreshBtn = UI.CreatePanelButton(panel, 18, 15, "A")
@@ -380,16 +336,21 @@ local function Build()
     sep:SetHeight(1)
     UI.ApplySeparator(sep, true)
 
-    content = CreateFrame("Frame", nil, panel)
-    content:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -26)
-    content:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -PAD, -26)
-
+    viewport=CreateFrame("ScrollFrame",nil,panel)
+    viewport:SetPoint("TOPLEFT",panel,"TOPLEFT",PAD,-26)
+    viewport:SetPoint("TOPRIGHT",panel,"TOPRIGHT",-PAD,-26)
+    viewport:SetHeight(60);viewport:EnableMouseWheel(true)
+    viewport:SetScript("OnMouseWheel",function(self,delta)
+        self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*(ROW_H+2))))
+    end)
+    content=CreateFrame("Frame",nil,viewport)
+    content:SetWidth(W-PAD*2);content:SetHeight(1);viewport:SetScrollChild(content)
     -- Ancré au bas de la LISTE (pas du panneau) : sa position suit donc
     -- directement `content`, quelle que soit la taille du groupe — voir
     -- TOP_CHROME/SEP_GAP/CONTROLS_H/BOTTOM_MARGIN plus haut.
     local controlSep = panel:CreateTexture(nil, "ARTWORK")
-    controlSep:SetPoint("TOPLEFT", content, "BOTTOMLEFT", 0, -SEP_GAP)
-    controlSep:SetPoint("TOPRIGHT", content, "BOTTOMRIGHT", 0, -SEP_GAP)
+    controlSep:SetPoint("TOPLEFT", viewport, "BOTTOMLEFT", 0, -SEP_GAP)
+    controlSep:SetPoint("TOPRIGHT", viewport, "BOTTOMRIGHT", 0, -SEP_GAP)
     controlSep:SetHeight(1)
     UI.ApplySeparator(controlSep, true)
 
@@ -399,32 +360,32 @@ local function Build()
     controls:SetHeight(CONTROLS_H)
 
     local valueLabel = controls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    valueLabel:SetPoint("TOPLEFT", controls, "TOPLEFT", 2, -2)
+    valueLabel:SetPoint("LEFT", controls, "TOPLEFT", 2, -11)
     valueLabel:SetText("Valeur")
     UI.ApplyLabel(valueLabel)
 
-    valueEB = UI.CreateStyledEditBox(controls, W - PAD * 2, 22)
+    valueEB = UI.CreateStyledEditBox(controls, 50, 22)
     valueEB:SetNumeric(true)
     valueEB:SetMaxLetters(5)
-    valueEB:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -18)
+    valueEB:SetPoint("TOPLEFT", controls, "TOPLEFT", 46, 0)
     valueEB:SetText("8")
 
-    local statDropdown = CreateMiniDropdown(controls, W - PAD * 2, "Ressource", {
-        { value = "hp", label = "HP" },
+    local statDropdown = CreateChoiceStrip(controls, W - PAD * 2, nil, {
+        { value = "hp", label = "Vie" },
         { value = "mana", label = "Mana" },
-        { value = "endurance", label = "Endurance" },
+        { value = "endurance", label = "End." },
     }, function() return selectedStat end, function(value) selectedStat = value end)
-    statDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -46)
+    statDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -30)
 
-    local actionDropdown = CreateMiniDropdown(controls, W - PAD * 2, "Action", {
+    local actionDropdown = CreateChoiceStrip(controls, W - PAD * 2, nil, {
         { value = "damage", label = "Retrait" },
         { value = "gain", label = "Gain" },
-        { value = "buff", label = "Buff temp." },
+        { value = "buff", label = "Bonus" },
     }, function() return selectedAction end, function(value) selectedAction = value end)
-    actionDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -92)
+    actionDropdown:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -56)
 
     multiCB = UI.CreateStyledCheckbox(controls, "Multicible")
-    multiCB:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -138)
+    multiCB:SetPoint("LEFT", valueEB, "RIGHT", 12, 0)
     multiCB.label:SetPoint("LEFT", multiCB, "RIGHT", 5, 0)
     multiCB:SetScript("OnClick", function(self)
         if not self:GetChecked() then
@@ -447,8 +408,8 @@ local function Build()
     -- contrairement à la liste ci-dessus qui ne montre que les joueurs (les
     -- joueurs ne voient pas le détail des PNJ), c'est la seule façon pour un
     -- joueur normal de viser aussi un PNJ.
-    local addStatusBtn = UI.CreatePanelButton(controls, W - PAD * 2, 20, "+ État")
-    addStatusBtn:SetPoint("TOPLEFT", multiCB, "BOTTOMLEFT", 0, -8)
+    local addStatusBtn = UI.CreatePanelButton(controls, (W-PAD*2-8)/2, 20, "+ État")
+    addStatusBtn:SetPoint("TOPLEFT", controls, "TOPLEFT", 0, -86)
     addStatusBtn:SetScript("OnClick", function()
         if not C.initiative.active then
             if ShowGroupStatus then ShowGroupStatus("Combat non démarré") end
@@ -457,12 +418,12 @@ local function Build()
         if C.OpenStatusPopup then C:OpenStatusPopup() end
     end)
 
-    applyBtn = UI.CreatePanelButton(controls, W - PAD * 2, 20, "Appliquer")
-    applyBtn:SetPoint("TOPLEFT", addStatusBtn, "BOTTOMLEFT", 0, -8)
+    applyBtn = UI.CreatePanelButton(controls, (W-PAD*2-8)/2, 20, "Appliquer")
+    applyBtn:SetPoint("TOPLEFT", addStatusBtn, "TOPRIGHT", 8, 0)
     applyBtn:SetScript("OnClick", ApplyToSelected)
 
     statusFS = controls:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    statusFS:SetPoint("TOPLEFT", applyBtn, "BOTTOMLEFT", 2, -2)
+    statusFS:SetPoint("TOPLEFT", addStatusBtn, "BOTTOMLEFT", 2, -4)
     statusFS:SetPoint("RIGHT", controls, "RIGHT", -2, 0)
     statusFS:SetJustifyH("LEFT")
     UI.ApplyMutedText(statusFS)
@@ -474,11 +435,13 @@ local function Build()
         local token = statusToken
         statusFS:SetText(text or "")
         statusFS:Show()
+        FitFooter()
         if C_Timer and C_Timer.After then
             C_Timer.After(3, function()
                 if token == statusToken and statusFS then
                     statusFS:SetText("")
                     statusFS:Hide()
+                    FitFooter()
                 end
             end)
         end

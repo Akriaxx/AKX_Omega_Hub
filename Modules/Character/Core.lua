@@ -1420,7 +1420,7 @@ end)
 local function RegisterSlash()
     SLASH_OCHAR1 = "/ochar"
     SlashCmdList["OCHAR"] = function()
-        if CharacterPlayerPanel then CharacterPlayerPanel:Toggle() end
+        if C.ToggleGroupView then C:ToggleGroupView() end
     end
 
     SLASH_OCHARMJ1 = "/ocharmj"
@@ -1462,6 +1462,7 @@ end
 -- ── Enable / Disable ──────────────────────────────────────────────────────────
 
 function C:Enable()
+    if C.EnableResourceHUD then C:EnableResourceHUD() end
     RegisterSlash()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
@@ -1472,12 +1473,6 @@ function C:Enable()
     eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
     for _, ev in ipairs(EVENTS) do ChatFrame_AddMessageEventFilter(ev, Filter) end
-    if C._resetLauncherOnNextEnable and C.ResetLauncherPosition then
-        C:ResetLauncherPosition(true)
-    elseif CharacterLauncherBtn then
-        CharacterLauncherBtn:Show()
-    end
-    C._resetLauncherOnNextEnable = nil
     if C.ApplyDisplaySettings then C:ApplyDisplaySettings() end
     OmegaHub:SetModuleLoaded("Character", true)
     if not OmegaHub._startingUp then
@@ -1486,11 +1481,11 @@ function C:Enable()
 end
 
 function C:Disable()
+    if C.DisableResourceHUD then C:DisableResourceHUD() end
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
     eventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
     eventFrame:UnregisterEvent("CHAT_MSG_RAID_WARNING")
     for _, ev in ipairs(EVENTS) do ChatFrame_RemoveMessageEventFilter(ev, Filter) end
-    C._resetLauncherOnNextEnable = true
     -- Si je suis l'hôte du combat, le clore proprement referme la bannière
     -- d'initiative chez tout le monde plutôt que de la laisser bloquée active.
     if C.initiative.isHost then C:EndCombat() end
@@ -1498,13 +1493,11 @@ function C:Disable()
     -- pleinement fonctionnelles (HP/Mana/Endurance modifiables, broadcast envoyé)
     -- alors que le module est censé être désactivé.
     if CharacterSettingsPanel      then CharacterSettingsPanel:Hide()      end
-    if CharacterPlayerPanel        then CharacterPlayerPanel:Hide()        end
     if CharacterMJPanel            then CharacterMJPanel:Hide()            end
     if CharacterMJImpactPanel      then CharacterMJImpactPanel:Hide()      end
     if CharacterMJPnjPanel         then CharacterMJPnjPanel:Hide()         end
     if CharacterGroupViewPanel     then CharacterGroupViewPanel:Hide()     end
     if CharacterInitiativeBanner   then CharacterInitiativeBanner:Hide()   end
-    if CharacterLauncherBtn        then CharacterLauncherBtn:Hide()        end
     SLASH_OCHAR1    = nil
     SLASH_OCHARMJ1  = nil
     SLASH_CHNPCADD1 = nil

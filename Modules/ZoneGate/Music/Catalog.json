@@ -1,0 +1,578 @@
+[
+  {
+    "file": "omega_desert_paisible_accent.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Paisible — Accent",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 1.25,
+    "bytes": 13566
+  },
+  {
+    "file": "omega_desert_paisible_phrase.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Paisible — Phrase",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 2.9,
+    "bytes": 22649
+  },
+  {
+    "file": "omega_desert_mysterieux_accent.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Mystérieux — Accent",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 1.25,
+    "bytes": 13541
+  },
+  {
+    "file": "omega_desert_mysterieux_phrase.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 2.9,
+    "bytes": 22702
+  },
+  {
+    "file": "omega_desert_menacant_accent.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Menaçant — Accent",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 1.25,
+    "bytes": 13591
+  },
+  {
+    "file": "omega_desert_menacant_phrase.ogg",
+    "family": "Désert / Moyen-Orient",
+    "name": "Menaçant — Phrase",
+    "instrument": "Oud et souffle de ney",
+    "seconds": 2.9,
+    "bytes": 22613
+  },
+  {
+    "file": "omega_asie_paisible_accent.ogg",
+    "family": "Asiatique",
+    "name": "Paisible — Accent",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 1.25,
+    "bytes": 13074
+  },
+  {
+    "file": "omega_asie_paisible_phrase.ogg",
+    "family": "Asiatique",
+    "name": "Paisible — Phrase",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 2.9,
+    "bytes": 23141
+  },
+  {
+    "file": "omega_asie_mysterieux_accent.ogg",
+    "family": "Asiatique",
+    "name": "Mystérieux — Accent",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 1.25,
+    "bytes": 13033
+  },
+  {
+    "file": "omega_asie_mysterieux_phrase.ogg",
+    "family": "Asiatique",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 2.9,
+    "bytes": 23135
+  },
+  {
+    "file": "omega_asie_menacant_accent.ogg",
+    "family": "Asiatique",
+    "name": "Menaçant — Accent",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 1.25,
+    "bytes": 13000
+  },
+  {
+    "file": "omega_asie_menacant_phrase.ogg",
+    "family": "Asiatique",
+    "name": "Menaçant — Phrase",
+    "instrument": "Cordes pincées et flûte",
+    "seconds": 2.9,
+    "bytes": 22493
+  },
+  {
+    "file": "omega_bambou_paisible_accent.ogg",
+    "family": "Bambou / Bois",
+    "name": "Paisible — Accent",
+    "instrument": "Bambou creux et bois",
+    "seconds": 1.25,
+    "bytes": 6496
+  },
+  {
+    "file": "omega_bambou_paisible_phrase.ogg",
+    "family": "Bambou / Bois",
+    "name": "Paisible — Phrase",
+    "instrument": "Bambou creux et bois",
+    "seconds": 2.9,
+    "bytes": 9123
+  },
+  {
+    "file": "omega_bambou_mysterieux_accent.ogg",
+    "family": "Bambou / Bois",
+    "name": "Mystérieux — Accent",
+    "instrument": "Bambou creux et bois",
+    "seconds": 1.25,
+    "bytes": 6347
+  },
+  {
+    "file": "omega_bambou_mysterieux_phrase.ogg",
+    "family": "Bambou / Bois",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Bambou creux et bois",
+    "seconds": 2.9,
+    "bytes": 8866
+  },
+  {
+    "file": "omega_bambou_menacant_accent.ogg",
+    "family": "Bambou / Bois",
+    "name": "Menaçant — Accent",
+    "instrument": "Bambou creux et bois",
+    "seconds": 1.25,
+    "bytes": 6119
+  },
+  {
+    "file": "omega_bambou_menacant_phrase.ogg",
+    "family": "Bambou / Bois",
+    "name": "Menaçant — Phrase",
+    "instrument": "Bambou creux et bois",
+    "seconds": 2.9,
+    "bytes": 10575
+  },
+  {
+    "file": "omega_cordes_paisible_accent.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Paisible — Accent",
+    "instrument": "Luth et lyre",
+    "seconds": 1.25,
+    "bytes": 7689
+  },
+  {
+    "file": "omega_cordes_paisible_phrase.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Paisible — Phrase",
+    "instrument": "Luth et lyre",
+    "seconds": 2.9,
+    "bytes": 14715
+  },
+  {
+    "file": "omega_cordes_mysterieux_accent.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Mystérieux — Accent",
+    "instrument": "Luth et lyre",
+    "seconds": 1.25,
+    "bytes": 7675
+  },
+  {
+    "file": "omega_cordes_mysterieux_phrase.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Luth et lyre",
+    "seconds": 2.9,
+    "bytes": 14335
+  },
+  {
+    "file": "omega_cordes_menacant_accent.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Menaçant — Accent",
+    "instrument": "Luth et lyre",
+    "seconds": 1.25,
+    "bytes": 7252
+  },
+  {
+    "file": "omega_cordes_menacant_phrase.ogg",
+    "family": "Cordes / Médiéval",
+    "name": "Menaçant — Phrase",
+    "instrument": "Luth et lyre",
+    "seconds": 2.9,
+    "bytes": 13548
+  },
+  {
+    "file": "omega_tambours_paisible_accent.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Paisible — Accent",
+    "instrument": "Peaux et résonances",
+    "seconds": 1.25,
+    "bytes": 9294
+  },
+  {
+    "file": "omega_tambours_paisible_phrase.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Paisible — Phrase",
+    "instrument": "Peaux et résonances",
+    "seconds": 2.9,
+    "bytes": 16099
+  },
+  {
+    "file": "omega_tambours_mysterieux_accent.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Mystérieux — Accent",
+    "instrument": "Peaux et résonances",
+    "seconds": 1.25,
+    "bytes": 9223
+  },
+  {
+    "file": "omega_tambours_mysterieux_phrase.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Peaux et résonances",
+    "seconds": 2.9,
+    "bytes": 15906
+  },
+  {
+    "file": "omega_tambours_menacant_accent.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Menaçant — Accent",
+    "instrument": "Peaux et résonances",
+    "seconds": 1.25,
+    "bytes": 8448
+  },
+  {
+    "file": "omega_tambours_menacant_phrase.ogg",
+    "family": "Tambours / Percussions",
+    "name": "Menaçant — Phrase",
+    "instrument": "Peaux et résonances",
+    "seconds": 2.9,
+    "bytes": 17580
+  },
+  {
+    "file": "omega_foret_paisible_accent.ogg",
+    "family": "Forêt / Nature",
+    "name": "Paisible — Accent",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 1.25,
+    "bytes": 11644
+  },
+  {
+    "file": "omega_foret_paisible_phrase.ogg",
+    "family": "Forêt / Nature",
+    "name": "Paisible — Phrase",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 2.9,
+    "bytes": 16837
+  },
+  {
+    "file": "omega_foret_mysterieux_accent.ogg",
+    "family": "Forêt / Nature",
+    "name": "Mystérieux — Accent",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 1.25,
+    "bytes": 11695
+  },
+  {
+    "file": "omega_foret_mysterieux_phrase.ogg",
+    "family": "Forêt / Nature",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 2.9,
+    "bytes": 16900
+  },
+  {
+    "file": "omega_foret_menacant_accent.ogg",
+    "family": "Forêt / Nature",
+    "name": "Menaçant — Accent",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 1.25,
+    "bytes": 11527
+  },
+  {
+    "file": "omega_foret_menacant_phrase.ogg",
+    "family": "Forêt / Nature",
+    "name": "Menaçant — Phrase",
+    "instrument": "Feuillage et chant bref",
+    "seconds": 2.9,
+    "bytes": 17898
+  },
+  {
+    "file": "omega_montagne_paisible_accent.ogg",
+    "family": "Montagne / Neige",
+    "name": "Paisible — Accent",
+    "instrument": "Vent froid et clochette",
+    "seconds": 1.25,
+    "bytes": 11446
+  },
+  {
+    "file": "omega_montagne_paisible_phrase.ogg",
+    "family": "Montagne / Neige",
+    "name": "Paisible — Phrase",
+    "instrument": "Vent froid et clochette",
+    "seconds": 2.9,
+    "bytes": 18428
+  },
+  {
+    "file": "omega_montagne_mysterieux_accent.ogg",
+    "family": "Montagne / Neige",
+    "name": "Mystérieux — Accent",
+    "instrument": "Vent froid et clochette",
+    "seconds": 1.25,
+    "bytes": 11405
+  },
+  {
+    "file": "omega_montagne_mysterieux_phrase.ogg",
+    "family": "Montagne / Neige",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Vent froid et clochette",
+    "seconds": 2.9,
+    "bytes": 19769
+  },
+  {
+    "file": "omega_montagne_menacant_accent.ogg",
+    "family": "Montagne / Neige",
+    "name": "Menaçant — Accent",
+    "instrument": "Vent froid et clochette",
+    "seconds": 1.25,
+    "bytes": 11336
+  },
+  {
+    "file": "omega_montagne_menacant_phrase.ogg",
+    "family": "Montagne / Neige",
+    "name": "Menaçant — Phrase",
+    "instrument": "Vent froid et clochette",
+    "seconds": 2.9,
+    "bytes": 19260
+  },
+  {
+    "file": "omega_mer_paisible_accent.ogg",
+    "family": "Mer / Port",
+    "name": "Paisible — Accent",
+    "instrument": "Vague et cloche de port",
+    "seconds": 1.25,
+    "bytes": 11808
+  },
+  {
+    "file": "omega_mer_paisible_phrase.ogg",
+    "family": "Mer / Port",
+    "name": "Paisible — Phrase",
+    "instrument": "Vague et cloche de port",
+    "seconds": 2.9,
+    "bytes": 19232
+  },
+  {
+    "file": "omega_mer_mysterieux_accent.ogg",
+    "family": "Mer / Port",
+    "name": "Mystérieux — Accent",
+    "instrument": "Vague et cloche de port",
+    "seconds": 1.25,
+    "bytes": 11760
+  },
+  {
+    "file": "omega_mer_mysterieux_phrase.ogg",
+    "family": "Mer / Port",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Vague et cloche de port",
+    "seconds": 2.9,
+    "bytes": 19585
+  },
+  {
+    "file": "omega_mer_menacant_accent.ogg",
+    "family": "Mer / Port",
+    "name": "Menaçant — Accent",
+    "instrument": "Vague et cloche de port",
+    "seconds": 1.25,
+    "bytes": 11802
+  },
+  {
+    "file": "omega_mer_menacant_phrase.ogg",
+    "family": "Mer / Port",
+    "name": "Menaçant — Phrase",
+    "instrument": "Vague et cloche de port",
+    "seconds": 2.9,
+    "bytes": 19750
+  },
+  {
+    "file": "omega_magie_paisible_accent.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Paisible — Accent",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 1.25,
+    "bytes": 6749
+  },
+  {
+    "file": "omega_magie_paisible_phrase.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Paisible — Phrase",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 2.9,
+    "bytes": 13503
+  },
+  {
+    "file": "omega_magie_mysterieux_accent.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Mystérieux — Accent",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 1.25,
+    "bytes": 6491
+  },
+  {
+    "file": "omega_magie_mysterieux_phrase.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 2.9,
+    "bytes": 13637
+  },
+  {
+    "file": "omega_magie_menacant_accent.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Menaçant — Accent",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 1.25,
+    "bytes": 6306
+  },
+  {
+    "file": "omega_magie_menacant_phrase.ogg",
+    "family": "Magie / Sanctuaire",
+    "name": "Menaçant — Phrase",
+    "instrument": "Cristal et halo harmonique",
+    "seconds": 2.9,
+    "bytes": 14016
+  },
+  {
+    "file": "omega_ruines_paisible_accent.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Paisible — Accent",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 1.25,
+    "bytes": 11360
+  },
+  {
+    "file": "omega_ruines_paisible_phrase.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Paisible — Phrase",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 2.9,
+    "bytes": 18928
+  },
+  {
+    "file": "omega_ruines_mysterieux_accent.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Mystérieux — Accent",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 1.25,
+    "bytes": 11503
+  },
+  {
+    "file": "omega_ruines_mysterieux_phrase.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 2.9,
+    "bytes": 19636
+  },
+  {
+    "file": "omega_ruines_menacant_accent.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Menaçant — Accent",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 1.25,
+    "bytes": 11340
+  },
+  {
+    "file": "omega_ruines_menacant_phrase.ogg",
+    "family": "Ruines / Sombre",
+    "name": "Menaçant — Phrase",
+    "instrument": "Pierre et corde frottée",
+    "seconds": 2.9,
+    "bytes": 19106
+  },
+  {
+    "file": "omega_ville_paisible_accent.ogg",
+    "family": "Ville / Auberge",
+    "name": "Paisible — Accent",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 1.25,
+    "bytes": 7893
+  },
+  {
+    "file": "omega_ville_paisible_phrase.ogg",
+    "family": "Ville / Auberge",
+    "name": "Paisible — Phrase",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 2.9,
+    "bytes": 15466
+  },
+  {
+    "file": "omega_ville_mysterieux_accent.ogg",
+    "family": "Ville / Auberge",
+    "name": "Mystérieux — Accent",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 1.25,
+    "bytes": 7508
+  },
+  {
+    "file": "omega_ville_mysterieux_phrase.ogg",
+    "family": "Ville / Auberge",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 2.9,
+    "bytes": 14669
+  },
+  {
+    "file": "omega_ville_menacant_accent.ogg",
+    "family": "Ville / Auberge",
+    "name": "Menaçant — Accent",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 1.25,
+    "bytes": 7172
+  },
+  {
+    "file": "omega_ville_menacant_phrase.ogg",
+    "family": "Ville / Auberge",
+    "name": "Menaçant — Phrase",
+    "instrument": "Luth chaleureux et clochette",
+    "seconds": 2.9,
+    "bytes": 14140
+  },
+  {
+    "file": "omega_danger_paisible_accent.ogg",
+    "family": "Danger / Combat",
+    "name": "Paisible — Accent",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 1.25,
+    "bytes": 8486
+  },
+  {
+    "file": "omega_danger_paisible_phrase.ogg",
+    "family": "Danger / Combat",
+    "name": "Paisible — Phrase",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 2.9,
+    "bytes": 16969
+  },
+  {
+    "file": "omega_danger_mysterieux_accent.ogg",
+    "family": "Danger / Combat",
+    "name": "Mystérieux — Accent",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 1.25,
+    "bytes": 8494
+  },
+  {
+    "file": "omega_danger_mysterieux_phrase.ogg",
+    "family": "Danger / Combat",
+    "name": "Mystérieux — Phrase",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 2.9,
+    "bytes": 17713
+  },
+  {
+    "file": "omega_danger_menacant_accent.ogg",
+    "family": "Danger / Combat",
+    "name": "Menaçant — Accent",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 1.25,
+    "bytes": 8168
+  },
+  {
+    "file": "omega_danger_menacant_phrase.ogg",
+    "family": "Danger / Combat",
+    "name": "Menaçant — Phrase",
+    "instrument": "Tambour et tension métallique",
+    "seconds": 2.9,
+    "bytes": 17211
+  }
+]

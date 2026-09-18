@@ -48,6 +48,17 @@ ZG.FontPaths = {
     metamorphous  = ADDON_FONT_DIR .. "Metamorphous-Regular.ttf",
     pirataone     = ADDON_FONT_DIR .. "PirataOne-Regular.ttf",
     medievalsharp = ADDON_FONT_DIR .. "MedievalSharp-Regular.ttf",
+    marcellus     = ADDON_FONT_DIR .. "Marcellus-Regular.ttf",
+    cormorantsc   = ADDON_FONT_DIR .. "CormorantSC-Regular.ttf",
+    almendra      = ADDON_FONT_DIR .. "Almendra-Regular.ttf",
+    amiri         = ADDON_FONT_DIR .. "Amiri-Regular.ttf",
+    tajawal       = ADDON_FONT_DIR .. "Tajawal-Regular.ttf",
+    rajdhani      = ADDON_FONT_DIR .. "Rajdhani-Regular.ttf",
+    rye           = ADDON_FONT_DIR .. "Rye-Regular.ttf",
+    forum         = ADDON_FONT_DIR .. "Forum-Regular.ttf",
+    barlowcondensed = ADDON_FONT_DIR .. "BarlowCondensed-Regular.ttf",
+    philosopher   = ADDON_FONT_DIR .. "Philosopher-Regular.ttf",
+    caudex        = ADDON_FONT_DIR .. "Caudex-Regular.ttf",
 }
 ZG.FontLabels = {
     frizqt        = "Standard (FrizQT)",
@@ -57,11 +68,24 @@ ZG.FontLabels = {
     metamorphous  = "Runique (Metamorphous)",
     pirataone     = "Gothique (Pirata One)",
     medievalsharp = "Manuscrit (MedievalSharp)",
+    marcellus     = "Sanctuaire (Marcellus)",
+    cormorantsc   = "Poétique (Cormorant SC)",
+    almendra      = "Conte ancien (Almendra)",
+    amiri         = "Lettré (Amiri)",
+    tajawal       = "Épuré (Tajawal)",
+    rajdhani      = "Futuriste (Rajdhani)",
+    rye           = "Western (Rye)",
+    forum         = "Antique (Forum)",
+    barlowcondensed = "Survie (Barlow Condensed)",
+    philosopher   = "Voyage (Philosopher)",
+    caudex        = "Chronique (Caudex)",
     custom        = "Personnalisée (chemin de fichier)",
 }
 ZG.FontOrder = {
     "frizqt", "skurri", "morpheus",
     "cinzel", "metamorphous", "pirataone", "medievalsharp",
+    "marcellus", "cormorantsc", "almendra", "amiri", "tajawal",
+    "rajdhani", "rye", "forum", "barlowcondensed", "philosopher", "caudex",
     "custom",
 }
 
@@ -88,7 +112,9 @@ ZG.MusicDir = "Interface\\AddOns\\Omega_Hub\\Modules\\ZoneGate\\Music\\"
 function ZG:GetMusicList()
     local list = {}
     for _, fileName in ipairs(ZoneGateMusicManifest or {}) do
-        table.insert(list, { name = fileName, path = ZG.MusicDir .. fileName })
+        local info=(ZoneGateSoundCatalog or {})[fileName]
+        table.insert(list, { name = info and info.name or fileName, family = info and info.family,
+            path = ZG.MusicDir .. fileName })
     end
     return list
 end
@@ -97,6 +123,7 @@ end
 -- exactement l'ancienne bannière codée en dur (aucune régression visuelle
 -- pour qui n'utilise jamais les thèmes).
 ZG.DefaultTheme = {
+    design = "classic", motion = "fade", placement = "top", bannerWidth = 600,
     id = nil, name = "Défaut", creator = nil,
     font = "frizqt", customFont = "", titleSize = 28,
     titleColor = { 1.00, 0.90, 0.55 }, subColor = { 0.72, 0.68, 0.55 },
@@ -1180,6 +1207,8 @@ local function PackState()
                 Enc(theme.soundEnter or ""), Enc(theme.soundExit or ""),
                 Enc(theme.customFont or ""), theme.midSepEnabled and 1 or 0,
                 Enc(theme.frameStyle or "none"), PackColor(theme.frameColor, true),
+                Enc(theme.design or "classic"), Enc(theme.motion or "fade"),
+                Enc(theme.placement or "top"), theme.bannerWidth or 600,
             }, SEP))
         end
     end
@@ -1229,6 +1258,9 @@ local function ApplyStateLine(line, sender)
                 customFont = fields[20] or "", midSepEnabled = fields[21] == "1",
                 frameStyle = ZG.FrameLabels[fields[22]] and fields[22] or "none",
                 frameColor = UnpackColor(fields[23], true),
+                design = fields[24] or "classic", motion = fields[25] or "fade",
+                placement = fields[26] or "top",
+                bannerWidth = math.max(400,math.min(900,tonumber(fields[27]) or 600)),
             }
         end
     elseif tag == "ZONE" then
@@ -1621,6 +1653,7 @@ function ZG:Disable()
     ZG:UnregisterNetwork()
     ZG:ResetState()
     if ZoneGatePanel then ZoneGatePanel:Hide() end
+    if ZoneGateThemePanel then ZoneGateThemePanel:Hide() end
     if ZG.HideBanner then ZG:HideBanner() end
 
     OmegaHub:SetModuleLoaded("ZoneGate", false)

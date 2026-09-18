@@ -4,10 +4,10 @@
 -- ============================================================
 
 local C  = Character
-local UI = OS2.UI
+local UI = C.RPGUI or OS2.UI
 
-local CARD_W, CARD_H = 52, 64
-local CARD_GAP       = 4
+local CARD_W, CARD_H = 48, 60
+local CARD_GAP       = 5
 local HEADER_H       = 20
 local CONTENT_H      = CARD_H + 10
 local BANNER_H       = HEADER_H + CONTENT_H
@@ -157,14 +157,18 @@ addGlobalEventBtn:Hide()
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
 local inputLabel = banner:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-inputLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 6, -6)
+inputLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 8, -16)
+inputLabel:SetWidth(INPUT_W)
+inputLabel:SetHeight(12)
+inputLabel:SetJustifyH("CENTER")
 inputLabel:SetText("Ma valeur")
 UI.ApplyLabel(inputLabel)
 
-local inputEB = UI.CreateStyledEditBox(banner, INPUT_W, 20)
+local inputEB = UI.CreateStyledEditBox(banner, INPUT_W, 22)
 inputEB:SetNumeric(true)
 inputEB:SetMaxLetters(4)
-inputEB:SetPoint("TOPLEFT", inputLabel, "BOTTOMLEFT", 0, -4)
+inputEB:SetPoint("TOPLEFT", inputLabel, "BOTTOMLEFT", 0, -6)
+inputEB:SetJustifyH("CENTER")
 
 inputEB:SetScript("OnEnterPressed", function(self)
     local v = self:GetText()
@@ -173,8 +177,8 @@ inputEB:SetScript("OnEnterPressed", function(self)
 end)
 
 local inputSep = banner:CreateTexture(nil, "ARTWORK")
-inputSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", INPUT_W + 12, -4)
-inputSep:SetPoint("BOTTOMLEFT", banner, "BOTTOMLEFT", INPUT_W + 12, 4)
+inputSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT", INPUT_W + 16, -8)
+inputSep:SetPoint("BOTTOMLEFT", banner, "BOTTOMLEFT", INPUT_W + 16, 8)
 inputSep:SetWidth(1)
 UI.ApplySeparator(inputSep, true)
 
@@ -521,12 +525,13 @@ UI.ApplyBorder(roundBox)
 banner.roundBox = roundBox
 
 local roundLabel = roundBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-roundLabel:SetPoint("TOP", roundBox, "TOP", 0, -8)
+roundLabel:SetPoint("CENTER", roundBox, "TOP", 0, -HEADER_H / 2)
 roundLabel:SetText("Tour")
 UI.ApplyLabel(roundLabel)
 
 local roundValue = roundBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-roundValue:SetPoint("CENTER", roundBox, "CENTER", 0, -6)
+roundValue:SetPoint("CENTER", roundBox, "CENTER", 0, -HEADER_H / 2)
+roundValue:SetFontObject("GameFontNormalLarge")
 UI.ApplyBodyText(roundValue)
 
 -- Voile cyan (même teinte que la surbrillance "tour en cours" des cartes,
@@ -1213,7 +1218,7 @@ local function Rebuild()
     -- surbrillance "tour en cours" compare directement les participants
     -- (référence de table), pas leur position, pour rester correcte même
     -- quand des cartes sont sautées.
-    local x = INPUT_W + 20
+    local x = INPUT_W + 24
     local cardIndex = 0
     for _, p in ipairs(participants) do
         if IsAlive(p) then

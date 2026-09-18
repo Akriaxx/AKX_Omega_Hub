@@ -32,13 +32,13 @@ place(c.form,panel,816,80);c.form:SetSize(448,650)
 c.placeholder:SetWidth(420);c.placeholder:SetText("Créez un style depuis la galerie, ou sélectionnez un thème dans votre bibliothèque.\n\nLes thèmes restent réutilisables dans vos zones et sous-zones.")
 local search=UI.CreateStyledEditBox(panel,168,24,false);place(search,panel,12,76)
 search:SetScript("OnTextChanged",function(self) panel.searchText=string.lower(self:GetText() or "");panel:RefreshList() end)
-text(panel,"Rechercher dans mes thèmes",12,57)
-c.listHeader:SetText("")
+c.listHeader:SetText("Mes thèmes")
 local inspectorTitle=text(panel,"PERSONNALISER",820,55,13)
 text(panel,"Enregistrement automatique",820,710)
 text(panel,"Affectation du thème : panneau Zones > Thème",820,731)
 local selectedTab="text"
 local tabs={}
+local optionRefresh={}
 local groups={"text","decor","timing"}
 local function showTab(key)
     selectedTab=key
@@ -59,6 +59,32 @@ place(c.sepStyleLabel,c.edit,6,86);place(c.sepColorLbl,c.edit,6,310)
 place(c.timingLabel,c.edit,6,86)
 c.timingLabel:SetText("Apparition / Lecture / Disparition (secondes)")
 c.preview:Hide()
+local function option(key,label,choices,order,group,y)
+    local lbl=text(c.edit,label,6,y)
+    local menu=CreateFrame("Frame",nil,c.edit,"UIDropDownMenuTemplate")
+    place(menu,c.edit,-10,y+20);UIDropDownMenu_SetWidth(menu,360);UI.StyleDropdown(menu)
+    UIDropDownMenu_Initialize(menu,function()
+        for _,value in ipairs(order) do
+            local info=UIDropDownMenu_CreateInfo();info.text=choices[value];info.notCheckable=true
+            info.func=function() if panel.selectedId then ZG:SetStudioOption(panel.selectedId,key,value);panel:RefreshForm() end end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    c[group][#c[group]+1]=lbl;c[group][#c[group]+1]=menu
+    optionRefresh[#optionRefresh+1]=function(t) UIDropDownMenu_SetText(menu,choices[t[key] or ZG.DefaultTheme[key]] or "Classique") end
+end
+option("design","Composition originale",ZG.StudioDesigns,{"souls","western","sumi","scifi","deco","minimal","classic"},"decor",360)
+option("motion","Mouvement d'apparition",ZG.StudioMotions,{"fade","rise","stamp","split"},"timing",240)
+option("placement","Position en jeu",ZG.StudioPlacements,{"top","center","bottom"},"timing",310)
+local widthLabel=text(c.edit,"Largeur minimum (adaptation automatique)",6,430)
+local widthEB=UI.CreateStyledEditBox(c.edit,100,24,false);place(widthEB,c.edit,6,452)
+widthEB:SetMaxLetters(3)
+local function saveWidth(self)
+    if panel.selectedId and not panel.suppressEvents then ZG:SetStudioOption(panel.selectedId,"bannerWidth",self:GetText());self:ClearFocus() end
+end
+widthEB:SetScript("OnEnterPressed",saveWidth)
+widthEB:SetScript("OnEditFocusLost",function(self) if panel.selectedId and not panel.suppressEvents then ZG:SetStudioOption(panel.selectedId,"bannerWidth",self:GetText()) end end)
+c.decor[#c.decor+1]=widthLabel;c.decor[#c.decor+1]=widthEB
 -- Commit numerical fields when leaving them, not only with Enter.
 for _,eb in ipairs({c.size,c.fadeIn,c.hold,c.fadeOut}) do
     eb:HookScript("OnEditFocusLost",function(self)
@@ -133,14 +159,18 @@ local function refreshPreview()
     local key=stamp..zoneEB:GetText().."/"..subEB:GetText()
     if key~=lastPreviewKey then
         previewTheme=t;preview:Configure(zoneEB:GetText()~="" and zoneEB:GetText() or "Nom du lieu",subEB:GetText(),t)
+        preview:SetScale(math.min(.86,160/(preview.baseHeight or 150),520/((preview.baseWidth or 600)*(t.motion=="stamp" and 1.15 or 1))))
+        for _,update in ipairs(optionRefresh) do update(t) end
+        if not widthEB:HasFocus() then widthEB:SetText(tostring(t.bannerWidth or 600)) end
         timeline:SetMinMaxValues(0,duration(t));seek(playing and progress or math.max(.05,t.fadeIn or .4))
         lastPreviewKey=key
     end
     status:SetText(theme() and ("Thème : "..t.name.."   ·   Enregistré") or "Choisissez un style ci-dessus pour créer votre premier thème.")
     showTab(selectedTab)
 end
-local function restore(from,to)
+local function restore(fromKey,toKey)
     refreshPreview()
+    local from,to=history[fromKey],history[toKey]
     local snapshot=table.remove(from)
     if not snapshot or not theme() then return end
     table.insert(to,ZG.CopyTheme(theme()))
@@ -149,8 +179,8 @@ local function restore(from,to)
         panel:RefreshAll();refreshPreview()
     end
 end
-button(panel,"Annuler",838,12,110,function() restore(history.undo,history.redo) end)
-button(panel,"Rétablir",954,12,110,function() restore(history.redo,history.undo) end)
+button(panel,"Annuler",838,12,110,function() restore("undo","redo") end)
+button(panel,"Rétablir",954,12,110,function() restore("redo","undo") end)
 button(panel,"Dupliquer",1070,12,138,function()
     local t=theme();if not t then return end
     local new=ZG:CreateStudioTheme(nil,t);if new then panel.selectedId=new.id;panel:RefreshAll() end
@@ -162,24 +192,43 @@ c.delete:SetScript("OnClick",function(self)
     else panel.deleteArmed=panel.selectedId;self:SetText("Confirmer") end
 end)
 
-text(panel,"GALERIE  /  Créer un thème à partir d'un style",220,463,13)
-for i,preset in ipairs(ZG.StudioPresets) do
+text(panel,"GALERIE  /  Choisir un style",220,463,13)
+local galleryPage=1
+local galleryTiles={}
+local pageLabel=text(panel,"",618,463,11)
+local function refreshGallery()
+    pageLabel:SetText(galleryPage.." / "..math.ceil(#ZG.StudioPresets/6))
+    for i,entry in ipairs(galleryTiles) do
+        local preset=ZG.StudioPresets[(galleryPage-1)*6+i]
+        entry.preset=preset;entry.tile:SetShown(preset~=nil)
+        if preset then
+            local t=ZG:StudioPresetTheme(preset)
+            entry.sample:Configure(preset.name,"",t);entry.sample:Seek(t.fadeIn)
+            entry.sample:SetScale(math.min(.40,250/entry.sample.baseWidth,42/entry.sample.baseHeight))
+            entry.caption:SetText(preset.caption)
+        end
+    end
+end
+button(panel,"<",714,453,30,function() galleryPage=(galleryPage-2)%math.ceil(#ZG.StudioPresets/6)+1;refreshGallery() end)
+button(panel,">",752,453,30,function() galleryPage=galleryPage%math.ceil(#ZG.StudioPresets/6)+1;refreshGallery() end)
+for i=1,6 do
     local col,row=(i-1)%2,math.floor((i-1)/2)
     local tile=CreateFrame("Button",nil,panel,"BackdropTemplate")
     place(tile,panel,220+col*288,486+row*80);tile:SetSize(278,72)
     tile:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Buttons\\WHITE8X8",edgeSize=1})
     tile:SetBackdropColor(.055,.05,.06,1);tile:SetBackdropBorderColor(.27,.24,.20,1)
     local sample=ZG.CreateBannerRenderer(tile);sample:ClearAllPoints();sample:SetPoint("TOP",tile,"TOP",0,-10);sample:SetScale(.40)
-    local sampleTheme=ZG:StudioPresetTheme(preset)
-    sample:Configure(preset.name,"",sampleTheme);sample:Seek(sampleTheme.fadeIn)
-    text(tile,preset.caption,14,52,10)
-    tile:SetScript("OnEnter",function() tile:SetBackdropBorderColor(unpack(preset.color)) end)
+    local entry={tile=tile,sample=sample,caption=text(tile,"",14,52,10)}
+    galleryTiles[i]=entry
+    tile:SetScript("OnEnter",function() if entry.preset then tile:SetBackdropBorderColor(unpack(entry.preset.color)) end end)
     tile:SetScript("OnLeave",function() tile:SetBackdropBorderColor(.27,.24,.20,1) end)
     tile:SetScript("OnClick",function()
-        local new=ZG:CreateStudioTheme(preset)
+        if not entry.preset then return end
+        local new=ZG:CreateStudioTheme(entry.preset)
         if new then search:SetText("");panel.selectedId=new.id;panel:RefreshAll();refreshPreview() end
     end)
 end
+refreshGallery()
 local originalRefresh=panel.RefreshForm
 function panel:RefreshForm() originalRefresh(self);refreshPreview() end
 zoneEB:SetScript("OnTextChanged",refreshPreview);subEB:SetScript("OnTextChanged",refreshPreview)

@@ -33,6 +33,18 @@ bgBand:SetTexture(MEDIA_DIR .. "Gradient.tga")
 bgBand:SetPoint("TOPLEFT", banner, "TOPLEFT", 0, -2)
 bgBand:SetPoint("BOTTOMRIGHT", banner, "BOTTOMRIGHT", 0, 2)
 bgBand:Hide()
+local compositions={}
+local supported={}
+for _,key in ipairs({"souls","western","sumi","scifi","deco","minimal","forest_spring","forest_summer","forest_autumn","forest_winter","mountains","snowpeaks","desert","ocean","marsh","ruins","volcano","cavern","relic","crystal","hunt","gothic","runes","portal"}) do supported[key]=true end
+for _,key in ipairs({"quiet_sacred","quiet_survivor","quiet_reverie","quiet_ronin","quiet_orbit","quiet_ashen","quiet_noir","quiet_fable","quiet_bamboo","quiet_sakura","quiet_jade","quiet_wave","quiet_rosette","quiet_arch","quiet_lattice","quiet_arabesque","quiet_caravan","quiet_copper"}) do supported[key]=true end
+local function GetComposition(key)
+    if not supported[key] then return nil end
+    if compositions[key] then return compositions[key] end
+    local tex=banner:CreateTexture(nil,"BACKGROUND")
+    tex:SetTexture(MEDIA_DIR.."Designs\\"..key..".tga")
+    tex:SetPoint("CENTER");tex:Hide();compositions[key]=tex
+    return tex
+end
 
 -- ── Cadre (aucun / simple / orné) ────────────────────────────────────────
 -- Indépendant des séparateurs et du bandeau de fond — les trois se cumulent
@@ -181,12 +193,22 @@ end
 
 local function ApplyTheme(theme)
     theme = theme or ZG.DefaultTheme
+    local width=math.max(400,math.min(900,tonumber(theme.bannerWidth) or 600))
+    local design=GetComposition(theme.design)
+    banner:SetSize(width,design and 150 or 90)
+    banner.material=design;banner.baseWidth=width
+    for _,tex in pairs(compositions) do tex:Hide() end
+    if design then
+        design:SetSize(width,150);design:SetVertexColor(unpack(theme.bgColor or ZG.DefaultTheme.bgColor))
+        design:SetShown(theme.bgEnabled~=false)
+    end
+    for _,tex in ipairs({lineTop,lineTop2,lineBottom,lineBottom2}) do tex:SetWidth(width*.6) end
 
     local fontPath = ResolveFontPath(theme)
     local flags = theme.outline and "OUTLINE" or ""
     local titleSize = theme.titleSize or 28
-    title:SetFont(fontPath, titleSize, flags)
-    sub:SetFont(fontPath, math.max(12, titleSize - 10), flags)
+    if not title:SetFont(fontPath, titleSize, flags) then title:SetFont(DEFAULT_FONT_PATH,titleSize,flags) end
+    if not sub:SetFont(fontPath, math.max(12, titleSize - 10), flags) then sub:SetFont(DEFAULT_FONT_PATH,math.max(12,titleSize-10),flags) end
 
     local tc = theme.titleColor or ZG.DefaultTheme.titleColor
     title:SetTextColor(tc[1], tc[2], tc[3], 1)
@@ -212,7 +234,7 @@ local function ApplyTheme(theme)
     lineMid:SetShown(theme.midSepEnabled)
 
     -- Bandeau de fond (voir bgBand plus haut).
-    bgBand:SetShown(theme.bgEnabled)
+    bgBand:SetShown(theme.bgEnabled and not design)
     if theme.bgEnabled then
         local bg = theme.bgColor or ZG.DefaultTheme.bgColor
         bgBand:SetVertexColor(bg[1], bg[2], bg[3], bg[4] or 0.55)
@@ -250,6 +272,7 @@ function banner:Configure(zoneName, subName, theme)
     theme = theme or ZG.DefaultTheme
 
     anim:Stop()
+    banner:SetScript("OnUpdate",nil)
     ApplyTheme(theme)
 
     title:SetText(ZG:StyleThemeText(zoneName, theme))
@@ -263,6 +286,40 @@ function banner:Configure(zoneName, subName, theme)
     end
 
     banner.theme=theme
+    -- Measure the final styled strings after applying the font. Keep the
+    -- configured width as a minimum, with room for the decorative edges.
+    local textWidth=math.max(title:GetStringWidth(),sub:GetStringWidth())
+    local quiet=type(theme.design)=="string" and theme.design:match("^quiet_")
+    local landscape=banner.material and not quiet and theme.design~="souls" and theme.design~="western" and theme.design~="sumi" and theme.design~="scifi" and theme.design~="deco" and theme.design~="minimal"
+    local width=math.max(banner.baseWidth,math.ceil((textWidth+48)/(landscape and .52 or .78)))
+    banner.baseWidth=width
+    banner:SetWidth(width)
+    if banner.material then banner.material:SetWidth(width) end
+    for _,tex in ipairs({lineTop,lineTop2,lineBottom,lineBottom2}) do tex:SetWidth(width*.78) end
+    lineMid:SetWidth(width*.55)
+    local hasSub=subName and subName~=""
+    local titleHeight=title:GetStringHeight()
+    local gap=theme.midSepEnabled and 20 or 12
+    local blockHeight=titleHeight+(hasSub and (gap+sub:GetStringHeight()) or 0)
+    -- These fractions describe the usable central area of the original artwork.
+    -- The brush edges and art-deco diamonds must stay outside the text block.
+    local safeHeight=({deco=.48,sumi=.50,western=.54,souls=.56,scifi=.70,minimal=.56})[theme.design] or ((landscape or quiet) and .56 or .80)
+    local height=math.max(banner.material and 150 or 90,math.ceil((blockHeight+24)/safeHeight))
+    banner.baseHeight=height
+    banner.textTop=blockHeight/2
+    banner:SetHeight(height)
+    if banner.material then banner.material:SetSize(width,height) end
+    title:ClearAllPoints();title:SetPoint("TOP",banner,"CENTER",0,banner.textTop)
+    sub:ClearAllPoints();sub:SetPoint("TOP",title,"BOTTOM",0,-gap)
+    lineMid:ClearAllPoints();lineMid:SetPoint("TOP",title,"BOTTOM",0,-gap/2)
+    lineMid:SetShown(hasSub and theme.midSepEnabled)
+    lineTop:ClearAllPoints();lineTop:SetPoint("BOTTOM",title,"TOP",0,10)
+    lineBottom:ClearAllPoints();lineBottom:SetPoint("TOP",hasSub and sub or title,"BOTTOM",0,-10)
+    if name=="ZoneGateBanner" then
+        -- Include the widest moment of the impact animation in screen fitting.
+        local peak=theme.motion=="stamp" and 1.15 or 1
+        banner:SetScale(math.min(1,math.max(1,UIParent:GetWidth()-48)/(width*peak),math.max(1,UIParent:GetHeight()-320)/height))
+    end
 end
 
 function banner:ShowBanner(zoneName, subName, theme)
@@ -270,11 +327,24 @@ function banner:ShowBanner(zoneName, subName, theme)
     self:Configure(zoneName,subName,theme)
     banner:SetAlpha(0)
     banner:Show()
-    anim:Play()
+    if name=="ZoneGateBanner" then
+        self:ClearAllPoints()
+        local placement=(theme or ZG.DefaultTheme).placement
+        if placement=="center" then self:SetPoint("CENTER",UIParent,"CENTER",0,0)
+        elseif placement=="bottom" then self:SetPoint("BOTTOM",UIParent,"BOTTOM",0,160)
+        else self:SetPoint("TOP",UIParent,"TOP",0,-140) end
+    end
+    local elapsed=0
+    self:SetScript("OnUpdate",function(_,dt)
+        elapsed=elapsed+dt
+        local total=self:Seek(elapsed)
+        if elapsed>=total then self:HideBanner() end
+    end)
 end
 
 function banner:HideBanner()
     anim:Stop()
+    self:SetScript("OnUpdate",nil)
     banner:SetAlpha(0)
     banner:Hide()
 end
@@ -287,6 +357,14 @@ function banner:Seek(seconds)
     local leave=math.max(.05,theme.fadeOut or .8)
     local t=math.max(0,seconds or enter)
     local alpha=t<enter and t/enter or (t<enter+stay and 1 or math.max(0,1-(t-enter-stay)/leave))
+    local p=math.min(1,t/enter)
+    local eased=1-(1-p)^3
+    local offset=theme.motion=="rise" and (1-eased)*-22 or theme.motion=="stamp" and (1-eased)*12 or 0
+    title:ClearAllPoints();title:SetPoint("TOP",self,"CENTER",0,(self.textTop or 0)+offset)
+    if self.material then
+        local factor=theme.motion=="split" and (.2+.8*eased) or theme.motion=="stamp" and (1+.15*(1-eased)) or 1
+        self.material:SetSize(self.baseWidth*factor,self.baseHeight or 150)
+    end
     self:SetAlpha(alpha);self:Show()
     return enter+stay+leave
 end
