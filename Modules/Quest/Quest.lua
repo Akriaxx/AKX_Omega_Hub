@@ -16,10 +16,17 @@ function J:InstallBinding()
         bindingEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
         return
     end
+    local set = GetCurrentBindingSet()
+    -- Login may expose 0 before the account/character bindings are loaded.
+    -- Wait for a valid profile rather than writing into the wrong one.
+    if set ~= 1 and set ~= 2 then
+        bindingEvents:RegisterEvent("UPDATE_BINDINGS")
+        bindingEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+        return
+    end
     bindingEvents:UnregisterAllEvents()
     OmegaHubDB.Quest_Bindings = OmegaHubDB.Quest_Bindings or {}
     local installed = OmegaHubDB.Quest_Bindings
-    local set = GetCurrentBindingSet()
     local profile = set == 1 and "account" or self:Me()
     if installed[profile] then return end
     if GetBindingKey("OMEGA_JOURNAL_TOGGLE") then

@@ -156,27 +156,13 @@ addGlobalEventBtn:Hide()
 
 -- The start-of-round resolution precedes the participant row.
 local function MakeResolutionStep(phase,label)
-    local button=UI.CreatePanelButton(banner,30,CARD_H,"E")
+    local button=UI.CreatePanelButton(banner,30,CARD_H,"")
+    local symbol=button:CreateTexture(nil,"OVERLAY")
+    symbol:SetSize(28,28);symbol:SetPoint("CENTER",0,0)
+    symbol:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResolutionSigil.tga")
     local selected=button:CreateTexture(nil,"ARTWORK")
     selected:SetAllPoints();selected:SetColorTexture(.78,.59,.24,.28)
     selected:Hide()
-    local activeBorder={}
-    for _,edge in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
-        local line=button:CreateTexture(nil,"BORDER")
-        line:SetColorTexture(unpack(UI.colors.turnHighlight))
-        if edge=="TOP" or edge=="BOTTOM" then
-            local y=edge=="TOP" and 2 or -2
-            line:SetPoint(edge.."LEFT",button,edge.."LEFT",-2,y)
-            line:SetPoint(edge.."RIGHT",button,edge.."RIGHT",2,y)
-            line:SetHeight(2)
-        else
-            local x=edge=="LEFT" and -2 or 2
-            line:SetPoint("TOP"..edge,button,"TOP"..edge,x,2)
-            line:SetPoint("BOTTOM"..edge,button,"BOTTOM"..edge,x,-2)
-            line:SetWidth(2)
-        end
-        line:Hide();activeBorder[#activeBorder+1]=line
-    end
     button:SetScript("OnClick",function()
         if C.initiative.isHost and C.initiative.phase==phase then C:NextTurn() end
     end)
@@ -192,12 +178,17 @@ local function MakeResolutionStep(phase,label)
     function button:Refresh()
         local active=C.initiative.phase==phase
         selected:SetShown(active)
-        for _,line in ipairs(activeBorder) do line:SetShown(active) end
         self:SetAlpha(active and 1 or .55)
     end
     return button
 end
 local startResolution=MakeResolutionStep("resolve_start","entre deux tours")
+startResolution:SetSize(44,BANNER_H)
+startResolution:SetPoint("TOPLEFT",banner,"TOPRIGHT",6,0)
+local stateHeading=startResolution:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+stateHeading:SetPoint("CENTER",startResolution,"TOP",0,-HEADER_H/2)
+stateHeading:SetText("États");UI.ApplyTitle(stateHeading)
+UI.ApplyBorder(startResolution)
 
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
@@ -247,24 +238,6 @@ local function MakeCard(parent)
     card.spotlight = spotlight
     function card:SetSpotlight(isOn) spotlight:SetShown(isOn) end
 
-    -- Juste un cadre (4 fines lignes), pas un pavé plein derrière la carte.
-    local function GlowLine(p1, p1x, p1y, p2, p2x, p2y, isVert)
-        local t = card:CreateTexture(nil, "BORDER")
-        t:SetColorTexture(unpack(UI.colors.turnHighlight))
-        t:SetPoint(p1, card, p1, p1x, p1y)
-        t:SetPoint(p2, card, p2, p2x, p2y)
-        if isVert then t:SetWidth(2) else t:SetHeight(2) end
-        t:Hide()
-        return t
-    end
-    local glow = {
-        GlowLine("TOPLEFT",     -2,  2, "TOPRIGHT",    2,  2, false),
-        GlowLine("BOTTOMLEFT",  -2, -2, "BOTTOMRIGHT", 2, -2, false),
-        GlowLine("TOPLEFT",     -2,  2, "BOTTOMLEFT", -2, -2, true),
-        GlowLine("TOPRIGHT",     2,  2, "BOTTOMRIGHT", 2, -2, true),
-    }
-    card.glow = glow
-
     local iconMask = card:CreateMaskTexture()
     iconMask:SetPoint("TOPLEFT", card, "TOPLEFT", 4, -4)
     iconMask:SetSize(CARD_W - 8, CARD_W - 8)
@@ -275,6 +248,10 @@ local function MakeCard(parent)
     icon:SetSize(CARD_W - 8, CARD_W - 8)
     icon:AddMaskTexture(iconMask)
     card.icon = icon
+    local portraitRim=card:CreateTexture(nil,"OVERLAY")
+    portraitRim:SetSize(CARD_W-6,CARD_W-6)
+    portraitRim:SetPoint("CENTER",icon,"CENTER",0,0)
+    portraitRim:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\InitiativeRing.tga")
 
     -- Juste la valeur d'initiative suffit, pas besoin du nom.
     local initFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -370,16 +347,15 @@ local function MakeCard(parent)
     -- ligne) : la cible elle-même peut se "soigner", l'hôte du combat peut
     -- retirer l'état de n'importe qui.
     local statusBadge = CreateFrame("Frame", nil, card)
-    statusBadge:SetSize(14, 12)
+    statusBadge:SetSize(19, 19)
     statusBadge:SetPoint("TOPLEFT", card, "TOPLEFT", -2, 2)
     statusBadge:EnableMouse(true)
     local sbBg = statusBadge:CreateTexture(nil, "BACKGROUND")
     sbBg:SetAllPoints()
     sbBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
-    local sbLbl = statusBadge:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sbLbl:SetAllPoints()
-    sbLbl:SetText("E")
-    UI.ApplyBodyText(sbLbl)
+    local stateIcon=statusBadge:CreateTexture(nil,"OVERLAY")
+    stateIcon:SetAllPoints()
+    stateIcon:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\StateSigil.tga")
     statusBadge:SetScript("OnEnter", function(self)
         if not card.participantId then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -407,8 +383,6 @@ local function MakeCard(parent)
     function card:Refresh(p, isCurrent)
         card.participantId = p.id
         initFS:SetText(tostring(p.initiative or 0))
-        for _, line in ipairs(glow) do line:SetShown(isCurrent) end
-
         addEventBtn:SetShown(C.initiative.isHost)
 
         local pendingN = 0
@@ -560,7 +534,7 @@ local ROUND_BOX_W = 54
 
 local roundBox = CreateFrame("Frame", nil, banner)
 roundBox:SetSize(ROUND_BOX_W, BANNER_H)
-roundBox:SetPoint("TOPLEFT", banner, "TOPRIGHT", 6, 0)
+roundBox:SetPoint("TOPLEFT", startResolution, "TOPRIGHT", 6, 0)
 
 local roundBoxBg = roundBox:CreateTexture(nil, "BACKGROUND")
 roundBoxBg:SetAllPoints()
@@ -579,74 +553,53 @@ roundValue:SetPoint("CENTER", roundBox, "CENTER", 0, -HEADER_H / 2)
 roundValue:SetFontObject("GameFontNormalLarge")
 UI.ApplyBodyText(roundValue)
 
--- Voile cyan (même teinte que la surbrillance "tour en cours" des cartes,
--- voir MakeCard) qui flashe puis s'éteint en fondu quand le compteur avance —
--- le côté "s'illumine" demandé, distinct d'un simple changement de texte.
-local roundGlow = roundBox:CreateTexture(nil, "ARTWORK")
-roundGlow:SetAllPoints()
-roundGlow:SetColorTexture(unpack(UI.colors.turnHighlight))
-roundGlow:SetAlpha(0)
-
-local roundGlowAnim = roundGlow:CreateAnimationGroup()
-local roundGlowFade = roundGlowAnim:CreateAnimation("Alpha")
-roundGlowFade:SetFromAlpha(0.85)
-roundGlowFade:SetToAlpha(0)
-roundGlowFade:SetDuration(0.7)
-roundGlowFade:SetSmoothing("OUT")
-roundGlowAnim:SetScript("OnPlay", function() roundGlow:SetAlpha(0.85) end)
-roundGlowAnim:SetScript("OnFinished", function() roundGlow:SetAlpha(0) end)
-
--- Fondu enchaîné de la valeur elle-même (l'ancienne s'efface, la nouvelle
--- apparaît) plutôt qu'un SetText() instantané.
-local roundValueFadeOut = roundValue:CreateAnimationGroup()
-local roundValueFadeOutAlpha = roundValueFadeOut:CreateAnimation("Alpha")
-roundValueFadeOutAlpha:SetFromAlpha(1)
-roundValueFadeOutAlpha:SetToAlpha(0)
-roundValueFadeOutAlpha:SetDuration(0.25)
-
-local roundValueFadeIn = roundValue:CreateAnimationGroup()
-local roundValueFadeInAlpha = roundValueFadeIn:CreateAnimation("Alpha")
-roundValueFadeInAlpha:SetFromAlpha(0)
-roundValueFadeInAlpha:SetToAlpha(1)
-roundValueFadeInAlpha:SetDuration(0.35)
-
-local pendingRoundText
-roundValueFadeOut:SetScript("OnFinished", function()
-    roundValue:SetText(pendingRoundText or "")
-    roundValueFadeIn:Play()
-end)
-
--- Valeur affichée au dernier Refresh, pour ne déclencher l'animation QUE
--- quand le compteur change réellement (pas à chaque Rebuild) — et jamais au
--- tout premier affichage du bandeau (sinon ça "flashe" dès l'ouverture).
+-- Two-number rolling counter. Only runs while changing rounds.
+local outgoingRound=roundBox:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
+UI.ApplyBodyText(outgoingRound)
+outgoingRound:Hide()
 local lastKnownRound
-
+local function PlaceRound(text,offset)
+    text:ClearAllPoints()
+    text:SetPoint("CENTER",roundBox,"CENTER",0,-HEADER_H/2+offset)
+end
+local function FinishRoundMotion()
+    roundBox:SetScript("OnUpdate",nil)
+    outgoingRound:Hide()
+    roundValue:SetAlpha(1)
+    PlaceRound(roundValue,0)
+end
 function roundBox:Refresh()
-    local newRound = C.initiative.round or 0
-    local text = tostring(newRound)
-    if lastKnownRound == nil or newRound == lastKnownRound then
-        if roundValueFadeOut:IsPlaying() then roundValueFadeOut:Stop() end
-        if roundValueFadeIn:IsPlaying() then roundValueFadeIn:Stop() end
-        roundValue:SetAlpha(1)
-        roundValue:SetText(text)
-    else
-        pendingRoundText = text
-        roundGlowAnim:Play()
-        if roundValueFadeOut:IsPlaying() then roundValueFadeOut:Stop() end
-        if roundValueFadeIn:IsPlaying() then roundValueFadeIn:Stop() end
-        roundValue:SetAlpha(1)
-        roundValueFadeOut:Play()
-    end
-    lastKnownRound = newRound
+    local newRound=C.initiative.round or 0
+    if newRound==lastKnownRound then return end
+    local previous=lastKnownRound
+    lastKnownRound=newRound
+    FinishRoundMotion()
+    roundValue:SetText(tostring(newRound))
+    if previous==nil then return end
+    outgoingRound:SetText(tostring(previous))
+    outgoingRound:SetAlpha(1);PlaceRound(outgoingRound,0);outgoingRound:Show()
+    roundValue:SetAlpha(0);PlaceRound(roundValue,24)
+    local elapsed=-.28
+    self:SetScript("OnUpdate",function(_,dt)
+        elapsed=elapsed+dt
+        if elapsed<0 then return end
+        local t=math.min(1,elapsed/.55)
+        -- Ease-out back: a small overshoot below the resting position.
+        local u=t-1
+        local progress=1+2.1*u*u*u+1.1*u*u
+        PlaceRound(roundValue,24*(1-progress))
+        roundValue:SetAlpha(math.min(1,t*3))
+        local exit=math.min(1,elapsed/.30)
+        PlaceRound(outgoingRound,-22*exit*exit)
+        outgoingRound:SetAlpha(1-exit)
+        if t>=1 then FinishRoundMotion() end
+    end)
 end
-
--- Le bandeau repart de zéro visuellement à chaque nouvelle apparition (fin
--- de combat précédent puis nouveau combat) : sans ça, le premier Refresh du
--- combat suivant comparerait au dernier round vu AVANT la fin du combat
--- précédent et déclencherait une animation parasite.
 function roundBox:ResetTracking()
-    lastKnownRound = nil
+    lastKnownRound=nil
+    FinishRoundMotion()
 end
+roundBox:SetScript("OnHide",function() roundBox:ResetTracking() end)
 
 -- ── Popup "Ajouter un évènement" ─────────────────────────────────────────────
 -- Ouverte soit via le "+" d'une carte (évènement accroché à ce participant,
@@ -663,7 +616,7 @@ local eventPopupTarget = nil    -- id du participant visé, ou nil si évènemen
 local eventPopupOpen   = false  -- distingue "pas de popup ouvert" de "cible générale (nil)"
 
 local eventPopup = CreateFrame("Frame", nil, banner)
-eventPopup:SetSize(220, 234)
+eventPopup:SetSize(240, 202)
 eventPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 eventPopup:SetFrameStrata("DIALOG")
 eventPopup:SetMovable(true)
@@ -704,12 +657,34 @@ eventDescLbl:SetPoint("TOPLEFT", eventForLbl, "BOTTOMLEFT", 0, -8)
 eventDescLbl:SetText("Description")
 UI.ApplyLabel(eventDescLbl)
 
-local eventDescEB = UI.CreateStyledEditBox(eventPopup, 200, 44, true)
-eventDescEB:SetPoint("TOPLEFT", eventDescLbl, "BOTTOMLEFT", 0, -4)
+-- A fixed viewport keeps the multiline editor from collapsing when empty.
+local eventDescArea=CreateFrame("ScrollFrame",nil,eventPopup)
+eventDescArea:SetSize(220,56)
+eventDescArea:SetPoint("TOPLEFT",eventPopup,"TOPLEFT",10,-64)
+eventDescArea:EnableMouseWheel(true)
+local descBackground=eventDescArea:CreateTexture(nil,"BACKGROUND")
+descBackground:SetAllPoints();descBackground:SetColorTexture(.015,.02,.023,.95)
+UI.ApplyBorder(eventDescArea)
+local eventDescEB=CreateFrame("EditBox",nil,eventDescArea)
+eventDescEB:SetWidth(208);eventDescEB:SetHeight(44)
+eventDescEB:SetMultiLine(true);eventDescEB:SetAutoFocus(false)
+eventDescEB:SetFontObject("GameFontHighlightSmall")
+eventDescEB:SetTextInsets(6,6,5,5)
 eventDescEB:SetMaxLetters(200)
+eventDescArea:SetScrollChild(eventDescEB)
+eventDescEB:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
+eventDescEB:SetScript("OnCursorChanged",function(_,_,y,_,height)
+    local top=math.abs(y)
+    local scroll=eventDescArea:GetVerticalScroll()
+    if top<scroll then eventDescArea:SetVerticalScroll(top)
+    elseif top+height>scroll+56 then eventDescArea:SetVerticalScroll(math.max(0,top+height-56)) end
+end)
+eventDescArea:SetScript("OnMouseWheel",function(self,delta)
+    self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*14)))
+end)
 
 local eventTurnsLbl = eventPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-eventTurnsLbl:SetPoint("TOPLEFT", eventDescEB, "BOTTOMLEFT", 0, -8)
+eventTurnsLbl:SetPoint("TOPLEFT", eventDescArea, "BOTTOMLEFT", 0, -8)
 eventTurnsLbl:SetText("Dans combien de tours")
 UI.ApplyLabel(eventTurnsLbl)
 
@@ -719,7 +694,7 @@ eventTurnsEB:SetMaxLetters(3)
 eventTurnsEB:SetPoint("TOPLEFT", eventTurnsLbl, "BOTTOMLEFT", 0, -4)
 
 local eventRepeatCB = UI.CreateStyledCheckbox(eventPopup, "Répétable (se relance)")
-eventRepeatCB:SetPoint("TOPLEFT", eventTurnsEB, "BOTTOMLEFT", 2, -12)
+eventRepeatCB:SetPoint("LEFT", eventTurnsEB, "RIGHT", 12, 0)
 eventRepeatCB.label:SetPoint("LEFT", eventRepeatCB, "RIGHT", 5, 0)
 eventRepeatCB:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -729,12 +704,13 @@ eventRepeatCB:SetScript("OnEnter", function(self)
 end)
 eventRepeatCB:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-local eventConfirmBtn = UI.CreatePanelButton(eventPopup, 200, 20, "Ajouter")
-eventConfirmBtn:SetPoint("TOPLEFT", eventRepeatCB, "BOTTOMLEFT", -2, -16)
+local eventConfirmBtn = UI.CreatePanelButton(eventPopup, 220, 22, "Ajouter")
+eventConfirmBtn:SetPoint("BOTTOMLEFT", eventPopup, "BOTTOMLEFT", 10, 10)
 
 local function CloseEventPopup()
     eventPopup:Hide()
     eventDescEB:SetText("")
+    eventDescArea:SetVerticalScroll(0)
     eventTurnsEB:SetText("")
     eventRepeatCB:SetChecked(false)
     eventPopupTarget = nil
@@ -777,6 +753,7 @@ OpenEventPopup = function(participantId)
     eventPopupOpen   = true
     eventForLbl:SetText("Pour : " .. label)
     eventDescEB:SetText("")
+    eventDescArea:SetVerticalScroll(0)
     eventTurnsEB:SetText("")
     eventRepeatCB:SetChecked(false)
     eventPopup:Show()
@@ -856,7 +833,7 @@ local function MakeStatusTargetRow(parent)
 end
 
 local statusPopup = CreateFrame("Frame", nil, banner)
-statusPopup:SetSize(220, 215)
+statusPopup:SetSize(220, 232)
 statusPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 statusPopup:SetFrameStrata("DIALOG")
 statusPopup:SetMovable(true)
@@ -916,12 +893,33 @@ statusDescLbl:SetPoint("TOPLEFT", statusCountFS, "BOTTOMLEFT", -2, -6)
 statusDescLbl:SetText("État")
 UI.ApplyLabel(statusDescLbl)
 
-local statusDescEB = UI.CreateStyledEditBox(statusPopup, 200, 36, true)
-statusDescEB:SetPoint("TOPLEFT", statusDescLbl, "BOTTOMLEFT", 0, -3)
+local statusDescArea=CreateFrame("ScrollFrame",nil,statusPopup)
+statusDescArea:SetSize(200,48)
+statusDescArea:SetPoint("TOPLEFT",statusPopup,"TOPLEFT",10,-98)
+statusDescArea:EnableMouseWheel(true)
+local statusDescBackground=statusDescArea:CreateTexture(nil,"BACKGROUND")
+statusDescBackground:SetAllPoints();statusDescBackground:SetColorTexture(.015,.02,.023,.95)
+UI.ApplyBorder(statusDescArea)
+local statusDescEB=CreateFrame("EditBox",nil,statusDescArea)
+statusDescEB:SetWidth(188);statusDescEB:SetHeight(44)
+statusDescEB:SetMultiLine(true);statusDescEB:SetAutoFocus(false)
+statusDescEB:SetFontObject("GameFontHighlightSmall")
+statusDescEB:SetTextInsets(6,6,5,5)
 statusDescEB:SetMaxLetters(200)
+statusDescArea:SetScrollChild(statusDescEB)
+statusDescEB:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
+statusDescEB:SetScript("OnCursorChanged",function(_,_,y,_,height)
+    local top=math.abs(y)
+    local scroll=statusDescArea:GetVerticalScroll()
+    if top<scroll then statusDescArea:SetVerticalScroll(top)
+    elseif top+height>scroll+48 then statusDescArea:SetVerticalScroll(math.max(0,top+height-48)) end
+end)
+statusDescArea:SetScript("OnMouseWheel",function(self,delta)
+    self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*14)))
+end)
 
 local statusTurnsLbl = statusPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-statusTurnsLbl:SetPoint("TOPLEFT", statusDescEB, "BOTTOMLEFT", 0, -6)
+statusTurnsLbl:SetPoint("TOPLEFT", statusDescArea, "BOTTOMLEFT", 0, -6)
 statusTurnsLbl:SetText("Pendant combien de tours")
 UI.ApplyLabel(statusTurnsLbl)
 
@@ -931,7 +929,7 @@ statusTurnsEB:SetMaxLetters(3)
 statusTurnsEB:SetPoint("TOPLEFT", statusTurnsLbl, "BOTTOMLEFT", 0, -3)
 
 local statusConfirmBtn = UI.CreatePanelButton(statusPopup, 200, 20, "Valider")
-statusConfirmBtn:SetPoint("TOPLEFT", statusTurnsEB, "BOTTOMLEFT", -2, -10)
+statusConfirmBtn:SetPoint("BOTTOMLEFT", statusPopup, "BOTTOMLEFT", 10, 10)
 
 -- ── Panneau "Cibles" (à droite du popup ci-dessus) ───────────────────────────
 -- Ouvert/fermé via "Choisir vos cibles..." : liste TOUTES les cibles
@@ -1052,6 +1050,7 @@ local function CloseStatusPopup()
     statusPopup:Hide()
     statusTargetsPanel:Hide()
     statusDescEB:SetText("")
+    statusDescArea:SetVerticalScroll(0)
     statusTurnsEB:SetText("")
     statusSelected = {}
     for _, row in ipairs(statusPlayerRows) do row:SetSelected(false) end
@@ -1085,6 +1084,7 @@ function C:OpenStatusPopup()
     if not C.initiative.active then return false end
     statusSelected = {}
     statusDescEB:SetText("")
+    statusDescArea:SetVerticalScroll(0)
     statusTurnsEB:SetText("")
     RefreshSelectedCount()
     statusTargetsPanel:Hide()
@@ -1245,6 +1245,84 @@ local function IsAlive(p)
     return not hp or hp > 0
 end
 
+-- One marker travels continuously between player, resolution and round counter.
+local turnMarker=CreateFrame("Frame",nil,banner)
+turnMarker:SetFrameLevel(banner:GetFrameLevel()+20)
+turnMarker:EnableMouse(false)
+for _,edge in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
+    local line=turnMarker:CreateTexture(nil,"OVERLAY")
+    line:SetColorTexture(unpack(UI.colors.turnHighlight))
+    if edge=="TOP" or edge=="BOTTOM" then
+        line:SetPoint(edge.."LEFT");line:SetPoint(edge.."RIGHT");line:SetHeight(2)
+    else
+        line:SetPoint("TOP"..edge);line:SetPoint("BOTTOM"..edge);line:SetWidth(2)
+    end
+end
+turnMarker:Hide()
+-- Three reusable echoes: no allocations of UI objects during movement.
+local markerGhosts={}
+for i=1,3 do
+    local ghost=CreateFrame("Frame",nil,turnMarker)
+    ghost:SetFrameLevel(turnMarker:GetFrameLevel()-1)
+    ghost:EnableMouse(false)
+    for _,edge in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
+        local line=ghost:CreateTexture(nil,"OVERLAY")
+        line:SetColorTexture(unpack(UI.colors.turnHighlight))
+        if edge=="TOP" or edge=="BOTTOM" then
+            line:SetPoint(edge.."LEFT");line:SetPoint(edge.."RIGHT");line:SetHeight(2)
+        else
+            line:SetPoint("TOP"..edge);line:SetPoint("BOTTOM"..edge);line:SetWidth(2)
+        end
+    end
+    ghost:Hide();markerGhosts[i]=ghost
+end
+local function HideMarkerGhosts()
+    for _,ghost in ipairs(markerGhosts) do ghost:Hide() end
+end
+local function MoveTurnMarker(x,y,w,h)
+    local goal={x=x-2,y=y+2,w=w+4,h=h+4}
+    local old=turnMarker.goal
+    if old and old.x==goal.x and old.y==goal.y and old.w==goal.w and old.h==goal.h and turnMarker:IsShown() then return end
+    turnMarker.goal=goal
+    local start=turnMarker.position or goal
+    HideMarkerGhosts()
+    local distance=math.abs(goal.x-start.x)
+    local strength=math.min(1,distance/48)
+    local function Draw(t)
+        local eased=t*t*(3-2*t)
+        local pulse=math.sin(math.pi*t)*strength
+        local stretch=math.min(16,distance*.12)*pulse
+        local p={}
+        for key,value in pairs(goal) do p[key]=start[key]+(value-start[key])*eased end
+        p.x=p.x-stretch/2;p.w=p.w+stretch
+        p.y=p.y-1.5*pulse;p.h=p.h-3*pulse
+        turnMarker.position=p
+        turnMarker:ClearAllPoints();turnMarker:SetPoint("TOPLEFT",banner,"TOPLEFT",p.x,p.y)
+        turnMarker:SetSize(p.w,p.h)
+        for i,ghost in ipairs(markerGhosts) do
+            local lag=math.max(0,t-i*.09)
+            local progress=lag*lag*(3-2*lag)
+            ghost:ClearAllPoints()
+            ghost:SetPoint("TOPLEFT",banner,"TOPLEFT",start.x+(goal.x-start.x)*progress-stretch/2,start.y+(goal.y-start.y)*progress)
+            ghost:SetSize(start.w+(goal.w-start.w)*progress+stretch,start.h+(goal.h-start.h)*progress)
+            ghost:SetAlpha(pulse*(.76-i*.13))
+            ghost:SetShown(pulse>.001)
+        end
+    end
+    Draw(0);turnMarker:Show()
+    local elapsed=0
+    turnMarker:SetScript("OnUpdate",function(self,dt)
+        elapsed=elapsed+dt
+        local t=math.min(1,elapsed/.28)
+        Draw(t)
+        if t>=1 then HideMarkerGhosts();self:SetScript("OnUpdate",nil) end
+    end)
+end
+banner:HookScript("OnHide",function()
+    HideMarkerGhosts()
+    turnMarker:SetScript("OnUpdate",nil);turnMarker:Hide();turnMarker.position=nil;turnMarker.goal=nil
+end)
+
 local function Rebuild()
     local st = C.initiative
     local participants = st.participants or {}
@@ -1266,9 +1344,7 @@ local function Rebuild()
     -- (référence de table), pas leur position, pour rester correcte même
     -- quand des cartes sont sautées.
     local x = INPUT_W + 24
-    startResolution:ClearAllPoints()
-    startResolution:SetPoint("TOPLEFT",header,"BOTTOMLEFT",x,-5)
-    x=x+30+CARD_GAP
+    local activeX
     local cardIndex = 0
     for _, p in ipairs(participants) do
         if IsAlive(p) then
@@ -1278,6 +1354,7 @@ local function Rebuild()
             card:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
             card:Refresh(p, p == current and (not phase or phase == "play"))
             card:Show()
+            if p==current then activeX=x end
             x = x + CARD_W + CARD_GAP
         end
     end
@@ -1303,7 +1380,17 @@ local function Rebuild()
         end
     end
 
-    banner:SetWidth(math.max(200, x + 6))
+    local width=math.max(200,x+6)
+    banner:SetWidth(width)
+    if phase=="resolve_start" then
+        MoveTurnMarker(width+6,0,44,BANNER_H)
+    elseif phase=="transition" then
+        MoveTurnMarker(width+56,0,ROUND_BOX_W,BANNER_H)
+    elseif activeX then
+        MoveTurnMarker(activeX,-HEADER_H-5,CARD_W,CARD_H)
+    else
+        turnMarker:Hide();turnMarker:SetScript("OnUpdate",nil);turnMarker.position=nil
+    end
 end
 
 -- Appelé depuis UI_MJ.lua quand la sélection du Gestionnaire de ressources
@@ -1355,7 +1442,17 @@ local function RefreshPhaseNotice()
     else
         phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil);return
     end
-    noticeTitle:SetText(title);noticeDetail:SetText(detail)
+    noticeTitle:ClearAllPoints()
+    if detail and detail ~= "" then
+        noticeTitle:SetPoint("TOPLEFT",12,-14)
+        noticeTitle:SetPoint("TOPRIGHT",-12,-14)
+        noticeDetail:Show()
+    else
+        noticeTitle:SetPoint("LEFT",phaseNotice,"LEFT",12,0)
+        noticeTitle:SetPoint("RIGHT",phaseNotice,"RIGHT",-12,0)
+        noticeDetail:Hide()
+    end
+    noticeTitle:SetText(title);noticeDetail:SetText(detail or "")
     phaseNotice:SetAlpha(0);phaseNotice:Show()
     local elapsed=0
     phaseNotice:SetScript("OnUpdate",function(self,dt)

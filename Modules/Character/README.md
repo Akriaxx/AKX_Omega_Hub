@@ -23,3 +23,5 @@ Les vues alliés, MJ, initiative et paramètres partagent un habillage sombre à
 Après le dernier participant vivant, Joueur suivant avance le compteur et lance son animation. La résolution des états de début de tour apparaît ensuite : le MJ valide le E placé avant les participants pour reprendre le jeu. Il n’y a plus de résolution ni de validation en fin de tour. Les annonces de changement de tour sont affichées au centre de l’écran, sans RW. Les phases sont synchronisées avec le groupe et les clics pendant la transition sont bloqués.
 
 `Tests/initiative-test.js` vérifie la résolution unique, l’incrément unique, le verrou pendant l’animation et les droits du MJ.
+
+La frise utilise un sceau turquoise et bronze unique pour les états actifs (survol et clic inchangés), un sablier pour la résolution et un cerclage de portrait assorti à l’ATH. Le cadre du participant actif apparaît en fondu sur 0,22 seconde, sans animation permanente. Les deux symboles sont générés par `Tests/initiative-art.js` (environ 32 Ko au total).

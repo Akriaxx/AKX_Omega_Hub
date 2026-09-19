@@ -14,12 +14,13 @@ local raid, grouped, sounds, sent, sendResult = false, false, {}, {}, true
 function GetTime() return now end
 local bindings, combat, savedBindings = {}, false, 0
 function InCombatLockdown() return combat end
-function GetCurrentBindingSet() return 1 end
+local bindingSet = 1
+function GetCurrentBindingSet() return bindingSet end
 function GetBindingKey(action)
     for key, value in pairs(bindings) do if value == action then return key end end
 end
 function SetBinding(key, action) bindings[key] = action; return true end
-function SaveBindings() savedBindings = savedBindings + 1 end
+function SaveBindings(set) assert(set==1 or set==2); savedBindings = savedBindings + 1 end
 function time() return 1800000000 end
 function GetNormalizedRealmName() return "Epsilon" end
 function GetRealmName() return "Epsilon" end
@@ -443,6 +444,23 @@ test("Builders trame/chapitre : fenêtre au thème de l'écritoire, un nom suffi
     assert(chapitreID); assert(J.mjDB.chapitres[chapitreID].trame_id == trameID)
     assert(panel.selected.kind == "chapitre" and panel.selected.id == chapitreID)
     assert(panel.detailsParent:GetText():find("Saga du builder", 1, true))
+end)
+
+test("Raccourci journal : profil 0 en attente puis profil personnage", function()
+    reset()
+    bindings, savedBindings, combat = {}, 0, false
+    OmegaHubDB.Quest_Bindings = nil
+    bindingSet = 0
+    J:InstallBinding()
+    assert(not bindings["SHIFT-I"] and savedBindings == 0)
+    assert(not OmegaHubDB.Quest_Bindings)
+    bindingSet = 2
+    for _, frame in ipairs(frames) do
+        if frame.events.UPDATE_BINDINGS then frame.scripts.OnEvent(frame, "UPDATE_BINDINGS") end
+    end
+    assert(bindings["SHIFT-I"] == "OMEGA_JOURNAL_TOGGLE" and savedBindings == 1)
+    assert(OmegaHubDB.Quest_Bindings[J:Me()] and not OmegaHubDB.Quest_Bindings.account)
+    bindingSet = 1
 end)
 
 test("Raccourci journal : installation différée et personnalisation conservée", function()
