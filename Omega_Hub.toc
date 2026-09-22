@@ -93,9 +93,11 @@ Modules\Character\UI_Style.lua
 Modules\Character\UI_MJ.lua
 Modules\Character\UI_Group.lua
 Modules\Character\UI_Initiative.lua
+Modules\Character\UI_Skills.lua
 Modules\Character\Settings.lua
 Modules\Character\UI_HUD.lua
 Modules\Character\UI_Auras.lua
+Modules\Character\UI_Action.lua
 
 ## -- Tech --
 Modules\Tech\Version.lua

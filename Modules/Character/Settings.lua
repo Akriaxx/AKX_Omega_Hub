@@ -6,7 +6,7 @@
 local C  = Character
 local UI = C.RPGUI or OS2.UI
 
-local PANEL_W, PANEL_H = 260, 416
+local PANEL_W, PANEL_H = 260, 456
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
@@ -299,10 +299,18 @@ rwEndTriggerEB:SetScript("OnEditFocusLost", function(self)
     C:SetRWEndTrigger(self:GetText())
 end)
 
+-- ── Base de données de compétences ───────────────────────────────────────────
+
+local skillsDbBtn = UI.CreatePanelButton(panel, PANEL_W - 28, 24, "Base de données")
+skillsDbBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -384)
+skillsDbBtn:SetScript("OnClick", function()
+    if C.ToggleSkillsBuilder then C:ToggleSkillsBuilder() end
+end)
+
 -- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
 local hudHint=panel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-hudHint:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-384)
+hudHint:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-422)
 hudHint:SetText("Maintenir et glisser le portrait : déplacer")
 hudHint:SetWidth(PANEL_W-28);hudHint:SetJustifyH("LEFT");hudHint:SetWordWrap(true)
 UI.ApplyMutedText(hudHint)

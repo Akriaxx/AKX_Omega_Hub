@@ -68,6 +68,7 @@ portrait:SetScript("OnClick",function(_,button)
     if suppressPortraitClick or hud.dragging then return end
     if button=="MiddleButton" then C:ToggleSettings()
     elseif button=="RightButton" then if CharacterMJPanel then CharacterMJPanel:Toggle() end
+    elseif button=="LeftButton" and IsShiftKeyDown() then if C.ToggleActionButton then C:ToggleActionButton() end
     elseif button=="LeftButton" and C.ToggleGroupView then C:ToggleGroupView() end
 end)
 portrait:SetScript("OnEnter",function(self)
@@ -75,7 +76,7 @@ portrait:SetScript("OnEnter",function(self)
     GameTooltip:AddLine("Ressources du personnage",.9,.8,.55)
     GameTooltip:AddLine("Maintenir le clic gauche et glisser : déplacer",.8,.8,.8)
     GameTooltip:AddLine("Clic : alliés · Clic droit : vue MJ",.8,.8,.8)
-    GameTooltip:AddLine("Clic molette : paramètres",.8,.8,.8)
+    GameTooltip:AddLine("Clic molette : paramètres · Shift+Clic : bouton Action",.8,.8,.8)
     GameTooltip:Show()
 end)
 portrait:SetScript("OnLeave",function() GameTooltip:Hide() end)
