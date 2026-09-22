@@ -323,3 +323,73 @@ hud:HookScript("OnEvent", function(_, event, unit)
         elseif unit == "target" then RefreshCard() end
     end
 end)
+
+-- ── Masquage des auras natives (joueur ET cible) ────────────────────────────
+-- Sur ce client, les icônes natives ne sont PAS des globales à plat
+-- (BuffButton1, TargetFrameBuff1…) — le premier essai les visait et n'a
+-- rien masqué du tout puisqu'elles n'existent pas sous cette forme. Le vrai
+-- rendu passe par des tables imbriquées (confirmé en lisant
+-- Epsilon_AuraManager.lua, qui les peuple lui-même) : BuffFrame.BuffButton
+-- / BuffFrame.DebuffButton côté joueur, TargetFrame.Buff / TargetFrame.Debuff
+-- côté cible. Blizzard peut créer nouveaux boutons à la volée (plus
+-- d'auras que jamais vues) : on ne fige pas la liste une fois pour toutes,
+-- on la reconstruit à chaque passage pour attraper les nouveaux.
+local function CollectNativeAuraIcons()
+    local icons = {}
+    local function AddArray(t)
+        if not t then return end
+        for _, icon in pairs(t) do
+            if icon and icon.Hide then icons[#icons + 1] = icon end
+        end
+    end
+    if BuffFrame then AddArray(BuffFrame.BuffButton); AddArray(BuffFrame.DebuffButton) end
+    if TargetFrame then AddArray(TargetFrame.Buff); AddArray(TargetFrame.Debuff) end
+    return icons
+end
+local function SetNativeAurasSuppressed(suppressed)
+    for _, icon in ipairs(CollectNativeAuraIcons()) do
+        if suppressed then
+            if icon.omegaOriginalOnShow == nil then
+                icon.omegaOriginalOnShow = icon:GetScript("OnShow") or false
+            end
+            icon:SetScript("OnShow", icon.Hide)
+            icon:Hide()
+        elseif icon.omegaOriginalOnShow ~= nil then
+            icon:SetScript("OnShow", icon.omegaOriginalOnShow or nil)
+            icon.omegaOriginalOnShow = nil
+        end
+    end
+end
+hud:HookScript("OnShow", function() SetNativeAurasSuppressed(true) end)
+hud:HookScript("OnHide", function() SetNativeAurasSuppressed(false) end)
+-- Repasse aussi à chaque changement d'auras pendant que Character est actif :
+-- un bouton natif tout juste créé pour une nouvelle aura doit être masqué
+-- dès son apparition, pas seulement au prochain Show/Hide du cadre.
+hud:HookScript("OnEvent", function(_, event)
+    if hud:IsShown() and (event == "UNIT_AURA" or event == "PLAYER_TARGET_CHANGED") then
+        SetNativeAurasSuppressed(true)
+    end
+end)
+if hud:IsShown() then SetNativeAurasSuppressed(true) end
+
+-- ── Masquage du TargetFrame natif ───────────────────────────────────────────
+-- Notre carte de cible fait doublon avec le cadre de cible par défaut de
+-- Blizzard : on le masque tant que Character est actif, même mécanisme
+-- réversible (OnShow -> Hide) que pour les auras juste au-dessus.
+if TargetFrame then
+    local function SetNativeTargetFrameSuppressed(suppressed)
+        if suppressed then
+            if TargetFrame.omegaOriginalOnShow == nil then
+                TargetFrame.omegaOriginalOnShow = TargetFrame:GetScript("OnShow") or false
+            end
+            TargetFrame:SetScript("OnShow", TargetFrame.Hide)
+            TargetFrame:Hide()
+        elseif TargetFrame.omegaOriginalOnShow ~= nil then
+            TargetFrame:SetScript("OnShow", TargetFrame.omegaOriginalOnShow or nil)
+            TargetFrame.omegaOriginalOnShow = nil
+        end
+    end
+    hud:HookScript("OnShow", function() SetNativeTargetFrameSuppressed(true) end)
+    hud:HookScript("OnHide", function() SetNativeTargetFrameSuppressed(false) end)
+    if hud:IsShown() then SetNativeTargetFrameSuppressed(true) end
+end
