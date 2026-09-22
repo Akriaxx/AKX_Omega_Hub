@@ -24,13 +24,13 @@ if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
     GetAura = function(unit, index, filter)
         local data = C_UnitAuras.GetAuraDataByIndex(unit, index, filter)
         if not data then return nil end
-        return data.name, data.icon, data.applications, data.dispelName, data.duration, data.expirationTime
+        return data.name, data.icon, data.applications, data.dispelName, data.duration, data.expirationTime, data.spellId
     end
 else
     GetAura = function(unit, index, filter)
-        local name, icon, count, dispelType, duration, expirationTime = UnitAura(unit, index, filter)
+        local name, icon, count, dispelType, duration, expirationTime, _, _, _, spellId = UnitAura(unit, index, filter)
         if not name then return nil end
-        return name, icon, count, dispelType, duration, expirationTime
+        return name, icon, count, dispelType, duration, expirationTime, spellId
     end
 end
 
@@ -40,9 +40,33 @@ local function DebuffColor(dispelType)
     return .8, .2, .2
 end
 
+-- Commandes GM déjà en place côté serveur pour les auras natives
+-- (Epsilon_TargetSpells.lua, désormais masquées) : on les reproduit à
+-- l'identique sur nos propres icônes, sinon clic droit/Ctrl+clic n'ont
+-- plus aucun moyen de s'exprimer une fois le TargetFrame natif caché.
+local function SendAuraCommand(msg)
+    SendChatMessage(msg, "GUILD")
+end
+
 local function NewAuraIcon(parent)
     local b = CreateFrame("Button", nil, parent)
     b:SetSize(ICON, ICON)
+    -- Clic droit : retire l'aura (.unaura, +" self" sur ses propres
+    -- auras). Ctrl+Clic gauche sur l'aura de quelqu'un d'autre (la cible,
+    -- jamais soi-même) : se l'applique à soi (.aura ... self).
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b:SetScript("OnClick", function(self, button)
+        if not self.spellId then return end
+        if button == "RightButton" then
+            if self.unit == "player" then
+                SendAuraCommand(".unaura " .. self.spellId .. " self")
+            else
+                SendAuraCommand(".unaura " .. self.spellId)
+            end
+        elseif button == "LeftButton" and IsControlKeyDown() and self.unit ~= "player" then
+            SendAuraCommand(".aura " .. self.spellId .. " self")
+        end
+    end)
     local border = b:CreateTexture(nil, "BACKGROUND")
     border:SetAllPoints()
     border:SetColorTexture(0, 0, 0, 1)
@@ -88,12 +112,12 @@ local function CreateAuraRow(parent, width, alignRight)
         local function Place(filter)
             local index = 1
             while true do
-                local name, icon, count, dispelType, duration, expirationTime = GetAura(unit, index, filter)
+                local name, icon, count, dispelType, duration, expirationTime, spellId = GetAura(unit, index, filter)
                 if not name then break end
                 n = n + 1
                 local b = row.icons[n]
                 if not b then b = NewAuraIcon(row); row.icons[n] = b end
-                b.unit, b.index, b.filter = unit, index, filter
+                b.unit, b.index, b.filter, b.spellId = unit, index, filter, spellId
                 b.tex:SetTexture(icon)
                 b.count:SetText((count and count > 1) and tostring(count) or "")
                 if filter == "HARMFUL" then
