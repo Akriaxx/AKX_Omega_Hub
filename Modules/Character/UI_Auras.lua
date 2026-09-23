@@ -354,11 +354,16 @@ totPortrait:SetScript("OnEnter", function(self)
 end)
 -- TRP3 ne ferme sa fiche que si la souris ne survole plus aucune unité ou
 -- si "targettarget" change : glisser vers la carte de cible (elle-même une
--- unité survolée) la laissait ouverte. On la ferme explicitement.
+-- unité survolée) la laissait ouverte, aperçus compris. On ferme tout.
 totPortrait:SetScript("OnLeave", function()
     GameTooltip:Hide()
     if TRP3_CharacterTooltip then TRP3_CharacterTooltip:Hide() end
     if TRP3_CompanionTooltip then TRP3_CompanionTooltip:Hide() end
+    -- Les aperçus ("Au premier coup d'œil") ont leurs propres infobulles.
+    for i = 1, 5 do
+        local glance = _G["TRP3_FirstGlanceTooltip" .. i]
+        if glance then glance:Hide() end
+    end
 end)
 
 -- Nom ancré à DROITE, juste au-dessus des auras (même bord droit), et qui
@@ -534,3 +539,60 @@ hud:HookScript("OnEvent", function(_, event)
     if event == "PLAYER_REGEN_ENABLED" then SetNativeFramesSuppressed(hud:IsShown()) end
 end)
 if hud:IsShown() then SetNativeFramesSuppressed(true) end
+
+-- ── Correctif TRP3 : position des aperçus ("Au premier coup d'œil") ───────
+-- TRP3 ne place ses infobulles d'aperçu que pour les ancrages curseur et
+-- haut/bas-droite de sa fiche ; pour les autres, elles gardent une position
+-- arbitraire et s'empilent les unes sur les autres. Si elles se chevauchent
+-- (entre elles ou avec la fiche), on les range en colonne à côté de la
+-- fiche, du côté où il reste de la place. Sinon, on ne touche à rien.
+local function Overlaps(a, b)
+    local al, ar, at, ab = a:GetLeft(), a:GetRight(), a:GetTop(), a:GetBottom()
+    local bl, br, bt, bb = b:GetLeft(), b:GetRight(), b:GetTop(), b:GetBottom()
+    if not (al and ar and at and ab and bl and br and bt and bb) then return true end
+    return al < br - 1 and bl < ar - 1 and ab < bt - 1 and bb < at - 1
+end
+
+local function FixGlanceLayout()
+    local main = TRP3_CharacterTooltip
+    if not main or not main:IsShown() then return end
+    local shown = {}
+    for i = 1, 5 do
+        local glance = _G["TRP3_FirstGlanceTooltip" .. i]
+        if glance and glance:IsShown() then shown[#shown + 1] = glance end
+    end
+    local overlapping = false
+    for i, glance in ipairs(shown) do
+        if Overlaps(glance, main) then overlapping = true end
+        for j = i + 1, #shown do
+            if Overlaps(glance, shown[j]) then overlapping = true end
+        end
+    end
+    if not overlapping then return end
+    local widest = 0
+    for _, glance in ipairs(shown) do widest = math.max(widest, glance:GetWidth() or 0) end
+    local toRight = (main:GetRight() or 0) + widest + 2 <= (UIParent:GetRight() or 0)
+    for i, glance in ipairs(shown) do
+        glance:ClearAllPoints()
+        if i == 1 then
+            if toRight then glance:SetPoint("TOPLEFT", main, "TOPRIGHT", 2, 0)
+            else glance:SetPoint("TOPRIGHT", main, "TOPLEFT", -2, 0) end
+        elseif toRight then
+            glance:SetPoint("TOPLEFT", shown[i - 1], "BOTTOMLEFT", 0, -2)
+        else
+            glance:SetPoint("TOPRIGHT", shown[i - 1], "BOTTOMRIGHT", 0, -2)
+        end
+    end
+end
+
+-- TRP3 peut se charger après nous : branchement à la connexion.
+local glanceHook = CreateFrame("Frame")
+glanceHook:RegisterEvent("PLAYER_LOGIN")
+glanceHook:SetScript("OnEvent", function(self)
+    self:UnregisterAllEvents()
+    for i = 1, 5 do
+        local glance = _G["TRP3_FirstGlanceTooltip" .. i]
+        -- Au prochain rendu : TRP3 finit de remplir et d'ancrer après le Show.
+        if glance then glance:HookScript("OnShow", function() C_Timer.After(0, FixGlanceLayout) end) end
+    end
+end)

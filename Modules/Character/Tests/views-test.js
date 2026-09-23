@@ -135,7 +135,24 @@ dofile('Modules/Character/UI_MJ.lua')
 dofile('Modules/Character/UI_Initiative.lua')
 assert(CharacterMJPanel:GetWidth()==276)
 assert(CharacterMJImpactPanel:GetHeight()==346)
-print('OK: RPG views load; 13 allies, HP only without numeric values, bounded raid scrolling, MJ dimensions')
+-- Annonce commune (Début du tour, conditions) : les messages attendent leur tour.
+function M:SetFont(path,size) self.fontPath=path;self.fontSize=size;return true end
+C:ShowNotice('Premier','a');C:ShowNotice('Second','b')
+local notice,title;for _,o in ipairs(objects) do if o.kind=='FontString' and o.text=='Premier' then title=o;notice=o.parent end end
+assert(notice and notice.shown and notice.scripts.OnUpdate,'premier affiché')
+notice.scripts.OnUpdate(notice,4.1);assert(title.text=='Second' and notice.shown,'second ensuite')
+notice.scripts.OnUpdate(notice,4.1);assert(not notice.shown,'file vidée')
+C:ShowNotice('Etat','x',true);assert(notice.shown and title.text=='Etat')
+local detail;for _,o in ipairs(objects) do if o.kind=='FontString' and o.parent==notice and o.text=='x' then detail=o end end
+assert(detail and detail.fontPath and detail.fontPath:find('NotoSans%-Italic'),'sous-texte d un état en italique')
+notice.scripts.OnUpdate(notice,.3);assert(notice.shown and not notice.scripts.OnUpdate,'persistant : reste affiché')
+local closeBtn;for _,o in ipairs(objects) do if o.kind=='Button' and o.parent==notice and o.scripts.OnClick then closeBtn=o end end
+C.initiative=C.initiative or {};C.initiative.active=false;C.OnInitiativeChanged()
+assert(notice.shown and title.text=='Etat','hors combat : l état reste affiché')
+assert(closeBtn and closeBtn.shown,'croix visible');closeBtn.scripts.OnClick(closeBtn);assert(not notice.shown,'fermé par le joueur')
+C:ShowNotice('Auto','y');assert(not closeBtn.shown,'pas de croix sur une annonce qui se ferme seule')
+notice.scripts.OnUpdate(notice,4.1);assert(not notice.shown)
+print('OK: RPG views load; 13 allies, HP only without numeric values, bounded raid scrolling, MJ dimensions, notice queue')
 `;
 const result=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:'local ok,err=pcall(function()\n'+code+'\nend)\nif not ok then print(err);os.exit(1) end',encoding:'utf8'});
 process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exit(result.status||0);

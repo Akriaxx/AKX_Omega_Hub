@@ -281,7 +281,8 @@ local function LayoutParagraph(pool, paragraph, width)
         lines[#lines + 1] = line
     end
     newLine()
-    local function place(word, style, spaced)
+    -- force : ne jamais couper avant ce morceau (suite d'un mot collé).
+    local function place(word, style, spaced, force)
         local last = line.pieces[#line.pieces]
         local size = style.size or RT.DEFAULT_SIZE
         local sep = (spaced and #line.pieces > 0) and " " or ""
@@ -292,7 +293,7 @@ local function LayoutParagraph(pool, paragraph, width)
             local gap = sep ~= "" and SpaceWidth(pool, style) or 0
             candidateWidth = line.width + gap + Measure(pool, word, style)
         end
-        if candidateWidth > width and #line.pieces > 0 then
+        if candidateWidth > width and #line.pieces > 0 and not force then
             newLine()
             return false
         end
@@ -309,6 +310,10 @@ local function LayoutParagraph(pool, paragraph, width)
         line.height = math.max(line.height, LineHeight(size))
         return true
     end
+    -- Mots, en gardant d'où vient chacun : des morceaux de styles différents
+    -- sans espace entre eux ("[" + nom d'un lien, ou un mot à moitié en
+    -- gras) forment un seul mot, qu'on ne coupe jamais.
+    local tokens = {}
     local pendingSpace = false
     for _, run in ipairs(paragraph.runs) do
         local pos, text = 1, run.text
@@ -320,18 +325,39 @@ local function LayoutParagraph(pool, paragraph, width)
             else
                 local word = text:match("^%S+", pos)
                 pos = pos + #word
-                if Measure(pool, word, run.style) > width then
-                    for index, part in ipairs(SplitLongWord(pool, word, run.style, width)) do
-                        local spaced = index == 1 and pendingSpace
-                        if not place(part, run.style, spaced) then place(part, run.style, false) end
-                    end
-                elseif not place(word, run.style, pendingSpace) then
-                    -- Nouvelle ligne : l'espace de coupure disparaît.
-                    place(word, run.style, false)
-                end
+                tokens[#tokens + 1] = { word = word, style = run.style, spaced = pendingSpace or #tokens == 0 }
                 pendingSpace = false
             end
         end
+    end
+    local i = 1
+    while i <= #tokens do
+        local j = i
+        while tokens[j + 1] and not tokens[j + 1].spaced do j = j + 1 end
+        local groupWidth = 0
+        for k = i, j do groupWidth = groupWidth + Measure(pool, tokens[k].word, tokens[k].style) end
+        local first = tokens[i]
+        if groupWidth > width then
+            -- Plus long qu'une ligne : découpé caractère par caractère.
+            for k = i, j do
+                local token = tokens[k]
+                for index, part in ipairs(SplitLongWord(pool, token.word, token.style, width)) do
+                    local spaced = index == 1 and k == i and token.spaced
+                    if not place(part, token.style, spaced) then place(part, token.style, false) end
+                end
+            end
+        else
+            -- Le mot entier passe à la ligne s'il ne tient pas.
+            local gap = (#line.pieces > 0) and SpaceWidth(pool, first.style) or 0
+            if #line.pieces > 0 and line.width + gap + groupWidth > width then newLine() end
+            for k = i, j do
+                local token = tokens[k]
+                if not place(token.word, token.style, k == i and token.spaced, k > i) then
+                    place(token.word, token.style, false, true)
+                end
+            end
+        end
+        i = j + 1
     end
     return lines
 end

@@ -7,7 +7,7 @@ hud:SetMovable(true);hud:SetClampedToScreen(true);hud:EnableMouse(true)
 hud:RegisterForDrag("LeftButton");hud:Hide()
 local active=false
 local rows={}
-local bonusColors={hp={1,.48,.66},mana={.35,.92,1},endurance={.64,1,.48}}
+local bonusColors={hp={.64,1,.48},mana={.35,.92,1},endurance={1,.48,.66}}
 local function Settings() return C:GetSettings() end
 local function PositionKey() return (UnitName("player") or "player").."-"..(GetRealmName() or "") end
 local function SavePosition()
@@ -138,7 +138,8 @@ local function CloseEditors()
         for _,field in pairs(row.fields) do field.cancel=true;field:ClearFocus();field.cancel=nil end
     end
 end
-local definitions={{"hp","Vie",.74,.15,.17},{"mana","Mana",.16,.43,.79},{"endurance","Endurance",.24,.65,.40}}
+-- Vie en vert, Endurance en rouge (choix du serveur, dans tout Character).
+local definitions={{"hp","Vie",.24,.65,.40},{"mana","Mana",.16,.43,.79},{"endurance","Endurance",.74,.15,.17}}
 for i,def in ipairs(definitions) do
     local key,label,r,g,b=unpack(def)
     local row=CreateFrame("Button",nil,hud)

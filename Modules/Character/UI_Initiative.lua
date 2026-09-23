@@ -1420,11 +1420,74 @@ local noticeDetail=phaseNotice:CreateFontString(nil,"OVERLAY","GameFontNormal")
 noticeDetail:SetPoint("TOPLEFT",12,-43);noticeDetail:SetPoint("TOPRIGHT",-12,-43)
 noticeDetail:SetJustifyH("CENTER");UI.ApplyBodyText(noticeDetail)
 phaseNotice:Hide()
+-- Affichage commun (phases du combat, états du personnage…) : fondu
+-- d'entrée, 4 s, fondu de sortie. Un message "persistant" (états : danger,
+-- K.O., faible) reste jusqu'à ce que le joueur le ferme. Les messages de
+-- C:ShowNotice attendent leur tour ; une phase de combat passe devant, et
+-- un état interrompu revient ensuite.
+local noticeQueue={}
+local PlayNotice,NextNotice
+local noticeClose=UI.CreateCloseButton(phaseNotice,function() NextNotice() end)
+if noticeClose.SetFrameLevel then noticeClose:SetFrameLevel(phaseNotice:GetFrameLevel()+5) end
+noticeClose:Hide()
+function NextNotice()
+    local message=table.remove(noticeQueue,1)
+    if message then PlayNotice(message[1],message[2],false,message[3])
+    else
+        phaseNotice.fromPhase,phaseNotice.current=nil,nil
+        phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil)
+    end
+end
+function PlayNotice(title,detail,fromPhase,sticky)
+    local current=phaseNotice.current
+    if fromPhase and current and current[3] and phaseNotice:IsShown() then table.insert(noticeQueue,1,current) end
+    phaseNotice.fromPhase=fromPhase
+    phaseNotice.current={title,detail,sticky}
+    phaseNotice:EnableMouse(sticky and true or false)
+    noticeClose:SetShown(sticky and true or false)
+    noticeTitle:ClearAllPoints()
+    if detail and detail ~= "" then
+        noticeTitle:SetPoint("TOPLEFT",12,-14)
+        noticeTitle:SetPoint("TOPRIGHT",-12,-14)
+        noticeDetail:Show()
+    else
+        noticeTitle:SetPoint("LEFT",phaseNotice,"LEFT",12,0)
+        noticeTitle:SetPoint("RIGHT",phaseNotice,"RIGHT",-12,0)
+        noticeDetail:Hide()
+    end
+    -- États (persistants) : sous-texte en italique (Noto Sans, la police
+    -- du jeu n'ayant pas d'italique) ; annonces de combat : police normale.
+    if sticky then
+        noticeDetail:SetFont("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Fonts\\NotoSans-Italic.ttf",13,"")
+    else
+        noticeDetail:SetFontObject("GameFontNormal")
+    end
+    UI.ApplyBodyText(noticeDetail)
+    noticeTitle:SetText(title);noticeDetail:SetText(detail or "")
+    phaseNotice:SetAlpha(0);phaseNotice:Show()
+    local elapsed=0
+    phaseNotice:SetScript("OnUpdate",function(self,dt)
+        elapsed=elapsed+dt
+        if sticky then
+            self:SetAlpha(math.min(1,elapsed/.2))
+            if elapsed>=.2 then self:SetScript("OnUpdate",nil) end
+            return
+        end
+        self:SetAlpha(math.max(0,math.min(1,elapsed/.2,(4-elapsed)/.5)))
+        if elapsed>=4 then NextNotice() end
+    end)
+end
+-- sticky : reste affiché jusqu'à la croix (états du personnage).
+function C:ShowNotice(title,detail,sticky)
+    noticeQueue[#noticeQueue+1]={title,detail,sticky}
+    if not phaseNotice:IsShown() then NextNotice() end
+end
 local lastNoticeKey
 local function RefreshPhaseNotice()
     local st=C.initiative
     if not st.active then
-        lastNoticeKey=nil;phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil)
+        lastNoticeKey=nil
+        if phaseNotice.fromPhase then NextNotice() end
         return
     end
     local phase=st.phase or "play"
@@ -1440,26 +1503,11 @@ local function RefreshPhaseNotice()
     elseif first then
         title="Début du tour "..st.round;detail="Le combat commence"
     else
-        phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil);return
+        -- Plus d'annonce de phase : on l'écourte, sans couper un message en file.
+        if phaseNotice.fromPhase then NextNotice() end
+        return
     end
-    noticeTitle:ClearAllPoints()
-    if detail and detail ~= "" then
-        noticeTitle:SetPoint("TOPLEFT",12,-14)
-        noticeTitle:SetPoint("TOPRIGHT",-12,-14)
-        noticeDetail:Show()
-    else
-        noticeTitle:SetPoint("LEFT",phaseNotice,"LEFT",12,0)
-        noticeTitle:SetPoint("RIGHT",phaseNotice,"RIGHT",-12,0)
-        noticeDetail:Hide()
-    end
-    noticeTitle:SetText(title);noticeDetail:SetText(detail or "")
-    phaseNotice:SetAlpha(0);phaseNotice:Show()
-    local elapsed=0
-    phaseNotice:SetScript("OnUpdate",function(self,dt)
-        elapsed=elapsed+dt
-        self:SetAlpha(math.max(0,math.min(1,elapsed/.2,(4-elapsed)/.5)))
-        if elapsed>=4 then self:Hide();self:SetScript("OnUpdate",nil) end
-    end)
+    PlayNotice(title,detail,true)
 end
 
 local function Refresh()

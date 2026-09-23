@@ -3,6 +3,7 @@ let basic=fs.readFileSync('Modules/ZoneGate/Tests/Studio_test.lua','utf8');basic
 let views=fs.readFileSync('Modules/Character/Tests/views-test.js','utf8');let extra=views.slice(views.indexOf('const code=mock+`')+17,views.indexOf("dofile('Modules/Character/UI_Group.lua')"));
 const code=basic+extra+`
 function M:RegisterEvent(event) self.events=self.events or {};self.events[event]=true end
+function M:GetAlpha() return self.alpha or 1 end
 function M:SetToplevel() end
 function M:SetShadowColor() end
 function M:SetShadowOffset() end
@@ -41,10 +42,31 @@ function M:SetFont(path,size) self.fontPath=path;self.fontSize=size;return true 
 function M:GetStringWidth() local t=tostring(self.text or ''):gsub('|H.-|h',''):gsub('|h','');return #t*6*((self.fontSize or 12)/12) end
 M.GetUnboundedStringWidth=M.GetStringWidth
 function M:SetDrawLayer(l) self.layer=l end
+local REGION={Texture=true,FontString=true,MaskTexture=true}
+local NOT_CHILD={Animation=true,AnimationGroup=true}
+function M:GetChildren() local t={};for _,o in ipairs(objects) do if o.parent==self and not REGION[o.kind] and not NOT_CHILD[o.kind] then t[#t+1]=o end end;return unpack(t) end
+function M:GetRegions() local t={};for _,o in ipairs(objects) do if o.parent==self and REGION[o.kind] then t[#t+1]=o end end;return unpack(t) end
+function M:SetParent(p) self.parent=p end
+function M:GetTop() return nil end
+function M:GetLeft() return nil end
+function M:CreateLine() local l=obj('Line',nil,self);return l end
+function M:SetStartPoint(...) self.startPoint={...} end
+function M:SetEndPoint(...) self.endPoint={...} end
+function M:SetThickness(t) self.thickness=t end
+function M:IsVisible() local f=self;while f do if f.shown==false then return false end;f=f.parent end;return true end
+function M:SetDegrees(d) self.degrees=d end
+function M:SetLooping(l) self.looping=l end
+function M:SetFromAlpha(a) self.fromAlpha=a end
+function M:SetToAlpha(a) self.toAlpha=a end
+function M:SetRotation(r) self.rotation=r end
+function M:SetBlendMode(m) self.blend=m end
+function M:SetTexture(t) self.texture=t end
+function M:GetBottom() return nil end
 dofile('Modules/Character/RichText.lua')
 dofile('Modules/Character/UI_Skills.lua')
 dofile('Modules/Character/Skills_Sync.lua')
 dofile('Modules/Character/UI_Action.lua')
+dofile('Modules/Character/UI_ActionFX.lua')
 assert(C:GetSkill('offensive','Legacy').description=='Old text')
 assert(C:SaveSkill('offensive',nil,'Slash','134400','a:b|c\\n{{rouge}}hit{{/}}'))
 assert(not C:SaveSkill('offensive',nil,'Slash','','overwrite'))
@@ -54,7 +76,12 @@ assert(decoded.offensive.Slash.description=='a:b|c\\n{{rouge}}hit{{/}}')
 assert(not C.SkillLibraryCodec.Decode(payload..'garbage'))
 assert(not C.SkillLibraryCodec.Decode('999999:x'))
 C:ToggleSkillsBuilder();assert(CharacterSkillsBuilder:IsShown())
-C:OpenSkillInBuilder('offensive','Slash')
+local form=CharacterSkillsBuilder.form;assert(not form:IsShown(),'formulaire caché hors édition')
+for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='+ Nouvelle' then o.scripts.OnClick(o) end end
+assert(form:IsShown(),'visible pour une création')
+for _,o in ipairs(objects) do if o.kind=='Button' and o.cat and o.cat.key=='defensive' and not o.back then o.scripts.OnClick(o) end end
+assert(not form:IsShown(),'caché au changement d onglet')
+C:OpenSkillInBuilder('offensive','Slash');assert(form:IsShown(),'visible pour une modification')
 assert(C:SaveSkill('base',nil,'Action de Déplacement','',''));assert(C:SaveSkill('base',nil,'Esquive','',''))
 local desc
 for _,o in ipairs(objects) do if o.kind=='EditBox' and o.scripts.OnTabPressed then desc=o end end
@@ -88,16 +115,36 @@ assert(desc.text=='{{Action : Charge}}',desc.text)
 assert(C:FindSkillRef('base','charge').name=='[[#ff8800]]Charge[[/]]')
 assert(C:RenderSkillText(desc.text)=='|Hcharskill:base:Charge|h|cffff8800[|r|cffff8800Charge|r|cffff8800]|r|h')
 C:ShowSkillTooltip(UIParent,{name='Source',description='Voir {{Action : Charge}}'})
-local card1=CharacterSkillCard1
-assert(card1:IsShown() and card1.hyperlinks and card1.strata=='TOOLTIP')
-card1.scripts.OnHyperlinkEnter(card1,'charskill:base:Charge')
+local card1=CharacterSkillCard1;local links1=card1.content
+assert(card1:IsShown() and links1.hyperlinks and card1.strata=='TOOLTIP')
+-- Ouverture du bas vers le haut : la hauteur part de 1, le contenu est à sa taille finale.
+local fullH=links1.h;assert(card1.h==1 and card1.w==links1.w and fullH>1,'carte fermée au départ')
+-- Cadre en 9 parts (mêmes matériaux que le cadre de ressources) + losange sous la carte.
+local parts,gem={},nil;for _,o in ipairs(objects) do if o.parent==card1 and o.kind=='Texture' then local t=tostring(o.texture);if t:find('SkillCard$') then parts[#parts+1]=o elseif t:find('SkillCardGem$') then gem=o end end end
+assert(#parts==9 and gem and gem.point[1]=='CENTER' and gem.point[3]=='BOTTOM','cadre 9 parts + losange')
+card1.scripts.OnUpdate(card1,.12);assert(card1.h>1 and card1.h<fullH,'en cours d ouverture')
+card1.scripts.OnUpdate(card1,.2);assert(card1.h==fullH and not card1.scripts.OnUpdate,'ouverte')
+-- Flux de pixels : de la source vers la carte, pixels placés à l'écran pendant qu'elle est ouverte.
+local flux=card1.flux;assert(flux.shown and #flux.dots>0 and flux.fade==1)
+function UIParent:GetCenter() return 400,300 end;function UIParent:GetTop() return 310 end;function card1:GetBottom() return 334 end
+flux.scripts.OnUpdate(flux,.1);local d=flux.dots[1].point;assert(d and d[2]==UIParent and d[5]>=310 and d[5]<=334,'pixel entre la source et la carte')
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge')
 local card2=CharacterSkillCard2
 assert(card2:IsShown() and card2.title.text=='|cffff8800Charge|r',card2.title.text)
-assert(card2.level>card1.level and card2.point[2]==card1,'la référence s’ouvre à côté, au-dessus')
-card1.scripts.OnHyperlinkLeave(card1);for _,fn in ipairs(timers) do fn() end
+assert(card2.level>card1.level and card2.point[2]==links1,'la référence s’ouvre à côté, au-dessus')
+-- Carte liée : s'ouvre en largeur (de gauche à droite quand la place est à droite).
+assert(card2.w==1 and card2.h==card2.content.h,'carte liée fermée au départ');card2.scripts.OnUpdate(card2,.3);assert(card2.w==card2.content.w)
+links1.scripts.OnHyperlinkLeave(links1);for _,fn in ipairs(timers) do fn() end
 assert(not card2:IsShown())
-card1.scripts.OnHyperlinkEnter(card1,'charskill:base:Inconnue');assert(card2.title.text=='Inconnue')
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Inconnue');assert(card2.title.text=='Inconnue')
+-- OnHyperlinkLeave perdu (aperçu redessiné, builder fermé) : la carte liée se ferme quand même.
+local watcher;for _,f in ipairs(objects) do if f.scripts and f.scripts.OnUpdate and f.parent==nil and f.kind=='Frame' and not f.name then watcher=f end end
+card1:Hide();assert(not card2:IsShown(),'fermée avec la carte qui l a ouverte')
+C:ShowSkillTooltip(UIParent,{name='Source',description='Voir {{Action : Charge}}'});links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge')
+assert(card2:IsShown());links1.shown=false;for _,f in ipairs(objects) do if f.scripts and f.scripts.OnUpdate and f.parent==nil then pcall(f.scripts.OnUpdate,f,.3) end end
+assert(not card2:IsShown(),'source disparue : carte liée fermée');links1.shown=true
 C:HideSkillTooltip();assert(not card1:IsShown() and not card2:IsShown())
+assert(not card1.flux.shown and not card2.flux.shown,'flux fermés avec les cartes')
 ColorPickerFrame=obj('Frame');ColorPickerFrame:Hide();ColorPickerFrame.strata='DIALOG'
 function ColorPickerFrame:GetFrameStrata() return self.strata end
 function ColorPickerFrame:Raise() end
@@ -172,12 +219,17 @@ RT.Render(box,'[[b]][[police friz]]gras[[/police]][[/b]] [[u]]sous[[/u]] [[fond 
 assert(box.richText.usedStrings==4,'faux gras doublé');assert(box.richText.usedTextures==2)
 RT.Render(box,'{{Action : Esquive}}',300,C:SkillTextOptions());assert(box.richText.strings[1].text:find('^|Hcharskill:base:Esquive|h'),box.richText.strings[1].text)
 RT.Render(box,'motextremementlongsansespace',40,{});assert(box.richText.usedStrings>=2,'mot trop long découpé')
+-- Crochet jamais orphelin : "[" reste avec le nom du lien et passe à la ligne avec lui.
+RT.Render(box,'aaaa {{Action : Esquive}}',60,C:SkillTextOptions())
+local yWord,yBracket
+for i=1,box.richText.usedStrings do local fs=box.richText.strings[i];if fs.text=='aaaa' then yWord=fs.point[5] end;if tostring(fs.text):find('[',1,true) then yBracket=fs.point[5] end end
+assert(yWord and yBracket and yBracket<yWord,'le crochet part à la ligne avec le lien')
 C:ShowSkillName(UIParent,{name='[[#ff8800]]Charge[[/]]'});assert(CharacterSkillNameTip:IsShown());C:HideSkillName()
 typeText('{{rouge}}x{{/}} {{Défensive:');desc.scripts.OnTabPressed(desc)
 assert(desc.text=='{{rouge}}x{{/}} {{Défensive:','catégorie vide : rien à insérer')
 C:ToggleActionButton();local root=CharacterActionMenu;assert(root:IsShown())
 local idle
-for _,o in ipairs(objects) do if o.parent==root and o.scripts.OnDragStart then idle=o end end
+for _,o in ipairs(objects) do if o.parent==root and o.scripts.OnDragStart and not o.cat then idle=o end end
 assert(idle)
 CharacterResourceHUD:SetScale(.85)
 assert(math.abs(root:GetEffectiveScale()-1)<1e-9,'le bouton Action ignore l’échelle du portrait')
@@ -195,14 +247,62 @@ assert(math.abs(root.point[4]-(685/.85))<1e-6 and math.abs(root.point[5]-(315/.8
 idle.scripts.OnDragStop(idle);assert(not idle.scripts.OnUpdate and not root.dragging)
 idle.scripts.OnMouseDown(idle)
 idle.scripts.OnClick();assert(root.scripts.OnUpdate)
-root.scripts.OnUpdate(root,.4);assert(not root.scripts.OnUpdate)
+-- Nexus : logo -> cube (planche) -> éclatement vers le triangle.
+local morph,cube;for _,o in ipairs(objects) do if o.kind=='Texture' and o.texture and tostring(o.texture):find('DataCube') then cube=o;morph=o.parent end end
+assert(cube and morph)
+root.scripts.OnUpdate(root,.2);assert(morph.shown and cube.alpha>0,'cube pendant la transformation')
+root.scripts.OnUpdate(root,.2);local shardShown=false
+for _,o in ipairs(objects) do if o.parent==morph and o.texture and tostring(o.texture):find('DataShard') and o.shown then shardShown=true end end
+assert(shardShown,'éclats vers le triangle')
+root.scripts.OnUpdate(root,.5);assert(not root.scripts.OnUpdate and not morph.shown)
 local category
 for _,o in ipairs(objects) do if o.cat and o.cat.key=='offensive' and o.parent==root then category=o end end
 category.scripts.OnClick(category,'RightButton');assert(root.scripts.OnUpdate and not idle:IsShown(),'fermeture animée')
 root.scripts.OnUpdate(root,.17);assert(category:IsShown() and category.alpha>0 and category.alpha<1)
-root.scripts.OnUpdate(root,.2);assert(not root.scripts.OnUpdate and idle:IsShown() and not category:IsShown())
-idle.scripts.OnClick();root.scripts.OnUpdate(root,.4)
+root.scripts.OnUpdate(root,.7);assert(not root.scripts.OnUpdate and idle:IsShown() and not category:IsShown())
+idle.scripts.OnClick();root.scripts.OnUpdate(root,.9)
 category.scripts.OnClick(category,'LeftButton');root.scripts.OnUpdate(root,.6);assert(not root.scripts.OnUpdate)
+-- Flux : défile vers la droite ; les compétences ondulent autour de leur place.
+local FR=C.ActionFrames;local strip=FR.strip;assert(strip.scripts.OnUpdate,'flux animé')
+local shownSkill;for _,b in ipairs(FR.skillButtons) do if b.shown and b.baseX then shownSkill=b end end
+assert(shownSkill,'au moins une compétence dans la bande')
+strip.scripts.OnUpdate(strip,.4)
+local dy=shownSkill.point[3]-shownSkill.baseY;assert(shownSkill.point[2]==shownSkill.baseX and math.abs(dy)>0 and math.abs(dy)<=C.ACTION_THEME.wave.amplitude+1e-9,'vaguelette')
+-- Catégorie : maintenir pour déplacer, le clic qui suit est ignoré ; le retour ramène au menu.
+root.scripts.OnUpdate=nil
+category.scripts.OnMouseDown(category);category.scripts.OnDragStart(category);assert(root.dragging and category.scripts.OnUpdate)
+cursor={300,300};category.scripts.OnUpdate(category);category.scripts.OnDragStop(category)
+assert(not root.dragging and not category.scripts.OnUpdate)
+category.scripts.OnClick(category,'LeftButton');assert(not root.scripts.OnUpdate,'clic après glisser ignoré')
+category.scripts.OnMouseDown(category);category.scripts.OnClick(category,'RightButton')
+for i=1,10 do if root.scripts.OnUpdate then root.scripts.OnUpdate(root,.2) end end
+assert(not idle:IsShown() and category:IsShown() and not category.back.shown,'clic droit sur le retour : retour au menu, pas fermeture')
+category.scripts.OnClick(category,'RightButton');for i=1,10 do if root.scripts.OnUpdate then root.scripts.OnUpdate(root,.2) end end
+assert(idle:IsShown(),'clic droit sur une catégorie du menu : fermeture')
+-- Panneau rapide : clic droit sur le bouton, cases à cocher, glisser-déposer.
+assert(C:SaveSkill('base',nil,'Alpha','',''));assert(C:SaveSkill('base',nil,'Beta','',''));assert(C:SaveSkill('base',nil,'Gamma','',''))
+idle.scripts.OnMouseDown(idle);idle.scripts.OnClick(idle,'RightButton');assert(CharacterActionLayout:IsShown(),'panneau ouvert')
+local function names(list) local t={};for _,sk in ipairs(list) do t[#t+1]=C:StripSkillMarkup(sk.name) end;return table.concat(t,',') end
+local before=names(C:ListActionSkills('base'))
+local rows={};for _,o in ipairs(objects) do if o.parent==CharacterActionLayout.content and o.entry and o.shown then rows[o.index]=o end end
+assert(#rows==#C:ListActionEntries('base') and #rows>=3)
+local beta;for _,r in ipairs(rows) do if r.entry.skill.name=='Beta' then beta=r end end
+beta.check.checked=false;beta.check.scripts.OnClick(beta.check)
+assert(not names(C:ListActionSkills('base')):find('Beta'),'décochée : absente de la bande')
+local gamma;for _,r in ipairs(rows) do if r.entry.skill.name=='Gamma' then gamma=r end end
+function CharacterActionLayout.content:GetTop() return 1000 end
+gamma.scripts.OnDragStart(gamma);cursor={0,1000};CharacterActionLayout.scripts.OnUpdate(CharacterActionLayout);gamma.scripts.OnDragStop(gamma)
+assert(C:ListActionEntries('base')[1].skill.name=='Gamma','glissée en tête');assert(names(C:ListActionSkills('base')):match('^Gamma'),'ordre des bulles')
+for _,o in ipairs(objects) do if o.parent==CharacterActionLayout.content and o.entry and o.shown and o.entry.skill.name=='Beta' then beta=o end end
+beta.check.checked=true;beta.check.scripts.OnClick(beta.check);assert(names(C:ListActionSkills('base')):find('Beta'))
+assert(CharacterActionLayout.point[1]=='LEFT' and CharacterActionLayout.point[2]==idle and CharacterActionLayout.point[3]=='RIGHT','à droite du bouton, centré')
+local bar;for _,o in ipairs(objects) do if o.parent==CharacterActionLayout and o.scripts.OnMouseDown and o.scripts.OnMouseUp then bar=o end end
+assert(bar);bar.scripts.OnMouseDown(bar,'LeftButton');bar.scripts.OnMouseUp(bar,'LeftButton')
+assert(CharacterDB.actionLayoutPositions['Tester-Realm'],'détaché : position retenue')
+idle.scripts.OnClick(idle,'RightButton');idle.scripts.OnClick(idle,'RightButton')
+assert(CharacterActionLayout.point[2]==UIParent,'rouvert à sa position détachée')
+bar.scripts.OnMouseUp(bar,'RightButton');assert(not CharacterDB.actionLayoutPositions['Tester-Realm'] and CharacterActionLayout.point[2]==idle,'raccroché au bouton')
+idle.scripts.OnClick(idle,'RightButton');assert(not CharacterActionLayout:IsShown(),'second clic droit : fermé')
 C:ToggleActionButton();assert(not root:IsShown() and not root.scripts.OnUpdate)
 assert(not CharacterDB.actionButtonShown['Tester-Realm'])
 C:ToggleActionButton();assert(CharacterDB.actionButtonShown['Tester-Realm'])
@@ -225,13 +325,19 @@ assert(not next(CharacterDB.skillLibraries['raid1-Realm'].categories.offensive))
 receive('H|1-1|1|'..n)
 for i=1,n do receive('D|1-1|'..i..'|'..payload:sub((i-1)*200+1,i*200)) end
 assert(CharacterDB.skillLibraries['raid1-Realm'].revision==2)
-for _,o in ipairs(objects) do if o.kind=='Button' and type(o.text)=='string' and o.text:find('la mienne',1,true) then o.scripts.OnClick() end end
+local function pickLibrary(owner)
+ local btn;for _,o in ipairs(objects) do if o.kind=='Button' and o.library then btn=o end end
+ assert(btn,'bouton bibliothèque');btn.scripts.OnClick(btn)
+ local row;for _,o in ipairs(objects) do if o.kind=='Button' and o.shown and o.owner==owner and o.label then row=o end end
+ assert(row,'ligne '..tostring(owner));assert(row.count.text~=nil);row.scripts.OnClick(row)
+end
+pickLibrary('raid1-Realm')
 assert(C:IsSkillLibraryReadOnly())
 assert(not C:SaveSkill('offensive',nil,'Bad','',''))
 assert(not C:DeleteSkill('offensive','Legacy'))
 assert(not C:SendSkillLibrary())
 -- Sending requires addon discovery; snapshots are never sent to silent peers.
-for _,o in ipairs(objects) do if o.kind=='Button' and type(o.text)=='string' and o.text:find('(lecture seule)',1,true) then o.scripts.OnClick() end end
+pickLibrary(false)
 assert(not C:IsSkillLibraryReadOnly())
 C:StopSkillTransfers();sent={}
 local ok=C:SendSkillLibrary();assert(ok)
@@ -248,6 +354,23 @@ for _,fn in ipairs(timers) do fn() end
 network.scripts.OnUpdate(network,.1)
 assert(C:SendSkillLibrary())
 C:StopSkillTransfers()
+-- Consultation : bibliothèques fusionnées, créateur affiché, doublons identiques retirés.
+CharacterDB.skillLibraries['zed-Realm']={revision=1,categories={base={},offensive={Frappe={name='Frappe',icon='x',description='zed'},Esquive={name='Esquive',icon='',description=''}},defensive={},ranged={},index={}}}
+CharacterDB.skillLibraries['amy-Realm']={revision=1,categories={base={},offensive={Frappe={name='Frappe',icon='x',description='zed'}},defensive={},ranged={},index={}}}
+assert(C:SaveSkill('offensive',nil,'Esquive','',''))
+local merged=C:ListAllSkills('offensive');local frappes,esquives=0,{}
+for _,sk in ipairs(merged) do if sk.name=='Frappe' then frappes=frappes+1 end;if sk.name=='Esquive' then esquives[#esquives+1]=sk end end
+assert(frappes==1,'doublon identique fusionné');assert(#esquives==2 and esquives[1].owner==nil and esquives[2].owner=='zed-Realm','la vôtre d abord')
+assert(C:SkillOwnerSuffix(esquives[2]):find('zed',1,true) and C:SkillOwnerSuffix(esquives[1])=='')
+assert(C:FindSkillRef('offensive','Frappe').owner=='amy-Realm','référence résolue dans une bibliothèque reçue')
+-- Bibliothèque commune : tout, fusionné, en lecture seule.
+pickLibrary(C.COMMON_SKILL_LIBRARY);assert(C:IsSkillLibraryReadOnly())
+local common=C:ListSkills('offensive');local ownEsq,zedEsq=false,false
+for _,sk in ipairs(common) do if sk.name=='Esquive' and sk.owner==nil then ownEsq=true end;if sk.name=='Esquive' and sk.owner=='zed-Realm' then zedEsq=true end end
+assert(ownEsq and zedEsq,'les deux Esquive dans la commune');assert(not C:SaveSkill('offensive',nil,'X','',''))
+local creators={};for _,o in ipairs(objects) do if o.kind=='Button' and o.creator and o.shown and o.skill then creators[o.creator.text]=true end end
+assert(creators['Créé par : Vous'] and creators['Créé par : zed'],'créateur en bas à droite')
+pickLibrary(false);assert(not C:IsSkillLibraryReadOnly())
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

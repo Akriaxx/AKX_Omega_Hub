@@ -69,7 +69,13 @@ local function GetOwnedSkillDB()
     return db
 end
 
+-- Bibliothèque commune : toutes les bibliothèques fusionnées (lecture seule).
+local COMMON = "*commune*"
+C.COMMON_SKILL_LIBRARY = COMMON
+local CommonSkillDB
+
 local function GetSkillDB()
+    if selectedOwner == COMMON then return CommonSkillDB() end
     if selectedOwner then
         local stores=CharacterDB.skillLibraries or {}
         local library=stores[selectedOwner]
@@ -96,6 +102,122 @@ end
 function C:GetSkill(catKey, name)
     local db = GetSkillDB()
     return db[catKey] and db[catKey][name]
+end
+
+-- Consultation (bouton Action, références) : toutes les bibliothèques
+-- fusionnées, la vôtre et celles reçues, sans avoir à en changer dans le
+-- builder. Copies en lecture seule, avec leur créateur (nil = la vôtre) ;
+-- une compétence identique reçue de plusieurs sources n'apparaît qu'une fois.
+function C:ListAllSkills(catKey)
+    local list, seen = {}, {}
+    local function add(categories, owner)
+        for _, skill in pairs(categories and categories[catKey] or {}) do
+            local key = self:StripSkillMarkup(skill.name):lower() .. "\0" .. tostring(skill.icon) .. "\0" .. tostring(skill.description)
+            if not seen[key] then
+                seen[key] = true
+                list[#list + 1] = { name = skill.name, icon = skill.icon, description = skill.description, owner = owner }
+            end
+        end
+    end
+    add(GetOwnedSkillDB(), nil)
+    local owners = {}
+    for owner in pairs(CharacterDB.skillLibraries or {}) do owners[#owners + 1] = owner end
+    table.sort(owners)
+    for _, owner in ipairs(owners) do add(CharacterDB.skillLibraries[owner].categories, owner) end
+    table.sort(list, function(a, b)
+        local an, bn = self:StripSkillMarkup(a.name):lower(), self:StripSkillMarkup(b.name):lower()
+        if an ~= bn then return an < bn end
+        if (a.owner == nil) ~= (b.owner == nil) then return a.owner == nil end
+        return (a.owner or "") < (b.owner or "")
+    end)
+    return list
+end
+
+-- Vue "commune" au format d'une bibliothèque : { catégorie = { clé = compétence } }.
+-- Deux versions d'un même nom (créateurs différents) gardent chacune leur clé.
+function CommonSkillDB()
+    local db = {}
+    for _, cat in ipairs(CATEGORIES) do
+        db[cat.key] = {}
+        for _, skill in ipairs(C:ListAllSkills(cat.key)) do
+            local key = skill.name
+            if db[cat.key][key] then key = skill.name .. "\0" .. (skill.owner or "") end
+            db[cat.key][key] = skill
+        end
+    end
+    return db
+end
+
+-- ── Disposition du bouton Action (par personnage) ──────────────────────────
+-- Pour chaque catégorie : l'ordre choisi (clés) et les compétences masquées.
+-- Clé stable = nom sans balises + créateur ("" = vous). Une compétence
+-- jamais rangée s'ajoute à la fin, affichée, dans l'ordre alphabétique.
+local function LayoutKey(skill)
+    return C:StripSkillMarkup(skill.name):lower() .. "@" .. (skill.owner or "")
+end
+
+local function GetActionLayout(catKey)
+    CharacterDB = CharacterDB or {}
+    CharacterDB.actionLayout = CharacterDB.actionLayout or {}
+    local mine = CharacterDB.actionLayout[OwnerKey()] or {}
+    CharacterDB.actionLayout[OwnerKey()] = mine
+    mine[catKey] = mine[catKey] or { order = {}, hidden = {} }
+    return mine[catKey]
+end
+
+-- Toutes les compétences (bibliothèque commune) dans l'ordre choisi :
+-- { { skill, key, shown }, … }
+function C:ListActionEntries(catKey)
+    local layout = GetActionLayout(catKey)
+    local byKey, entries, placed = {}, {}, {}
+    for _, skill in ipairs(self:ListAllSkills(catKey)) do byKey[LayoutKey(skill)] = skill end
+    for _, key in ipairs(layout.order) do
+        if byKey[key] and not placed[key] then
+            placed[key] = true
+            entries[#entries + 1] = { skill = byKey[key], key = key, shown = not layout.hidden[key] }
+        end
+    end
+    for _, skill in ipairs(self:ListAllSkills(catKey)) do
+        local key = LayoutKey(skill)
+        if not placed[key] then
+            placed[key] = true
+            entries[#entries + 1] = { skill = skill, key = key, shown = not layout.hidden[key] }
+        end
+    end
+    return entries
+end
+
+-- Compétences affichées dans la bande du bouton Action, dans l'ordre choisi.
+function C:ListActionSkills(catKey)
+    local list = {}
+    for _, entry in ipairs(self:ListActionEntries(catKey)) do
+        if entry.shown then list[#list + 1] = entry.skill end
+    end
+    return list
+end
+
+-- Déplace l'entrée n° from à la place n° to (indices de ListActionEntries).
+function C:MoveActionEntry(catKey, from, to)
+    local entries = self:ListActionEntries(catKey)
+    local moved = table.remove(entries, from)
+    if not moved then return end
+    to = math.max(1, math.min(#entries + 1, to))
+    table.insert(entries, to, moved)
+    local layout = GetActionLayout(catKey)
+    layout.order = {}
+    for i, entry in ipairs(entries) do layout.order[i] = entry.key end
+    if self.OnSkillsChanged then self.OnSkillsChanged() end
+end
+
+function C:SetActionEntryShown(catKey, key, shown)
+    GetActionLayout(catKey).hidden[key] = (not shown) or nil
+    if self.OnSkillsChanged then self.OnSkillsChanged() end
+end
+
+-- " · Créateur" discret après le nom d'une compétence reçue.
+function C:SkillOwnerSuffix(skill)
+    if not skill or not skill.owner then return "" end
+    return "  |cff8a8a8a· " .. (skill.owner:match("^[^-]+") or skill.owner) .. "|r"
 end
 
 -- oldName nil/absent = création ; renommage géré en retirant l'ancienne clé.
@@ -169,12 +291,16 @@ function C:SkillTextOptions()
     return skillTextOptions
 end
 
--- Retrouve une compétence par son nom affiché (balises de couleur ignorées).
+-- Retrouve une compétence par son nom affiché (balises ignorées) : d'abord
+-- dans la bibliothèque affichée, puis dans toutes les bibliothèques.
 function C:FindSkillRef(catKey, name)
     local skill = self:GetSkill(catKey, name)
     if skill then return skill end
     name = self:StripSkillMarkup(name):lower()
     for _, candidate in ipairs(self:ListSkills(catKey)) do
+        if self:StripSkillMarkup(candidate.name):lower() == name then return candidate end
+    end
+    for _, candidate in ipairs(self:ListAllSkills(catKey)) do
         if self:StripSkillMarkup(candidate.name):lower() == name then return candidate end
     end
 end
@@ -206,21 +332,42 @@ end
 -- Survoler une référence ouvre la carte suivante À CÔTÉ de la précédente,
 -- un niveau au-dessus ; elle reste ouverte tant que la souris est sur le
 -- lien ou sur elle, ce qui permet de suivre une référence dans une référence.
-local CARD_MIN_W, CARD_MAX_W, CARD_PAD, CARD_HEAD = 150, 300, 8, 22
+local CARD_MIN_W, CARD_MAX_W, CARD_PAD, CARD_HEAD = 150, 300, 13, 31
 local MAX_CARDS = 5
 local cards = {}
 local ShowCard
 
+-- Une carte liée se ferme quand la souris n'est plus ni sur son lien, ni sur
+-- elle, ni sur une carte plus profonde — ou quand le cadre qui l'a ouverte
+-- disparaît. "Sur son lien" exige aussi la souris sur ce cadre : un
+-- OnHyperlinkLeave peut ne jamais arriver (aperçu du builder redessiné sous
+-- la souris, builder fermé), et la carte restait alors ouverte.
 local function CheckCards()
     for depth = #cards, 2, -1 do
         local card = cards[depth]
         local deeper = cards[depth + 1]
-        if card:IsShown() and not card.linkHovered and not card:IsMouseOver()
-            and not (deeper and deeper:IsShown()) then
-            card:Hide()
+        if card:IsShown() then
+            local source = card.source
+            local sourceGone = not source or not source:IsVisible()
+            local onLink = card.linkHovered and source and source:IsMouseOver()
+            if sourceGone or (not onLink and not card:IsMouseOver() and not (deeper and deeper:IsShown())) then
+                card:Hide()
+            end
         end
     end
 end
+
+-- Surveillance légère tant qu'une carte liée est ouverte.
+local cardWatcher = CreateFrame("Frame")
+cardWatcher:Hide()
+local watchElapsed = 0
+cardWatcher:SetScript("OnUpdate", function(self, elapsed)
+    watchElapsed = watchElapsed + elapsed
+    if watchElapsed < .2 then return end
+    watchElapsed = 0
+    CheckCards()
+    if not (cards[2] and cards[2]:IsShown()) then self:Hide() end
+end)
 
 local function OnSkillLinkEnter(self, link)
     local kind, catKey, name = link:match("^(%a+):([^:]+):(.+)$")
@@ -248,22 +395,129 @@ function C:EnableSkillLinks(frame, depth)
     frame:SetScript("OnHyperlinkLeave", OnSkillLinkLeave)
 end
 
+local OPEN_TIME = .24
+local LINK_GAP = 24   -- espace entre une carte et sa source, occupé par le flux
+
+-- Flux de pixels qui relie une carte à sa source (« je viens de là ») :
+-- des pixels bronze et or montent de l'icône vers la carte, ou filent du
+-- lien survolé vers la carte liée, en s'évasant à l'arrivée. Hors de la
+-- carte (qui rogne ses enfants), dans un cadre plein écran sans souris.
+local FLUX_DOTS = 26
+local FLUX_COLORS = { { .85, .70, .42 }, { .47, .38, .26 }, { .91, .80, .57 }, { .62, .48, .25 } }
+
+-- Position d'un point d'un cadre, ramenée à l'échelle de UIParent (le
+-- bouton Action a sa propre échelle).
+local function ToUI(frame, x, y)
+    local ratio = frame:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    return x * ratio, y * ratio
+end
+
+local function FluxFrame()
+    local flux = CreateFrame("Frame", nil, UIParent)
+    flux:SetFrameStrata("TOOLTIP")
+    flux:SetAllPoints(UIParent)
+    flux:EnableMouse(false)
+    flux:Hide()
+    flux.dots, flux.clock, flux.fade = {}, 0, 0
+    for i = 1, FLUX_DOTS do
+        local dot = flux:CreateTexture(nil, "OVERLAY")
+        local color = FLUX_COLORS[(i - 1) % #FLUX_COLORS + 1]
+        dot:SetColorTexture(color[1], color[2], color[3], 1)
+        local size = (i % 3 == 0) and 3 or 2
+        dot:SetSize(size, size)
+        dot.seed = i * 1.618
+        flux.dots[i] = dot
+    end
+    flux:SetScript("OnUpdate", function(self, elapsed)
+        self.clock = self.clock + elapsed
+        local sx, sy, tx, ty, vertical = self.Geometry()
+        if not sx then return end
+        for i, dot in ipairs(self.dots) do
+            local phase = (self.clock * .9 + i / FLUX_DOTS + dot.seed * .07) % 1
+            local spread = math.sin(dot.seed * 7 + self.clock * 2.4) * (vertical and 11 or 8) * (.2 + .8 * phase)
+            local x, y
+            if vertical then
+                x, y = sx + spread, sy + (ty - sy) * phase
+            else
+                x, y = sx + (tx - sx) * phase, sy + spread
+            end
+            dot:ClearAllPoints()
+            dot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+            dot:SetAlpha(math.sin(phase * math.pi) * .9 * self.fade)
+        end
+    end)
+    return flux
+end
+
+-- Cadre des cartes : même facture que le cadre de ressources (métal doré,
+-- filet bronze, fond sombre), en 9 parts pour s'étirer sans déformer les
+-- coins (Media/SkillCard.tga, coins 24/128 ; Tests/hud-art.js).
+local CARD_FRAME = "Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\SkillCard"
+local CARD_GEM = "Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\SkillCardGem"
+local CORNER, CORNER_TEX = 12, 24 / 128
+
+local function BuildCardFrame(card)
+    local parts = {}
+    local cuts = { 0, CORNER_TEX, 1 - CORNER_TEX, 1 }
+    for row = 1, 3 do
+        for col = 1, 3 do
+            local tex = card:CreateTexture(nil, "BACKGROUND")
+            tex:SetTexture(CARD_FRAME)
+            tex:SetTexCoord(cuts[col], cuts[col + 1], cuts[row], cuts[row + 1])
+            parts[(row - 1) * 3 + col] = tex
+        end
+    end
+    -- Coins réduits tant que la carte est plus petite qu'eux (ouverture).
+    local function Layout()
+        local w, h = card:GetWidth() or 0, card:GetHeight() or 0
+        local k = math.max(1, math.min(CORNER, w / 2, h / 2))
+        local xs, ys = { 0, k, w - k, w }, { 0, k, h - k, h }
+        for i, tex in ipairs(parts) do
+            local row, col = math.floor((i - 1) / 3) + 1, (i - 1) % 3 + 1
+            tex:ClearAllPoints()
+            tex:SetPoint("TOPLEFT", card, "TOPLEFT", xs[col], -ys[row])
+            tex:SetPoint("BOTTOMRIGHT", card, "TOPLEFT", xs[col + 1], -ys[row + 1])
+        end
+    end
+    card:SetScript("OnSizeChanged", Layout)
+    Layout()
+    -- Losange : là où le flux arrive (placé par PlayOpen).
+    card.gem = card:CreateTexture(nil, "OVERLAY", nil, 2)
+    card.gem:SetTexture(CARD_GEM)
+end
+
 local function GetCard(depth)
     if cards[depth] then return cards[depth] end
     local card = CreateFrame("Frame", "CharacterSkillCard" .. depth, UIParent)
     card:SetFrameStrata("TOOLTIP")
     card:SetClampedToScreen(true)
+    -- Ouverture animée : la carte grandit et ne montre que ce qu'elle couvre.
+    card:SetClipsChildren(true)
     card:Hide()
-    local bg = card:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(); UI.ApplyWindowBackground(bg, .97)
-    card.title = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    card.title:SetPoint("TOPLEFT", CARD_PAD, -4)
-    card.title:SetJustifyH("LEFT"); card.title:SetWordWrap(false)
+    BuildCardFrame(card)
+    -- Contenu à sa taille finale, posé contre le bord d'où la carte s'ouvre :
+    -- la carte grandit par-dessus et le dévoile (panneau de données).
+    local content = CreateFrame("Frame", nil, card)
+    card.content = content
+    card.title = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    card.title:SetPoint("TOP", 0, -11)
+    card.title:SetJustifyH("CENTER"); card.title:SetWordWrap(false)
     UI.ApplyTitle(card.title)
-    -- Corps : texte enrichi (C.RichText), blanc par défaut, posé dans la carte.
-    C:EnableSkillLinks(card, depth)
+    local rule = content:CreateTexture(nil, "ARTWORK")
+    rule:SetPoint("TOPLEFT", CARD_PAD, -CARD_HEAD); rule:SetPoint("TOPRIGHT", -CARD_PAD, -CARD_HEAD)
+    rule:SetHeight(1); UI.ApplySeparator(rule, true)
+    card.rule = rule
+    -- Filet de balayage sur le bord qui avance pendant l'ouverture.
+    card.edge = card:CreateTexture(nil, "OVERLAY")
+    card.edge:SetColorTexture(.85, .70, .42, 1)
+    card.edge:Hide()
+    card.flux = FluxFrame()
+    -- Corps : texte enrichi (C.RichText), blanc par défaut, posé dans le contenu.
+    C:EnableSkillLinks(content, depth)
     card:SetScript("OnHide", function()
         card.linkHovered = false
+        card:SetScript("OnUpdate", nil)
+        card.flux:Hide()
         if cards[depth + 1] then cards[depth + 1]:Hide() end
     end)
     if depth > 1 then card:SetScript("OnLeave", function() C_Timer.After(.15, CheckCards) end) end
@@ -275,10 +529,74 @@ local function TextWidth(fs)
     return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
 end
 
+-- side : "UP" (carte d'une compétence, du bas vers le haut) ou "RIGHT" /
+-- "LEFT" (carte liée, vers l'extérieur de la carte active).
+local function PlayOpen(card, width, height, side)
+    local content, edge, gem = card.content, card.edge, card.gem
+    content:ClearAllPoints()
+    edge:ClearAllPoints()
+    gem:ClearAllPoints()
+    if side == "UP" then
+        gem:SetSize(10, 26); gem:SetRotation(math.pi / 2)
+        gem:SetPoint("CENTER", card, "BOTTOM", 0, 2)
+    else
+        gem:SetSize(10, 26); gem:SetRotation(0)
+        gem:SetPoint("CENTER", card, side == "RIGHT" and "LEFT" or "RIGHT", side == "RIGHT" and 2 or -2, 0)
+    end
+    if side == "UP" then
+        content:SetPoint("BOTTOM", card, "BOTTOM")
+        edge:SetPoint("TOPLEFT"); edge:SetPoint("TOPRIGHT"); edge:SetHeight(1)
+    elseif side == "RIGHT" then
+        content:SetPoint("LEFT", card, "LEFT")
+        edge:SetPoint("TOPRIGHT"); edge:SetPoint("BOTTOMRIGHT"); edge:SetWidth(1)
+    else
+        content:SetPoint("RIGHT", card, "RIGHT")
+        edge:SetPoint("TOPLEFT"); edge:SetPoint("BOTTOMLEFT"); edge:SetWidth(1)
+    end
+    local elapsed = 0
+    local function Draw(p)
+        local ease = 1 - (1 - p) ^ 3
+        if side == "UP" then card:SetSize(width, math.max(1, height * ease))
+        else card:SetSize(math.max(1, width * ease), height) end
+        edge:SetAlpha(1 - p)
+        edge:SetShown(p < 1)
+        card.flux.fade = ease
+    end
+    -- Flux : de la source (haut de l'icône, ou bord de la carte active à la
+    -- hauteur du lien) vers le bord de la carte qui s'ouvre.
+    local source = card.source
+    card.flux.Geometry = function()
+        if not source or not source:IsVisible() then return end
+        if side == "UP" then
+            local cx, top = source:GetCenter(), source:GetTop()
+            local bottom = card:GetBottom()
+            if not (cx and top and bottom) then return end
+            local sx, sy = ToUI(source, cx, top)
+            return sx, sy, sx, bottom, true
+        end
+        local edge = side == "RIGHT" and source:GetRight() or source:GetLeft()
+        local target = side == "RIGHT" and card:GetLeft() or card:GetRight()
+        local _, sourceBottom = source:GetCenter()
+        if not (edge and target) then return end
+        local sx = ToUI(source, edge, 0)
+        local y = card.linkY or select(2, ToUI(source, 0, sourceBottom or 0))
+        return sx, y, target, y, false
+    end
+    card.flux:Show()
+    Draw(0)
+    card:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        local p = math.min(1, elapsed / OPEN_TIME)
+        Draw(p)
+        if p >= 1 then self:SetScript("OnUpdate", nil) end
+    end)
+end
+
 function ShowCard(depth, anchor, skill)
     local card = GetCard(depth)
     if cards[depth + 1] then cards[depth + 1]:Hide() end
-    card.title:SetText(C:RenderSkillName(skill.name))
+    local content = card.content
+    card.title:SetText(C:RenderSkillName(skill.name) .. C:SkillOwnerSuffix(skill))
     local body
     if skill.missing then
         card.title:SetTextColor(1, .35, .3)
@@ -288,28 +606,45 @@ function ShowCard(depth, anchor, skill)
         body = skill.description or ""
     end
     local RT, opts = C.RichText, C:SkillTextOptions()
-    local bodyWidth = RT.Measure(card, body, CARD_MAX_W - CARD_PAD * 2, opts)
+    local bodyWidth = RT.Measure(content, body, CARD_MAX_W - CARD_PAD * 2, opts)
     local inner = math.max(TextWidth(card.title), bodyWidth)
     local width = math.max(CARD_MIN_W, math.min(CARD_MAX_W, inner + CARD_PAD * 2))
     card.title:SetWidth(width - CARD_PAD * 2)
-    local _, bodyHeight = RT.Render(card, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
-    card:SetSize(width, body ~= "" and (CARD_HEAD + 12 + bodyHeight) or CARD_HEAD + 2)
+    local _, bodyHeight = RT.Render(content, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
+    local height = body ~= "" and (CARD_HEAD + 18 + bodyHeight) or CARD_HEAD + 8
+    card.rule:SetShown(body ~= "")
+    content:SetSize(width, height)
 
-    -- Toujours au-dessus de la carte / du cadre qui l'ouvre.
-    card:SetFrameLevel((anchor:GetFrameLevel() or 0) + 20)
+    -- Toujours au-dessus de la carte / du cadre qui l'ouvre (pour une
+    -- référence, la carte précédente, pas son contenu).
+    local below = depth > 1 and cards[depth - 1] or anchor
+    card.source = anchor
+    if depth > 1 then
+        cardWatcher:Show()
+        -- Hauteur du lien survolé (curseur), pour la pointe de l'accolade.
+        local cy = GetCursorPosition and select(2, GetCursorPosition())
+        card.linkY = cy and cy / UIParent:GetEffectiveScale() or nil
+    end
+    card:SetFrameLevel((below:GetFrameLevel() or 0) + 20)
     card:ClearAllPoints()
+    local side = "UP"
     if depth == 1 then
-        card:SetPoint("BOTTOM", anchor, "TOP", 0, 6)
+        card:SetPoint("BOTTOM", anchor, "TOP", 0, LINK_GAP)
     else
         local right = anchor:GetRight() or 0
         local screen = UIParent:GetRight() or 0
-        if right + 6 + width <= screen then
-            card:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+        -- Centrée sur la hauteur du lien survolé : le flux arrive au milieu
+        -- de son bord (l'écran la garde entière, SetClampedToScreen).
+        local anchorTop = anchor:GetTop()
+        local dy = (card.linkY and anchorTop) and (card.linkY - anchorTop) or -height / 2
+        if right + LINK_GAP + width <= screen then
+            card:SetPoint("LEFT", anchor, "TOPRIGHT", LINK_GAP, dy); side = "RIGHT"
         else
-            card:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -6, 0)
+            card:SetPoint("RIGHT", anchor, "TOPLEFT", -LINK_GAP, dy); side = "LEFT"
         end
     end
     card:Show()
+    PlayOpen(card, width, height, side)
     return card
 end
 
@@ -326,14 +661,14 @@ function C:ShowSkillName(owner, skill)
     if not nameTip then
         nameTip = CreateFrame("Frame", "CharacterSkillNameTip", UIParent)
         nameTip:SetFrameStrata("TOOLTIP"); nameTip:SetClampedToScreen(true)
-        local bg = nameTip:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(); UI.ApplyWindowBackground(bg, .97)
+        BuildCardFrame(nameTip)
+        nameTip.gem:Hide()
         nameTip.title = nameTip:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         nameTip.title:SetPoint("LEFT", CARD_PAD, 0); nameTip.title:SetWordWrap(false)
         UI.ApplyTitle(nameTip.title)
     end
     GameTooltip:Hide()
-    nameTip.title:SetText(C:RenderSkillName(skill.name))
+    nameTip.title:SetText(C:RenderSkillName(skill.name) .. C:SkillOwnerSuffix(skill))
     nameTip:SetSize(math.min(CARD_MAX_W, TextWidth(nameTip.title) + CARD_PAD * 2), CARD_HEAD + 2)
     nameTip:SetFrameLevel((owner:GetFrameLevel() or 0) + 40)
     nameTip:ClearAllPoints(); nameTip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
@@ -355,6 +690,14 @@ local saveControl,deleteControl
 local pendingDelete
 local activeCat, editingName
 local RefreshList, RefreshForm
+local formFrame, formHint
+
+-- Le formulaire n'apparaît que pendant une création ou une modification ;
+-- sinon, une invite à choisir une compétence ou à en créer une.
+local function SetFormShown(shown)
+    if formFrame then formFrame:SetShown(shown) end
+    if formHint then formHint:SetShown(not shown) end
+end
 
 local function ClearForm()
     editingName = nil
@@ -368,6 +711,7 @@ local function ClearForm()
 end
 
 local function LoadIntoForm(skill)
+    SetFormShown(true)
     editingName = skill.name
     pendingDelete=nil
     if descViewport then descViewport:SetVerticalScroll(0) end
@@ -392,10 +736,16 @@ local function MakeSkillRow(parent)
     local icon = row:CreateTexture(nil, "ARTWORK")
     icon:SetSize(24, 24); icon:SetPoint("LEFT", 3, 0)
     local text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    text:SetPoint("LEFT", icon, "RIGHT", 5, 0); text:SetPoint("RIGHT", -4, 0)
+    text:SetPoint("LEFT", icon, "RIGHT", 5, 4); text:SetPoint("RIGHT", -4, 4)
     text:SetJustifyH("LEFT"); text:SetWordWrap(false)
     UI.ApplyBodyText(text)
-    row.icon, row.text, row.bg = icon, text, bg
+    -- Créateur de l'entrée, discret, en bas à droite.
+    local creator = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    creator:SetPoint("BOTTOMRIGHT", -5, 3)
+    creator:SetFont(C.RichText.GetFont("noto").regular, 9, "")
+    creator:SetJustifyH("RIGHT"); creator:SetWordWrap(false)
+    creator:SetTextColor(.55, .55, .55)
+    row.icon, row.text, row.bg, row.creator = icon, text, bg, creator
     row:SetScript("OnEnter", function(self) bg:SetColorTexture(unpack(UI.colors.rowBgSelected)) end)
     row:SetScript("OnLeave", function(self) bg:SetColorTexture(unpack(UI.colors.rowBg)) end)
     row:SetScript("OnClick", function(self)
@@ -417,6 +767,10 @@ function RefreshList()
         row.skill = skill
         row.icon:SetTexture(C:ResolveIconValue(skill.icon))
         row.text:SetText(C:RenderSkillName(skill.name))
+        -- Commune : chaque copie porte son créateur (nil = vous) ; bibliothèque
+        -- reçue : son créateur ; la vôtre : « Vous ».
+        local owner = skill.owner or (selectedOwner ~= COMMON and selectedOwner) or nil
+        row.creator:SetText("Créé par : " .. (owner and (owner:match("^[^-]+") or owner) or "Vous"))
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, -(i - 1) * 34)
         row:SetWidth(LIST_W)
@@ -429,6 +783,7 @@ end
 
 function RefreshForm()
     ClearForm()
+    SetFormShown(false)
 end
 
 local function SelectTab(cat)
@@ -998,24 +1353,91 @@ local function Build()
     UI.ApplySeparator(sep)
 
     -- Colonne gauche : liste + bouton nouvelle compétence
-    local ownerBtn=UI.CreatePanelButton(panel,PANEL_W-132,22,"Ma bibliothèque")
+    -- Bibliothèque affichée : menu déroulant (la vôtre, puis chaque créateur).
+    local ownerBtn=UI.CreatePanelButton(panel,LIST_W,22,"Ma bibliothèque")
     ownerBtn:SetPoint("TOPLEFT",10,-60)
+    ownerBtn.library=true
+    local ownerText=ownerBtn:GetFontString()
+    ownerText:ClearAllPoints();ownerText:SetPoint("LEFT",8,0);ownerText:SetPoint("RIGHT",-22,0);ownerText:SetJustifyH("LEFT")
+    local arrow=ownerBtn:CreateTexture(nil,"OVERLAY")
+    arrow:SetSize(14,14);arrow:SetPoint("RIGHT",-5,-1)
+    arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
     local sendBtn=UI.CreatePanelButton(panel,102,22,"Envoyer au raid")
     sendBtn:SetPoint("TOPRIGHT",-10,-60)
+    local function OwnerName(owner)
+        if owner==COMMON then return "Bibliothèque commune" end
+        local name,realm=owner:match("^([^-]+)%-(.+)$")
+        return name and (name.."|cff8a8a8a-"..realm.."|r") or owner
+    end
+    local function LibraryCount(categories)
+        local count=0
+        for _,cat in ipairs(CATEGORIES) do for _ in pairs(categories and categories[cat.key] or {}) do count=count+1 end end
+        return count
+    end
     local function OwnerLabel()
-        ownerBtn:SetText(selectedOwner and ("Bibliothèque : "..selectedOwner.." (lecture seule)  »") or "Bibliothèque : la mienne  »")
+        ownerBtn:SetText(selectedOwner and OwnerName(selectedOwner) or "Ma bibliothèque")
         sendBtn:SetEnabled(not selectedOwner)
         if saveControl then saveControl:SetEnabled(not selectedOwner);deleteControl:SetEnabled(not selectedOwner) end
     end
-    ownerBtn:SetScript("OnClick",function()
-        local owners={false}
-        for owner in pairs(CharacterDB.skillLibraries or {}) do owners[#owners+1]=owner end
-        table.sort(owners,function(a,b) if a==false then return true elseif b==false then return false else return a<b end end)
-        local nextIndex=1
-        for i,owner in ipairs(owners) do if owner==(selectedOwner or false) then nextIndex=i%#owners+1;break end end
-        selectedOwner=owners[nextIndex] or nil
+    local libraryMenu
+    local libraryRows={}
+    local function SelectLibrary(owner)
+        if libraryMenu then libraryMenu:Hide() end
+        selectedOwner=owner or nil
         OwnerLabel();SelectTab(activeCat)
         if C.OnSkillsChanged then C.OnSkillsChanged() end
+    end
+    local function OpenLibraryMenu()
+        if not libraryMenu then
+            libraryMenu=CreateFrame("Frame",nil,panel)
+            libraryMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+            libraryMenu:SetFrameLevel(panel:GetFrameLevel()+60)
+            local bg=libraryMenu:CreateTexture(nil,"BACKGROUND")
+            bg:SetAllPoints();UI.ApplyWindowBackground(bg,.98);UI.ApplyBorder(libraryMenu)
+            libraryMenu:SetScript("OnShow",function(menu)
+                menu:SetScript("OnUpdate",function()
+                    if IsMouseButtonDown and IsMouseButtonDown() and not menu:IsMouseOver() and not ownerBtn:IsMouseOver() then menu:Hide() end
+                end)
+            end)
+            libraryMenu:Hide()
+        end
+        local owners={}
+        for owner in pairs(CharacterDB.skillLibraries or {}) do owners[#owners+1]=owner end
+        table.sort(owners)
+        table.insert(owners,1,COMMON);table.insert(owners,1,false)
+        for i,owner in ipairs(owners) do
+            local row=libraryRows[i]
+            if not row then
+                row=CreateFrame("Button",nil,libraryMenu)
+                row:SetSize(LIST_W-8,22);row:SetPoint("TOPLEFT",4,-4-(i-1)*22)
+                row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.label:SetPoint("LEFT",8,0);row.label:SetPoint("RIGHT",-40,0);row.label:SetJustifyH("LEFT");row.label:SetWordWrap(false)
+                row.count=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.count:SetPoint("RIGHT",-8,0);UI.ApplyMutedText(row.count)
+                row.mark=row:CreateTexture(nil,"ARTWORK")
+                row.mark:SetPoint("TOPLEFT",0,-3);row.mark:SetPoint("BOTTOMLEFT",0,3);row.mark:SetWidth(2)
+                row.mark:SetColorTexture(.85,.70,.42,1)
+                local hl=row:CreateTexture(nil,"HIGHLIGHT");hl:SetAllPoints();hl:SetColorTexture(1,1,1,.12)
+                row:SetScript("OnClick",function(self) SelectLibrary(self.owner) end)
+                libraryRows[i]=row
+            end
+            row.owner=owner
+            local current=(selectedOwner or false)==owner
+            row.label:SetText(owner and OwnerName(owner) or "Ma bibliothèque")
+            if current then row.label:SetTextColor(.91,.80,.57) else row.label:SetTextColor(1,1,1) end
+            row.mark:SetShown(current)
+            local categories=owner==COMMON and CommonSkillDB() or owner and CharacterDB.skillLibraries[owner].categories or C:GetOwnedSkillLibrary()
+            row.count:SetText(LibraryCount(categories))
+            row:Show()
+        end
+        for i=#owners+1,#libraryRows do libraryRows[i]:Hide() end
+        libraryMenu:SetSize(LIST_W,#owners*22+8)
+        libraryMenu:ClearAllPoints();libraryMenu:SetPoint("TOPLEFT",ownerBtn,"BOTTOMLEFT",0,-2)
+        libraryMenu:Show()
+    end
+    panel.OpenLibraryMenu=OpenLibraryMenu
+    ownerBtn:SetScript("OnClick",function()
+        if libraryMenu and libraryMenu:IsShown() then libraryMenu:Hide() else OpenLibraryMenu() end
     end)
     sendBtn:SetScript("OnClick",function()
         if selectedOwner then return end
@@ -1025,16 +1447,17 @@ local function Build()
     ownerBtn:HookScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_BOTTOM")
         GameTooltip:AddLine("Bibliothèque affichée",unpack(UI.colors.title))
-        GameTooltip:AddLine("Clic : passer à la bibliothèque suivante (la vôtre, puis celles reçues du raid, par créateur).",1,1,1,true)
-        GameTooltip:AddLine("Les bibliothèques reçues sont en lecture seule.",.65,.68,.64,true)
+        GameTooltip:AddLine("La vôtre, la bibliothèque commune (tout ce qui existe, fusionné) ou celle d'un créateur reçue du raid. Seule la vôtre se modifie.",1,1,1,true)
         GameTooltip:Show()
     end)
     ownerBtn:HookScript("OnLeave",function() GameTooltip:Hide() end)
+    panel:HookScript("OnHide",function() if libraryMenu then libraryMenu:Hide() end end)
     panel:HookScript("OnShow",OwnerLabel)
     panel:HookScript("OnHide",function() if iconPicker then iconPicker:Hide() end;if autocomplete then autocomplete:Hide() end end)
     local newBtn = UI.CreatePanelButton(panel, LIST_W, 22, "+ Nouvelle")
-    newBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -92)
-    newBtn:SetScript("OnClick", function() ClearForm(); ShowStatus("") end)
+    -- Même ligne de départ que le formulaire (icône et « Nom » à -96).
+    newBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -96)
+    newBtn:SetScript("OnClick", function() ClearForm(); SetFormShown(true); ShowStatus("") end)
 
     listViewport = CreateFrame("ScrollFrame", nil, panel)
     searchEB=UI.CreateStyledEditBox(panel,LIST_W,22)
@@ -1055,13 +1478,21 @@ local function Build()
     listViewport:SetScrollChild(listContent)
 
     local vsep = panel:CreateTexture(nil, "ARTWORK")
-    vsep:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + LIST_W + 8, -92)
+    vsep:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + LIST_W + 8, -96)
     vsep:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10 + LIST_W + 8, 10)
     vsep:SetWidth(1)
     UI.ApplySeparator(vsep)
 
     -- Colonne droite : formulaire
     local formX = 10 + LIST_W + 8 + 10
+    -- Tout ce qui est créé jusqu'au bouton Supprimer appartient au
+    -- formulaire : on le rattache ensuite à formFrame pour le masquer d'un bloc.
+    formFrame = CreateFrame("Frame", nil, panel)
+    formFrame:SetAllPoints(panel)
+    panel.form = formFrame
+    local existingChildren, existingRegions = {}, {}
+    for _, child in ipairs({ panel:GetChildren() }) do existingChildren[child] = true end
+    for _, region in ipairs({ panel:GetRegions() }) do existingRegions[region] = true end
     local formW = PANEL_W - formX - 10
 
     local nameLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1312,9 +1743,23 @@ local function Build()
         end
         C:DeleteSkill(activeCat.key, editingName)
         ClearForm()
+        SetFormShown(false)
         RefreshList()
         ShowStatus("Supprimé")
     end)
+
+    for _, child in ipairs({ panel:GetChildren() }) do
+        if not existingChildren[child] then child:SetParent(formFrame) end
+    end
+    for _, region in ipairs({ panel:GetRegions() }) do
+        if not existingRegions[region] then region:SetParent(formFrame) end
+    end
+    formHint = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    formHint:SetPoint("CENTER", panel, "TOPLEFT", formX + formW / 2, -PANEL_H / 2)
+    formHint:SetWidth(formW - 40); formHint:SetJustifyH("CENTER")
+    formHint:SetText("Choisissez une compétence dans la liste pour la consulter ou la modifier,\nou créez-en une avec « + Nouvelle ».")
+    UI.ApplyMutedText(formHint)
+    SetFormShown(false)
 
     statusFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     statusFS:SetPoint("BOTTOMLEFT",panel,"BOTTOMLEFT",formX,12)

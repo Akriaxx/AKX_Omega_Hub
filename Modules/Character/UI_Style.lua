@@ -3,10 +3,14 @@ local Base=OS2.UI
 local UI=setmetatable({}, {__index=Base})
 Character.RPGUI=UI
 UI.colors=setmetatable({
-    rowBg={.065,.075,.073,.95},rowBgSelected={.18,.15,.09,.98},
+    rowBg={.028,.039,.055,.95},rowBgSelected={.075,.095,.125,.98},
     rowSelection={.72,.53,.22,.16},title={.91,.80,.57,1},
-    text={.89,.88,.80,1},textMuted={.65,.68,.64,1},
+    text={.89,.88,.80,1},textMuted={.63,.66,.71,1},
     turnHighlight={.95,.76,.35,1},
+    -- Vie en vert, Endurance en rouge dans tout Character (les autres
+    -- modules gardent les couleurs partagées d'OS2.UI).
+    statHP={fg={0.10,0.70,0.20,1},bg={0.03,0.16,0.05,1},label="HP"},
+    statEnd={fg={0.85,0.15,0.15,1},bg={0.20,0.04,0.04,1},label="END"},
 }, {__index=Base.colors})
 function UI.ApplyBorder(frame)
     if frame.rpgBorder then return end
@@ -27,14 +31,14 @@ function UI.ApplyBorder(frame)
     inset:SetColorTexture(.85,.72,.45,.22)
 end
 function UI.ApplyWindowBackground(texture,alpha)
-    texture:SetColorTexture(.025,.032,.035,math.max(0,math.min(1,alpha or .97)))
+    texture:SetColorTexture(.018,.026,.039,math.max(0,math.min(1,alpha or .97)))
     local frame=texture:GetParent()
     UI.ApplyBorder(frame)
     if not frame.rpgHeading then
         frame.rpgHeading=true
         local band=frame:CreateTexture(nil,"BACKGROUND",nil,1)
         band:SetPoint("TOPLEFT",1,-1);band:SetPoint("TOPRIGHT",-1,-1);band:SetHeight(21)
-        band:SetColorTexture(.16,.14,.095,.85)
+        band:SetColorTexture(.045,.06,.08,.85)
         local rule=frame:CreateTexture(nil,"BORDER")
         rule:SetPoint("TOPLEFT",8,-22);rule:SetPoint("TOPRIGHT",-8,-22);rule:SetHeight(1)
         rule:SetColorTexture(.62,.48,.25,.55)
@@ -47,15 +51,15 @@ function UI.CreatePanelButton(parent,w,h,label)
     button:SetSize(w,h)
     local bg=button:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints()
     bg:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga")
-    bg:SetVertexColor(.16,.18,.17,1)
+    bg:SetVertexColor(.06,.08,.11,1)
     local text=button:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     text:SetPoint("LEFT",4,0);text:SetPoint("RIGHT",-4,0);text:SetJustifyH("CENTER")
     text:SetWordWrap(false);text:SetText(label);text:SetTextColor(.92,.84,.67,1)
     button:SetFontString(text)
     local accent=button:CreateTexture(nil,"BORDER");accent:SetPoint("BOTTOMLEFT",2,0);accent:SetPoint("BOTTOMRIGHT",-2,0);accent:SetHeight(1)
     accent:SetColorTexture(.65,.51,.29,.7);button.accent=accent
-    button:SetScript("OnEnter",function() bg:SetVertexColor(.30,.27,.19,1) end)
-    button:SetScript("OnLeave",function() bg:SetVertexColor(.16,.18,.17,1) end)
+    button:SetScript("OnEnter",function() bg:SetVertexColor(.13,.16,.20,1) end)
+    button:SetScript("OnLeave",function() bg:SetVertexColor(.06,.08,.11,1) end)
     button:SetScript("OnDisable",function() text:SetAlpha(.35);bg:SetAlpha(.5) end)
     button:SetScript("OnEnable",function() text:SetAlpha(1);bg:SetAlpha(1) end)
     return button
@@ -64,7 +68,7 @@ function UI.CreateStyledCheckbox(parent,labelText)
     local button=CreateFrame("CheckButton",nil,parent)
     button:SetSize(18,18)
     local background=button:CreateTexture(nil,"BACKGROUND")
-    background:SetAllPoints();background:SetColorTexture(.025,.032,.035,1)
+    background:SetAllPoints();background:SetColorTexture(.018,.026,.039,1)
     UI.ApplyBorder(button)
     local check=button:CreateTexture(nil,"OVERLAY")
     check:SetPoint("CENTER");check:SetSize(8,8)
@@ -93,7 +97,7 @@ function UI.CreateChoiceStrip(parent,width,label,items,getValue,setValue)
     local title=holder:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     title:SetPoint("TOPLEFT",2,0);title:SetText(label or "");UI.ApplyTitle(title)
     local buttons={}
-    local colors={hp={.85,.28,.32},mana={.30,.64,.95},endurance={.43,.79,.48}}
+    local colors={hp={.43,.79,.48},mana={.30,.64,.95},endurance={.85,.28,.32}}
     function holder:Refresh()
         for i,button in ipairs(buttons) do
             local selected=getValue()==items[i].value
@@ -118,7 +122,7 @@ function UI.HealthMini(parent,y)
     bar:SetPoint("TOPLEFT",parent,"TOPLEFT",6,y);bar:SetPoint("TOPRIGHT",parent,"TOPRIGHT",-6,y);bar:SetHeight(10)
     local bg=bar:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints();bg:SetColorTexture(.025,.03,.03,1)
     local fill=bar:CreateTexture(nil,"ARTWORK");fill:SetPoint("TOPLEFT");fill:SetPoint("BOTTOMLEFT")
-    fill:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga");fill:SetVertexColor(.73,.17,.20,1)
+    fill:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga");fill:SetVertexColor(.24,.65,.40,1)
     function bar:Refresh(stat)
         local width=math.max(1,self:GetWidth())
         local cur=stat and tonumber(stat.cur) or 0
