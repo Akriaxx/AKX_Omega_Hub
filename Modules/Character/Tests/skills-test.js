@@ -371,6 +371,10 @@ assert(ownEsq and zedEsq,'les deux Esquive dans la commune');assert(not C:SaveSk
 local creators={};for _,o in ipairs(objects) do if o.kind=='Button' and o.creator and o.shown and o.skill then creators[o.creator.text]=true end end
 assert(creators['Créé par : Vous'] and creators['Créé par : zed'],'créateur en bas à droite')
 pickLibrary(false);assert(not C:IsSkillLibraryReadOnly())
+-- Ordre alphabétique sur le nom affiché : balises, majuscules et accents ignorés.
+for _,n in ipairs({'[[#ff0000]]Zèbre[[/]]','Écu','[[#00ff00]]Aptitude[[/]]','Déplacement','def.Phy','Esquive'}) do assert(C:SaveSkill('ranged',nil,n,'','')) end
+local order={};for _,sk in ipairs(C:ListSkills('ranged')) do order[#order+1]=C:StripSkillMarkup(sk.name) end
+assert(table.concat(order,',')=='Aptitude,def.Phy,Déplacement,Écu,Esquive,Zèbre',table.concat(order,','))
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

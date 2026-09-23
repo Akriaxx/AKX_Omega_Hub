@@ -89,11 +89,39 @@ function C:IsSkillLibraryReadOnly() return selectedOwner~=nil end
 function C:GetSkillLibraryOwner() return selectedOwner end
 
 -- ── CRUD ─────────────────────────────────────────────────────────────────────
+-- Clé de tri alphabétique : le nom affiché (sans balises), sans majuscules
+-- ni accents, pour que « Déplacement » se range avec les D et qu'un nom
+-- coloré ne soit pas classé par sa balise de couleur.
+local ACCENTS = {
+    ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["á"] = "a", ["ã"] = "a", ["å"] = "a",
+    ["ç"] = "c", ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e",
+    ["î"] = "i", ["ï"] = "i", ["í"] = "i", ["ì"] = "i",
+    ["ô"] = "o", ["ö"] = "o", ["ó"] = "o", ["ò"] = "o", ["õ"] = "o",
+    ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["ú"] = "u", ["ÿ"] = "y", ["ñ"] = "n",
+    ["œ"] = "oe", ["æ"] = "ae",
+}
+local function SortKey(name)
+    local plain = C:StripSkillMarkup(tostring(name or "")):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    plain = plain:lower():gsub("[\195\197][\128-\191]", function(ch)
+        -- Majuscule accentuée (É, À, Ç…) -> minuscule : même décalage qu'en Latin-1.
+        local b1, b2 = ch:byte(1, 2)
+        if b1 == 195 and b2 >= 128 and b2 <= 158 and b2 ~= 151 then ch = string.char(195, b2 + 32) end
+        return ACCENTS[ch] or ch
+    end)
+    return plain
+end
+function C:SkillSortKey(name) return SortKey(name) end
+local function Alphabetical(a, b)
+    local ka, kb = SortKey(a), SortKey(b)
+    if ka ~= kb then return ka < kb end
+    return a < b
+end
+
 function C:ListSkills(catKey)
     local db = GetSkillDB()
     local names = {}
     for name in pairs(db[catKey] or {}) do names[#names + 1] = name end
-    table.sort(names, function(a, b) return a:lower() < b:lower() end)
+    table.sort(names, Alphabetical)
     local list = {}
     for _, name in ipairs(names) do list[#list + 1] = db[catKey][name] end
     return list
@@ -125,7 +153,7 @@ function C:ListAllSkills(catKey)
     table.sort(owners)
     for _, owner in ipairs(owners) do add(CharacterDB.skillLibraries[owner].categories, owner) end
     table.sort(list, function(a, b)
-        local an, bn = self:StripSkillMarkup(a.name):lower(), self:StripSkillMarkup(b.name):lower()
+        local an, bn = SortKey(a.name), SortKey(b.name)
         if an ~= bn then return an < bn end
         if (a.owner == nil) ~= (b.owner == nil) then return a.owner == nil end
         return (a.owner or "") < (b.owner or "")
