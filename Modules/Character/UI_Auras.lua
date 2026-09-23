@@ -317,16 +317,19 @@ cardPortrait:SetPoint("RIGHT", card, "RIGHT", 0, 0)
 -- pour la cibler directement (SecureActionButtonTemplate sur le token
 -- stable "targettarget").
 local TOT_SIZE = 44
--- Fond noir pur, plus grand que le portrait+anneau, pour cacher proprement
--- le morceau du grand portrait/anneau qu'il chevauche plutôt que de le
--- laisser transparaître en dessous.
+-- Fond noir pur sous le portrait et son anneau, pour cacher proprement le
+-- morceau du grand portrait qu'il chevauche plutôt que de le laisser
+-- transparaître ; l'anneau doré, opaque, recouvre son bord.
 local totBacking = CreateFrame("Frame", nil, cardPortrait)
 -- L'anneau du grand portrait est deux niveaux au-dessus de lui (holder ->
 -- modèle -> anneau) : sans ce saut, il repasse par-dessus le petit
 -- portrait. Fixé AVANT de créer le petit portrait pour que son modèle 3D
 -- et son anneau héritent de ce niveau (voir plus bas).
 totBacking:SetFrameLevel(cardPortrait:GetFrameLevel() + 10)
-totBacking:SetSize(TOT_SIZE + 14, TOT_SIZE + 14)
+-- Le cercle doré de PortraitRing.tga fait ~90 % de la texture, elle-même
+-- 1,25 × le portrait : ~50 px ici. Le fond reste en dessous (48 px), sinon
+-- son bord noir dépasse de l'anneau.
+totBacking:SetSize(TOT_SIZE + 4, TOT_SIZE + 4)
 totBacking:SetPoint("CENTER", cardPortrait, "BOTTOMRIGHT", -4, 4)
 local totBackingMask = totBacking:CreateMaskTexture()
 totBackingMask:SetAllPoints()
@@ -349,7 +352,14 @@ totPortrait:SetScript("OnEnter", function(self)
     GameTooltip:SetUnit("targettarget")
     GameTooltip:Show()
 end)
-totPortrait:SetScript("OnLeave", function() GameTooltip:Hide() end)
+-- TRP3 ne ferme sa fiche que si la souris ne survole plus aucune unité ou
+-- si "targettarget" change : glisser vers la carte de cible (elle-même une
+-- unité survolée) la laissait ouverte. On la ferme explicitement.
+totPortrait:SetScript("OnLeave", function()
+    GameTooltip:Hide()
+    if TRP3_CharacterTooltip then TRP3_CharacterTooltip:Hide() end
+    if TRP3_CompanionTooltip then TRP3_CompanionTooltip:Hide() end
+end)
 
 -- Nom ancré à DROITE, juste au-dessus des auras (même bord droit), et qui
 -- s'écrit vers la gauche — comme les auras en dessous, pas collé au bord
