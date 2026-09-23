@@ -85,8 +85,46 @@ local function GetSkillDB()
     return GetOwnedSkillDB()
 end
 function C:GetOwnedSkillLibrary() return GetOwnedSkillDB() end
-function C:IsSkillLibraryReadOnly() return selectedOwner~=nil end
 function C:GetSkillLibraryOwner() return selectedOwner end
+
+-- ── Droits d'édition ───────────────────────────────────────────────────────
+-- Vos éditeurs : { ["Nom-Royaume"]=true }, envoyés avec votre bibliothèque.
+function C:GetSkillEditors()
+    CharacterDB = CharacterDB or {}
+    CharacterDB.skillEditors = CharacterDB.skillEditors or {}
+    CharacterDB.skillEditors[OwnerKey()] = CharacterDB.skillEditors[OwnerKey()] or {}
+    return CharacterDB.skillEditors[OwnerKey()]
+end
+function C:SetSkillEditor(name, allowed)
+    self:GetSkillEditors()[name] = allowed and true or nil
+end
+
+-- Modifiable : la vôtre, ou celle d'un créateur qui vous a nommé éditeur.
+function C:CanEditSkillLibrary(owner)
+    if owner == nil then return true end
+    if owner == COMMON then return false end
+    local library = CharacterDB.skillLibraries and CharacterDB.skillLibraries[owner]
+    -- Même écriture que le protocole (royaume sans espaces).
+    local me = OwnerKey():gsub("%s", "")
+    return library and library.editors and library.editors[me] and true or false
+end
+function C:IsSkillLibraryReadOnly() return not self:CanEditSkillLibrary(selectedOwner) end
+
+-- Oublie une bibliothèque reçue (elle reviendra si son créateur la renvoie).
+function C:DeleteReceivedSkillLibrary(owner)
+    if not owner or owner == COMMON or not (CharacterDB.skillLibraries and CharacterDB.skillLibraries[owner]) then return false end
+    CharacterDB.skillLibraries[owner] = nil
+    if selectedOwner == owner then selectedOwner = nil end
+    if self.OnSkillsChanged then self.OnSkillsChanged() end
+    return true
+end
+
+-- Votre bibliothèque, remplacée par la version d'un de vos éditeurs.
+function C:ReplaceOwnedSkillLibrary(categories)
+    CharacterDB.skills = CharacterDB.skills or {}
+    CharacterDB.skills[OwnerKey()] = categories
+    GetOwnedSkillDB()
+end
 
 -- ── CRUD ─────────────────────────────────────────────────────────────────────
 -- Clé de tri alphabétique : le nom affiché (sans balises), sans majuscules
@@ -250,7 +288,7 @@ end
 
 -- oldName nil/absent = création ; renommage géré en retirant l'ancienne clé.
 function C:SaveSkill(catKey, oldName, name, icon, description)
-    if selectedOwner then return false,"Lecture seule : seul le créateur peut modifier" end
+    if self:IsSkillLibraryReadOnly() then return false,"Lecture seule : seuls le créateur et ses éditeurs peuvent modifier" end
     if not FindCategory(catKey) then return false, "Catégorie inconnue" end
     name = tostring(name or ""):match("^%s*(.-)%s*$")
     if name == "" then return false, "Nom requis" end
@@ -268,7 +306,7 @@ function C:SaveSkill(catKey, oldName, name, icon, description)
 end
 
 function C:DeleteSkill(catKey, name)
-    if selectedOwner then return false,"Lecture seule : seul le créateur peut supprimer" end
+    if self:IsSkillLibraryReadOnly() then return false,"Lecture seule : seuls le créateur et ses éditeurs peuvent supprimer" end
     local db = GetSkillDB()
     if db[catKey] then db[catKey][name] = nil end
     if self.OnSkillsChanged then self.OnSkillsChanged() end
@@ -624,7 +662,8 @@ function ShowCard(depth, anchor, skill)
     local card = GetCard(depth)
     if cards[depth + 1] then cards[depth + 1]:Hide() end
     local content = card.content
-    card.title:SetText(C:RenderSkillName(skill.name) .. C:SkillOwnerSuffix(skill))
+    -- Fiche de consultation : le nom seul, sans son créateur.
+    card.title:SetText(C:RenderSkillName(skill.name))
     local body
     if skill.missing then
         card.title:SetTextColor(1, .35, .3)
@@ -696,7 +735,7 @@ function C:ShowSkillName(owner, skill)
         UI.ApplyTitle(nameTip.title)
     end
     GameTooltip:Hide()
-    nameTip.title:SetText(C:RenderSkillName(skill.name) .. C:SkillOwnerSuffix(skill))
+    nameTip.title:SetText(C:RenderSkillName(skill.name))
     nameTip:SetSize(math.min(CARD_MAX_W, TextWidth(nameTip.title) + CARD_PAD * 2), CARD_HEAD + 2)
     nameTip:SetFrameLevel((owner:GetFrameLevel() or 0) + 40)
     nameTip:ClearAllPoints(); nameTip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
@@ -1402,10 +1441,18 @@ local function Build()
         for _,cat in ipairs(CATEGORIES) do for _ in pairs(categories and categories[cat.key] or {}) do count=count+1 end end
         return count
     end
+    local rightsBtn=UI.CreatePanelButton(panel,70,22,"Droits")
+    rightsBtn:SetPoint("RIGHT",sendBtn,"LEFT",-6,0)
+    local rightsPanel
     local function OwnerLabel()
-        ownerBtn:SetText(selectedOwner and OwnerName(selectedOwner) or "Ma bibliothèque")
-        sendBtn:SetEnabled(not selectedOwner)
-        if saveControl then saveControl:SetEnabled(not selectedOwner);deleteControl:SetEnabled(not selectedOwner) end
+        local editable=C:CanEditSkillLibrary(selectedOwner)
+        local label=selectedOwner and OwnerName(selectedOwner) or "Ma bibliothèque"
+        if selectedOwner and editable then label=label.."  |cff8a8a8a(édition)|r" end
+        ownerBtn:SetText(label)
+        sendBtn:SetEnabled(editable and selectedOwner~=COMMON)
+        rightsBtn:SetShown(selectedOwner==nil)
+        if rightsPanel and selectedOwner then rightsPanel:Hide() end
+        if saveControl then saveControl:SetEnabled(editable);deleteControl:SetEnabled(editable) end
     end
     local libraryMenu
     local libraryRows={}
@@ -1441,7 +1488,31 @@ local function Build()
                 row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
                 row.label:SetPoint("LEFT",8,0);row.label:SetPoint("RIGHT",-40,0);row.label:SetJustifyH("LEFT");row.label:SetWordWrap(false)
                 row.count=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-                row.count:SetPoint("RIGHT",-8,0);UI.ApplyMutedText(row.count)
+                row.count:SetPoint("RIGHT",-24,0);UI.ApplyMutedText(row.count)
+                -- Oublier une bibliothèque reçue : second clic pour confirmer.
+                local del=CreateFrame("Button",nil,row)
+                del:SetSize(18,18);del:SetPoint("RIGHT",-2,0)
+                del.text=del:CreateFontString(nil,"OVERLAY","GameFontNormal")
+                del.text:SetAllPoints();del.text:SetText("×");del.text:SetTextColor(.65,.68,.64)
+                del:SetScript("OnClick",function(self)
+                    local owner=row.owner
+                    if self.armed~=owner then
+                        self.armed=owner;self.text:SetTextColor(1,.3,.3)
+                        ShowStatus("Recliquez sur × pour supprimer la bibliothèque de "..OwnerName(owner),true)
+                        return
+                    end
+                    self.armed=nil
+                    C:DeleteReceivedSkillLibrary(owner)
+                    ShowStatus("Bibliothèque de "..OwnerName(owner).." supprimée (elle reviendra si son créateur la renvoie)")
+                    OwnerLabel();SelectTab(activeCat);OpenLibraryMenu()
+                end)
+                del:SetScript("OnEnter",function(self)
+                    GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+                    GameTooltip:SetText("Supprimer cette bibliothèque de chez vous",1,1,1)
+                    GameTooltip:Show()
+                end)
+                del:SetScript("OnLeave",function() GameTooltip:Hide() end)
+                row.del=del
                 row.mark=row:CreateTexture(nil,"ARTWORK")
                 row.mark:SetPoint("TOPLEFT",0,-3);row.mark:SetPoint("BOTTOMLEFT",0,3);row.mark:SetWidth(2)
                 row.mark:SetColorTexture(.85,.70,.42,1)
@@ -1456,6 +1527,9 @@ local function Build()
             row.mark:SetShown(current)
             local categories=owner==COMMON and CommonSkillDB() or owner and CharacterDB.skillLibraries[owner].categories or C:GetOwnedSkillLibrary()
             row.count:SetText(LibraryCount(categories))
+            local received=owner and owner~=COMMON
+            row.del:SetShown(received and true or false)
+            if row.del.armed~=owner then row.del.armed=nil;row.del.text:SetTextColor(.65,.68,.64) end
             row:Show()
         end
         for i=#owners+1,#libraryRows do libraryRows[i]:Hide() end
@@ -1468,14 +1542,76 @@ local function Build()
         if libraryMenu and libraryMenu:IsShown() then libraryMenu:Hide() else OpenLibraryMenu() end
     end)
     sendBtn:SetScript("OnClick",function()
-        if selectedOwner then return end
         local ok,message=C:SendSkillLibrary()
         ShowStatus(message,not ok)
     end)
+    -- ── Droits d'édition : les éditeurs peuvent modifier votre bibliothèque
+    -- reçue et la renvoyer au raid sous votre nom.
+    local editorRows={}
+    local function RefreshRights()
+        local names={};for name in pairs(C:GetSkillEditors()) do names[#names+1]=name end;table.sort(names)
+        for i,name in ipairs(names) do
+            local row=editorRows[i]
+            if not row then
+                row=CreateFrame("Frame",nil,rightsPanel);row:SetSize(224,22)
+                row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.label:SetPoint("LEFT",4,0);row.label:SetTextColor(1,1,1)
+                row.remove=UI.CreatePanelButton(row,64,18,"Retirer");row.remove:SetPoint("RIGHT",0,0)
+                row.remove:SetScript("OnClick",function()
+                    C:SetSkillEditor(row.name,false);RefreshRights()
+                    ShowStatus("Droits retirés à "..OwnerName(row.name)..". Envoyez la bibliothèque pour le transmettre.")
+                end)
+                editorRows[i]=row
+            end
+            row.name=name;row.label:SetText(OwnerName(name))
+            row:ClearAllPoints();row:SetPoint("TOPLEFT",rightsPanel,"TOPLEFT",8,-58-(i-1)*24);row:Show()
+        end
+        for i=#names+1,#editorRows do editorRows[i]:Hide() end
+        rightsPanel.empty:SetShown(#names==0)
+        rightsPanel:SetHeight(92+math.max(1,#names)*24)
+    end
+    local function BuildRights()
+        rightsPanel=CreateFrame("Frame","CharacterSkillRights",panel)
+        rightsPanel:SetFrameStrata("FULLSCREEN_DIALOG");rightsPanel:SetFrameLevel(panel:GetFrameLevel()+60)
+        rightsPanel:SetWidth(240);rightsPanel:EnableMouse(true)
+        rightsPanel:SetPoint("TOPRIGHT",sendBtn,"BOTTOMRIGHT",0,-4)
+        local bg=rightsPanel:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints();UI.ApplyWindowBackground(bg,.98);UI.ApplyBorder(rightsPanel)
+        local title=rightsPanel:CreateFontString(nil,"OVERLAY","GameFontNormal")
+        title:SetPoint("TOPLEFT",10,-8);title:SetText("Droits d'édition");UI.ApplyTitle(title)
+        local add=UI.CreatePanelButton(rightsPanel,224,22,"Ajouter les droits d'édition (cible)")
+        add:SetPoint("TOPLEFT",8,-28)
+        add:SetScript("OnClick",function()
+            if not UnitExists("target") or not UnitIsPlayer("target") then ShowStatus("Ciblez un joueur",true);return end
+            local name,realm=UnitFullName("target")
+            realm=(realm and realm~="") and realm or GetRealmName()
+            local id=name.."-"..realm:gsub("%s","")
+            if id==OwnerKey():gsub("%s","") then ShowStatus("Vous êtes déjà le créateur de cette bibliothèque",true);return end
+            C:SetSkillEditor(id,true);RefreshRights()
+            ShowStatus("Droits d'édition donnés à "..OwnerName(id)..". Envoyez la bibliothèque pour les transmettre.")
+        end)
+        rightsPanel.empty=rightsPanel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        rightsPanel.empty:SetPoint("TOPLEFT",12,-62);rightsPanel.empty:SetText("Aucun éditeur.");UI.ApplyMutedText(rightsPanel.empty)
+        local hint=rightsPanel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        hint:SetPoint("BOTTOMLEFT",10,8);hint:SetPoint("RIGHT",-10,0);hint:SetJustifyH("LEFT")
+        hint:SetText("Un éditeur modifie et renvoie votre bibliothèque sous votre nom.");UI.ApplyMutedText(hint)
+        rightsPanel:Hide()
+    end
+    rightsBtn:SetScript("OnClick",function()
+        if not rightsPanel then BuildRights() end
+        if rightsPanel:IsShown() then rightsPanel:Hide() else RefreshRights();rightsPanel:Show() end
+    end)
+    rightsBtn:HookScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Droits d'édition",unpack(UI.colors.title))
+        GameTooltip:AddLine("Ciblez un joueur et donnez-lui le droit de modifier votre bibliothèque et de la renvoyer au raid sous votre nom.",1,1,1,true)
+        GameTooltip:Show()
+    end)
+    rightsBtn:HookScript("OnLeave",function() GameTooltip:Hide() end)
+    panel:HookScript("OnHide",function() if rightsPanel then rightsPanel:Hide() end end)
     ownerBtn:HookScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_BOTTOM")
         GameTooltip:AddLine("Bibliothèque affichée",unpack(UI.colors.title))
-        GameTooltip:AddLine("La vôtre, la bibliothèque commune (tout ce qui existe, fusionné) ou celle d'un créateur reçue du raid. Seule la vôtre se modifie.",1,1,1,true)
+        GameTooltip:AddLine("La vôtre, la bibliothèque commune (tout ce qui existe, fusionné) ou celle d'un créateur reçue du raid. Seules la vôtre et celles dont vous êtes éditeur se modifient ; × supprime une bibliothèque reçue.",1,1,1,true)
         GameTooltip:Show()
     end)
     ownerBtn:HookScript("OnLeave",function() GameTooltip:Hide() end)
@@ -1764,7 +1900,7 @@ local function Build()
     deleteControl=deleteBtn
     deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
     deleteBtn:SetScript("OnClick", function()
-        if selectedOwner then ShowStatus("Lecture seule : seul le créateur peut supprimer",true);return end
+        if C:IsSkillLibraryReadOnly() then ShowStatus("Lecture seule : seuls le créateur et ses éditeurs peuvent supprimer",true);return end
         if not editingName then ShowStatus("Rien à supprimer", true); return end
         if pendingDelete ~= editingName then
             pendingDelete=editingName;ShowStatus("Recliquez sur Supprimer pour confirmer",true);return

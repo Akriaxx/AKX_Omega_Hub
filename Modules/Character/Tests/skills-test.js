@@ -375,6 +375,52 @@ pickLibrary(false);assert(not C:IsSkillLibraryReadOnly())
 for _,n in ipairs({'[[#ff0000]]Zèbre[[/]]','Écu','[[#00ff00]]Aptitude[[/]]','Déplacement','def.Phy','Esquive'}) do assert(C:SaveSkill('ranged',nil,n,'','')) end
 local order={};for _,sk in ipairs(C:ListSkills('ranged')) do order[#order+1]=C:StripSkillMarkup(sk.name) end
 assert(table.concat(order,',')=='Aptitude,def.Phy,Déplacement,Écu,Esquive,Zèbre',table.concat(order,','))
+-- Fiche de consultation : jamais le créateur dans le titre.
+C:ShowSkillTooltip(UIParent,{name='Frappe',owner='Erzah-Apertus',description='x'});assert(CharacterSkillCard1.title.text=='Frappe',CharacterSkillCard1.title.text);C:HideSkillTooltip()
+C:ShowSkillName(UIParent,{name='Frappe',owner='Erzah-Apertus'});assert(CharacterSkillNameTip.title.text=='Frappe');C:HideSkillName()
+-- Droits d'édition et bibliothèques reçues supprimables.
+local Codec=C.SkillLibraryCodec
+local function lib(name,desc) local db={base={},offensive={},defensive={},ranged={},index={}};db.base[name]={name=name,icon='',description=desc or ''};return db end
+local dbE,edE=Codec.Decode(Codec.Encode(lib('A'),{['Tester-Realm']=true,['raid4-Realm']=true}))
+assert(dbE.base.A and edE['Tester-Realm'] and edE['raid4-Realm'],'éditeurs transportés')
+assert(select(2,Codec.Decode(Codec.Encode(lib('A'))))~=nil,'sans éditeurs : format inchangé')
+local seq=0
+local function deliver(sender,owner,rev,db,editors)
+ seq=seq+1;local payload=Codec.Encode(db,editors);local total=math.ceil(#payload/200);local id=tostring(seq)..'-9'
+ receive('H|'..id..'|'..rev..'|'..total..(owner and ('|'..owner) or ''),sender)
+ for k=1,total do receive('D|'..id..'|'..k..'|'..payload:sub((k-1)*200+1,k*200),sender) end
+end
+-- Le créateur raid3 nomme Tester et raid4 éditeurs.
+deliver('raid3-Realm',nil,1,lib('Orig'),{['Tester-Realm']=true,['raid4-Realm']=true})
+assert(CharacterDB.skillLibraries['raid3-Realm'].editors['Tester-Realm'] and C:CanEditSkillLibrary('raid3-Realm'),'nommé éditeur')
+assert(not C:CanEditSkillLibrary('raid1-Realm'),'pas éditeur ailleurs')
+pickLibrary('raid3-Realm');assert(not C:IsSkillLibraryReadOnly(),'bibliothèque reçue modifiable')
+assert(C:SaveSkill('base',nil,'Ajout','',''),'l éditeur modifie')
+C:StopSkillTransfers();sent={};assert(C:SendSkillLibrary(),'l éditeur renvoie');for k=1,12 do network.scripts.OnUpdate(network,.1) end
+assert(sent[1][2]:match('|raid3%-Realm$') and CharacterDB.skillLibraries['raid3-Realm'].revision==2,'renvoi sous le nom du créateur')
+C:StopSkillTransfers()
+-- Renvoi par raid4 (nommé) : accepté ; par raid5 (non nommé) : refusé.
+deliver('raid4-Realm','raid3-Realm',3,lib('ParRaid4'))
+local stored=CharacterDB.skillLibraries['raid3-Realm'];assert(stored.categories.base.ParRaid4 and stored.revision==3 and stored.editors['raid4-Realm'],'renvoi d un éditeur accepté, éditeurs conservés')
+deliver('raid5-Realm','raid3-Realm',4,lib('Pirate'))
+assert(not CharacterDB.skillLibraries['raid3-Realm'].categories.base.Pirate,'non nommé par le créateur : refusé')
+deliver('raid4-Realm','raid9-Realm',1,lib('Inconnu'))
+assert(not CharacterDB.skillLibraries['raid9-Realm'],'créateur jamais reçu : refusé')
+-- Chez le créateur : la version d'un éditeur nommé remplace la sienne.
+pickLibrary(false);C:SetSkillEditor('raid6-Realm',true);CharacterDB.skillRevision=5
+deliver('raid7-Realm','Tester-Realm',9,lib('Intrus'));assert(not C:GetOwnedSkillLibrary().base.Intrus,'non éditeur : refusé')
+deliver('raid6-Realm','Tester-Realm',4,lib('Vieille'));assert(not C:GetOwnedSkillLibrary().base.Vieille,'révision périmée : refusée')
+deliver('raid6-Realm','Tester-Realm',6,lib('Collab'));assert(C:GetOwnedSkillLibrary().base.Collab and CharacterDB.skillRevision==6,'version de l éditeur adoptée')
+-- Seul le créateur change la liste d'éditeurs ; supprimer une bibliothèque reçue.
+assert(C:DeleteReceivedSkillLibrary('raid3-Realm') and not CharacterDB.skillLibraries['raid3-Realm'],'bibliothèque supprimée')
+assert(not C:DeleteReceivedSkillLibrary(C.COMMON_SKILL_LIBRARY),'la commune ne se supprime pas')
+-- Menu : × sur une bibliothèque reçue, second clic pour confirmer.
+deliver('raid8-Realm',nil,1,lib('Temp'));assert(CharacterDB.skillLibraries['raid8-Realm'])
+local ob;for _,o in ipairs(objects) do if o.kind=='Button' and o.library then ob=o end end;ob.scripts.OnClick(ob)
+local del;for _,o in ipairs(objects) do if o.kind=='Button' and o.del and o.owner=='raid8-Realm' and o.shown then del=o.del end end
+assert(del and del.shown,'croix sur la bibliothèque reçue')
+del.scripts.OnClick(del);assert(CharacterDB.skillLibraries['raid8-Realm'],'premier clic : confirmation')
+del.scripts.OnClick(del);assert(not CharacterDB.skillLibraries['raid8-Realm'],'second clic : supprimée')
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

@@ -1,4 +1,9 @@
 -- Creator-scoped libraries, sent only through addon whispers to current raid peers.
+-- Un créateur peut donner des droits d'édition : la liste des éditeurs part
+-- avec sa bibliothèque, et un éditeur peut la renvoyer au raid sous le nom
+-- du créateur. Un destinataire n'accepte ce renvoi que si le créateur
+-- LUI-MÊME lui a déjà transmis cet éditeur ; le créateur accepte la version
+-- d'un éditeur qu'il a nommé et remplace alors sa propre bibliothèque.
 local C=Character
 local PREFIX="OmegaSkills2"
 local MAX_BYTES,MAX_CHUNKS,MAX_SKILLS=128000,640,256
@@ -60,7 +65,9 @@ local function Field(value)
     value=tostring(value or "")
     return #value..":"..value
 end
-local function Encode(db)
+-- editors (facultatif) : { ["Nom-Royaume"]=true }, ajoutés à la fin ; sans
+-- éditeurs, le format reste celui des versions précédentes.
+local function Encode(db,editors)
     local parts={};local count=0
     for _,category in ipairs(categories) do
         local names={};for name in pairs(db[category] or {}) do names[#names+1]=name end;table.sort(names)
@@ -72,6 +79,11 @@ local function Encode(db)
         end
     end
     local payload=Field(count)..table.concat(parts)
+    local names={};for name in pairs(editors or {}) do names[#names+1]=name end;table.sort(names)
+    if #names>0 then
+        payload=payload..Field(#names)
+        for _,name in ipairs(names) do payload=payload..Field(name) end
+    end
     if #payload>MAX_BYTES then return nil,"Bibliothèque trop volumineuse (128 Ko maximum)" end
     return payload
 end
@@ -95,16 +107,40 @@ local function Decode(payload)
         if not category or not db[category] or not name or not name:match("%S") or not icon or not description or db[category][name] then return end
         db[category][name]={name=name,icon=icon,description=description}
     end
+    local editors={}
+    if pos<=#payload then
+        local rawEditors=Read(3);local total=rawEditors and tonumber(rawEditors)
+        if not total or total<0 or total>64 then return end
+        for i=1,total do
+            local name=Read(64)
+            if not name or not name:match("^[^%-]+%-%S+$") then return end
+            editors[name]=true
+        end
+    end
     if pos~=#payload+1 then return end
-    return db
+    return db,editors
 end
+-- Envoie la bibliothèque affichée : la vôtre (avec vos éditeurs), ou celle
+-- d'un créateur dont vous êtes éditeur (sous son nom, révision suivante).
 function C:SendSkillLibrary()
-    if self:IsSkillLibraryReadOnly() then return false,"Seul le créateur peut envoyer cette bibliothèque" end
+    local owner=self:GetSkillLibraryOwner()
+    if owner==self.COMMON_SKILL_LIBRARY then return false,"La bibliothèque commune ne s'envoie pas" end
+    if self:IsSkillLibraryReadOnly() then return false,"Seul le créateur ou un éditeur peut envoyer cette bibliothèque" end
     if not self.enabled or not IsInRaid() then return false,"Rejoignez un raid pour envoyer" end
     if next(offered) or #queue>0 then return false,"Un envoi est déjà en cours" end
-    local payload,err=Encode(self:GetOwnedSkillLibrary());if not payload then return false,err end
-    CharacterDB.skillRevision=(CharacterDB.skillRevision or 0)+1
-    local revision=CharacterDB.skillRevision
+    local payload,err,revision,suffix
+    if owner then
+        local library=CharacterDB.skillLibraries[owner]
+        payload,err=Encode(library.categories)
+        if not payload then return false,err end
+        library.revision=(library.revision or 0)+1
+        revision,suffix=library.revision,"|"..owner
+    else
+        payload,err=Encode(self:GetOwnedSkillLibrary(),self:GetSkillEditors())
+        if not payload then return false,err end
+        CharacterDB.skillRevision=(CharacterDB.skillRevision or 0)+1
+        revision,suffix=CharacterDB.skillRevision,""
+    end
     local id=tostring(revision).."-"..math.floor(GetTime()*1000)
     local offer={payload=payload,revision=revision,targets={},expires=GetTime()+3600}
     local count=0
@@ -112,7 +148,7 @@ function C:SendSkillLibrary()
         local unit="raid"..i;local target=Identity(unit)
         if target and target~=Identity("player") and UnitIsConnected(unit) then
             offer.targets[target]=true;count=count+1
-            Send("H|"..id.."|"..revision.."|"..math.ceil(#payload/200),target)
+            Send("H|"..id.."|"..revision.."|"..math.ceil(#payload/200)..suffix,target)
         end
     end
     if count==0 then return false,"Aucun autre joueur connecté dans le raid" end
@@ -127,16 +163,38 @@ frame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
     if prefix~=PREFIX or channel~="WHISPER" or not C.enabled or #message>255 then return end
     sender=Normalize(sender)
     if sender==Identity("player") or not RaidMember(sender) then return end
-    local id,rev,total=message:match("^H|([%d%-]+)|(%d+)|(%d+)$")
+    -- En-tête : H|id|révision|fragments (le créateur est l'expéditeur), ou
+    -- H|id|révision|fragments|Créateur-Royaume (renvoi par un éditeur).
+    local id,rev,total,owner=message:match("^H|([%d%-]+)|(%d+)|(%d+)|([^|]+)$")
+    if not id then
+        id,rev,total=message:match("^H|([%d%-]+)|(%d+)|(%d+)$")
+        owner=""
+    end
     if id then
         rev,total=tonumber(rev),tonumber(total)
-        if #id>40 or rev>9007199254740991 or total<1 or total>MAX_CHUNKS then return end
+        if #id>40 or rev>9007199254740991 or total<1 or total>MAX_CHUNKS or #owner>64 then return end
         CharacterDB.skillLibraries=CharacterDB.skillLibraries or {}
-        local old=CharacterDB.skillLibraries[sender]
-        if old and rev<=old.revision then return end
+        owner=(owner~="" and owner) or sender
+        local me=Identity("player")
+        local authorized,oldRevision
+        if owner==me then
+            -- Votre bibliothèque, renvoyée par un éditeur que vous avez nommé.
+            authorized=C:GetSkillEditors()[sender]
+            oldRevision=CharacterDB.skillRevision or 0
+        elseif owner==sender then
+            authorized=true
+            local old=CharacterDB.skillLibraries[sender]
+            oldRevision=old and old.revision or -1
+        else
+            -- Renvoi par un éditeur : seulement si le créateur l'a lui-même nommé.
+            local stored=CharacterDB.skillLibraries[owner]
+            authorized=stored and stored.editors and stored.editors[sender]
+            oldRevision=stored and stored.revision or -1
+        end
+        if not authorized or rev<=oldRevision then return end
         local current=incoming[sender]
         if current and current.expires>GetTime() then return end
-        incoming[sender]={id=id,revision=rev,total=total,chunks={},count=0,bytes=0,expires=GetTime()+3600}
+        incoming[sender]={id=id,revision=rev,total=total,owner=owner,chunks={},count=0,bytes=0,expires=GetTime()+3600}
         Send("Y|"..id,sender);return
     end
     id=message:match("^Y|([%d%-]+)$")
@@ -158,13 +216,29 @@ frame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
         buffer.chunks[index]=chunk;buffer.count=buffer.count+1;buffer.bytes=buffer.bytes+#chunk
         if buffer.bytes>MAX_BYTES then incoming[sender]=nil;return end
         if buffer.count==buffer.total then
-            local db=Decode(table.concat(buffer.chunks));incoming[sender]=nil
+            local db,editors=Decode(table.concat(buffer.chunks));incoming[sender]=nil
             if not db then return end
-            -- Ownership comes ONLY from the transport sender, never from payload data.
-            CharacterDB.skillLibraries[sender]={revision=buffer.revision,categories=db}
+            -- Le créateur vient de l'en-tête vérifié à l'arrivée (expéditeur réel,
+            -- ou créateur ayant nommé cet éditeur), jamais du contenu seul.
+            local owner=buffer.owner
+            local status
+            if owner==Identity("player") then
+                C:ReplaceOwnedSkillLibrary(db)
+                CharacterDB.skillRevision=buffer.revision
+                status="Votre bibliothèque, modifiée par "..sender
+            elseif owner==sender then
+                -- Seul le créateur fixe la liste de ses éditeurs.
+                CharacterDB.skillLibraries[sender]={revision=buffer.revision,categories=db,editors=editors}
+                status="Bibliothèque reçue : "..sender
+            else
+                local stored=CharacterDB.skillLibraries[owner]
+                if not stored then return end
+                stored.categories,stored.revision=db,buffer.revision
+                status="Bibliothèque de "..owner.." reçue (modifiée par "..sender..")"
+            end
             if C.OnSkillsChanged then C.OnSkillsChanged() end
             Send("A|"..id,sender)
-            if C.OnSkillTransferStatus then C.OnSkillTransferStatus("Bibliothèque reçue : "..sender) end
+            if C.OnSkillTransferStatus then C.OnSkillTransferStatus(status) end
         end
         return
     end
