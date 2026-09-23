@@ -1462,6 +1462,7 @@ end
 -- ── Enable / Disable ──────────────────────────────────────────────────────────
 
 function C:Enable()
+    self.enabled=true
     if C.EnableResourceHUD then C:EnableResourceHUD() end
     RegisterSlash()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -1481,6 +1482,10 @@ function C:Enable()
 end
 
 function C:Disable()
+    self.enabled=false
+    if self.StopSkillTransfers then self:StopSkillTransfers() end
+    if CharacterSkillsBuilder then CharacterSkillsBuilder:Hide() end
+    if CharacterIconPicker then CharacterIconPicker:Hide() end
     if C.DisableResourceHUD then C:DisableResourceHUD() end
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
     eventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")

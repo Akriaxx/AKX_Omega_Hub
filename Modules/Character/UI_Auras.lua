@@ -161,10 +161,35 @@ end
 -- (masque circulaire, liseré noir, anneau PortraitRing.tga) : mêmes
 -- proportions, juste une taille de conteneur paramétrable. Fonctionne
 -- aussi bien sur un joueur que sur un PNJ : SetUnit affiche le modèle réel
--- de l'unité, pas une icône statique.
-local function NewAnimatedPortrait(parent, size)
-    local holder = CreateFrame("Frame", nil, parent)
+-- de l'unité, pas une icône statique. `noRing` omet l'anneau doré. `secure`
+-- en fait un vrai bouton de ciblage (SecureActionButtonTemplate) : cliquer
+-- dessus cible `secure` (le token d'unité, ex. "targettarget") — fixé une
+-- fois pour toutes puisque c'est un token stable, pas un nom résolu, donc
+-- aucun souci de verrouillage de combat à gérer à chaque rafraîchissement.
+-- `withMenu` : le clic droit ouvre le menu natif de l'unité (Inspecter,
+-- Chuchoter, Inviter, TRP3, Epsilon...), comme sur le TargetFrame natif
+-- qu'on masque. Client 9.2.7 : même ouverture que Blizzard (menu de
+-- TargetFrameDropDown) ; client récent : action sécurisée "togglemenu".
+local function EnableUnitMenu(button)
+    if TargetFrameDropDown and ToggleDropDownMenu then
+        button:SetAttribute("type2", "menu")
+        button.menu = function()
+            ToggleDropDownMenu(1, nil, TargetFrameDropDown, "cursor", 0, 0)
+        end
+    else
+        button:SetAttribute("type2", "togglemenu")
+    end
+end
+
+local function NewAnimatedPortrait(parent, size, noRing, secure, withMenu)
+    local holder = CreateFrame("Button", nil, parent, secure and "SecureActionButtonTemplate" or nil)
     holder:SetSize(size, size)
+    if secure then
+        holder:RegisterForClicks(withMenu and "AnyUp" or "LeftButtonUp")
+        holder:SetAttribute("type1", "target")
+        holder:SetAttribute("unit", secure)
+        if withMenu then EnableUnitMenu(holder) end
+    end
     local mask = holder:CreateMaskTexture()
     mask:SetAllPoints()
     mask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
@@ -189,13 +214,15 @@ local function NewAnimatedPortrait(parent, size)
     fallback:AddMaskTexture(fallbackMask)
     -- Anneau doré : parenté au modèle (pas au holder) pour rendre par-dessus
     -- lui, exactement comme "ornament" dans le cadre principal.
-    local ornament = CreateFrame("Frame", nil, model)
-    ornament:SetAllPoints(holder); ornament:EnableMouse(false)
-    local pad = size * .125
-    local medallion = ornament:CreateTexture(nil, "OVERLAY")
-    medallion:SetPoint("TOPLEFT", holder, "TOPLEFT", -pad, pad)
-    medallion:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", pad, -pad)
-    medallion:SetTexture(MEDIA .. "PortraitRing.tga")
+    if not noRing then
+        local ornament = CreateFrame("Frame", nil, model)
+        ornament:SetAllPoints(holder); ornament:EnableMouse(false)
+        local pad = size * .125
+        local medallion = ornament:CreateTexture(nil, "OVERLAY")
+        medallion:SetPoint("TOPLEFT", holder, "TOPLEFT", -pad, pad)
+        medallion:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", pad, -pad)
+        medallion:SetTexture(MEDIA .. "PortraitRing.tga")
+    end
     -- Recadrage tête/épaules : appliqué tout de suite après SetUnit (le
     -- cadre principal fait pareil) ET à chaque chargement réel du fichier
     -- modèle. Une cible retargetée souvent ne peut pas se permettre
@@ -255,6 +282,18 @@ card:SetSize(CARD_W, CARD_H)
 card:SetPoint("LEFT", hud, "RIGHT", 10, 0)
 card:Hide()
 
+-- Toute la carte réagit comme le portrait (clic droit = menu natif), au
+-- niveau de la carte elle-même : les auras et portraits, créés ensuite
+-- comme enfants, restent au-dessus et gardent leurs propres clics.
+local cardClick = CreateFrame("Button", nil, card, "SecureActionButtonTemplate")
+cardClick:SetPoint("TOPLEFT", card, "TOPLEFT", 24, -8)
+cardClick:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -CARD_PORTRAIT, 8)
+cardClick:SetFrameLevel(card:GetFrameLevel())
+cardClick:RegisterForClicks("AnyUp")
+cardClick:SetAttribute("unit", "target")
+cardClick:SetAttribute("type1", "target")
+EnableUnitMenu(cardClick)
+
 -- Même texture que le fond du cadre principal, retournée horizontalement :
 -- le bord arrondi et le petit joyau qui ornaient son bord droit se
 -- retrouvent à gauche, loin du portrait — le miroir exact de l'original.
@@ -271,8 +310,46 @@ cardBg:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -42, 8)
 cardBg:SetTexture(MEDIA .. "ResourcePanelRounded.tga")
 cardBg:SetTexCoord(1, 192 / 512, 0, 1)
 
-local cardPortrait = NewAnimatedPortrait(card, CARD_PORTRAIT)
+local cardPortrait = NewAnimatedPortrait(card, CARD_PORTRAIT, false, "target", true)
 cardPortrait:SetPoint("RIGHT", card, "RIGHT", 0, 0)
+
+-- Cible de la cible : même anneau que les cadres classiques, cliquable
+-- pour la cibler directement (SecureActionButtonTemplate sur le token
+-- stable "targettarget").
+local TOT_SIZE = 44
+-- Fond noir pur, plus grand que le portrait+anneau, pour cacher proprement
+-- le morceau du grand portrait/anneau qu'il chevauche plutôt que de le
+-- laisser transparaître en dessous.
+local totBacking = CreateFrame("Frame", nil, cardPortrait)
+-- L'anneau du grand portrait est deux niveaux au-dessus de lui (holder ->
+-- modèle -> anneau) : sans ce saut, il repasse par-dessus le petit
+-- portrait. Fixé AVANT de créer le petit portrait pour que son modèle 3D
+-- et son anneau héritent de ce niveau (voir plus bas).
+totBacking:SetFrameLevel(cardPortrait:GetFrameLevel() + 10)
+totBacking:SetSize(TOT_SIZE + 14, TOT_SIZE + 14)
+totBacking:SetPoint("CENTER", cardPortrait, "BOTTOMRIGHT", -4, 4)
+local totBackingMask = totBacking:CreateMaskTexture()
+totBackingMask:SetAllPoints()
+totBackingMask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+local totBackingTex = totBacking:CreateTexture(nil, "BACKGROUND")
+totBackingTex:SetAllPoints(); totBackingTex:SetColorTexture(0, 0, 0, 1)
+totBackingTex:AddMaskTexture(totBackingMask)
+totBacking:Hide()
+
+-- Parenté à totBacking (pas à cardPortrait) : ses propres enfants (modèle
+-- 3D, anneau) héritent alors du bon niveau dès leur création et passent
+-- automatiquement devant le fond noir et le coin qu'il chevauche. Un
+-- simple SetFrameLevel après coup ne suffit pas ici — il ne remonte que ce
+-- portrait-ci, pas son modèle 3D interne (déjà figé à son propre niveau à
+-- la création).
+local totPortrait = NewAnimatedPortrait(totBacking, TOT_SIZE, false, "targettarget")
+totPortrait:SetPoint("CENTER", totBacking, "CENTER", 0, 0)
+totPortrait:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetUnit("targettarget")
+    GameTooltip:Show()
+end)
+totPortrait:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- Nom ancré à DROITE, juste au-dessus des auras (même bord droit), et qui
 -- s'écrit vers la gauche — comme les auras en dessous, pas collé au bord
@@ -324,8 +401,19 @@ local function RefreshCard()
     cardName:SetText(ResolveCardName())
     cardPortrait:Refresh("target")
     cardAuras:Refresh("target")
+    -- Rien si la cible se cible elle-même : dupliquer le même portrait en
+    -- plus petit n'apporterait rien.
+    if C:GetSettings().showTargetOfTarget and UnitExists("targettarget")
+        and not UnitIsUnit("targettarget", "target") then
+        totPortrait:Refresh("targettarget")
+        totBacking:Show()
+    else
+        totBacking:Hide()
+    end
     card:Show()
 end
+
+C.RefreshTargetCard = RefreshCard
 
 -- Un seul point d'accroche pour les deux : hud:Refresh() est déjà appelé
 -- par ApplyResourceHUD, OnMyDataChanged et les events portrait existants.
@@ -338,6 +426,9 @@ end
 
 hud:RegisterEvent("PLAYER_TARGET_CHANGED")
 hud:RegisterEvent("UNIT_AURA")
+-- La cible peut changer QUI ELLE cible sans que notre propre cible change :
+-- UNIT_TARGET sur "target" est le seul événement qui le signale.
+hud:RegisterEvent("UNIT_TARGET")
 hud:HookScript("OnEvent", function(_, event, unit)
     if not hud:IsShown() then return end
     if event == "PLAYER_TARGET_CHANGED" then
@@ -345,6 +436,8 @@ hud:HookScript("OnEvent", function(_, event, unit)
     elseif event == "UNIT_AURA" then
         if unit == "player" then RefreshSelfAuras()
         elseif unit == "target" then RefreshCard() end
+    elseif event == "UNIT_TARGET" and unit == "target" then
+        RefreshCard()
     end
 end)
 
@@ -368,6 +461,7 @@ local function CollectNativeAuraIcons()
     end
     if BuffFrame then AddArray(BuffFrame.BuffButton); AddArray(BuffFrame.DebuffButton) end
     if TargetFrame then AddArray(TargetFrame.Buff); AddArray(TargetFrame.Debuff) end
+    if PlayerFrame then AddArray(PlayerFrame.Buff); AddArray(PlayerFrame.Debuff) end
     return icons
 end
 local function SetNativeAurasSuppressed(suppressed)
@@ -396,24 +490,37 @@ hud:HookScript("OnEvent", function(_, event)
 end)
 if hud:IsShown() then SetNativeAurasSuppressed(true) end
 
--- ── Masquage du TargetFrame natif ───────────────────────────────────────────
--- Notre carte de cible fait doublon avec le cadre de cible par défaut de
--- Blizzard : on le masque tant que Character est actif, même mécanisme
--- réversible (OnShow -> Hide) que pour les auras juste au-dessus.
-if TargetFrame then
-    local function SetNativeTargetFrameSuppressed(suppressed)
-        if suppressed then
-            if TargetFrame.omegaOriginalOnShow == nil then
-                TargetFrame.omegaOriginalOnShow = TargetFrame:GetScript("OnShow") or false
-            end
-            TargetFrame:SetScript("OnShow", TargetFrame.Hide)
-            TargetFrame:Hide()
-        elseif TargetFrame.omegaOriginalOnShow ~= nil then
-            TargetFrame:SetScript("OnShow", TargetFrame.omegaOriginalOnShow or nil)
-            TargetFrame.omegaOriginalOnShow = nil
+-- ── Masquage des cadres natifs du joueur et de la cible ─────────────────────
+-- Le cadre principal et la carte de cible font doublon avec PlayerFrame et
+-- TargetFrame de Blizzard : on les masque tant que Character est actif,
+-- même mécanisme réversible (OnShow -> Hide) que pour les auras juste
+-- au-dessus. Les auras qu'Epsilon accroche sous ces cadres sont leurs
+-- enfants et disparaissent avec eux. PlayerFrame ne se réaffiche pas
+-- seul (il n'a pas de "changement de cible") : on le remontre au retour.
+local function SetNativeFrameSuppressed(frame, suppressed, reshow)
+    if suppressed then
+        if frame.omegaOriginalOnShow == nil then
+            frame.omegaOriginalOnShow = frame:GetScript("OnShow") or false
         end
+        frame:SetScript("OnShow", frame.Hide)
+        frame:Hide()
+    elseif frame.omegaOriginalOnShow ~= nil then
+        frame:SetScript("OnShow", frame.omegaOriginalOnShow or nil)
+        frame.omegaOriginalOnShow = nil
+        if reshow then frame:Show() end
     end
-    hud:HookScript("OnShow", function() SetNativeTargetFrameSuppressed(true) end)
-    hud:HookScript("OnHide", function() SetNativeTargetFrameSuppressed(false) end)
-    if hud:IsShown() then SetNativeTargetFrameSuppressed(true) end
 end
+local function SetNativeFramesSuppressed(suppressed)
+    -- Cadres sécurisés : Show/Hide interdits en combat. On réessaie à la
+    -- sortie du combat (PLAYER_REGEN_ENABLED, plus bas).
+    if InCombatLockdown and InCombatLockdown() then return end
+    if PlayerFrame then SetNativeFrameSuppressed(PlayerFrame, suppressed, true) end
+    if TargetFrame then SetNativeFrameSuppressed(TargetFrame, suppressed, false) end
+end
+hud:HookScript("OnShow", function() SetNativeFramesSuppressed(true) end)
+hud:HookScript("OnHide", function() SetNativeFramesSuppressed(false) end)
+hud:RegisterEvent("PLAYER_REGEN_ENABLED")
+hud:HookScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then SetNativeFramesSuppressed(hud:IsShown()) end
+end)
+if hud:IsShown() then SetNativeFramesSuppressed(true) end

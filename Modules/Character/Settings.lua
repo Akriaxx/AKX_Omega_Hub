@@ -6,7 +6,7 @@
 local C  = Character
 local UI = C.RPGUI or OS2.UI
 
-local PANEL_W, PANEL_H = 260, 456
+local PANEL_W, PANEL_H = 260, 528
 local WINDOW_SCALE_MIN, WINDOW_SCALE_MAX, WINDOW_SCALE_STEP = 0.60, 1.60, 0.05
 
 local DEFAULTS = {
@@ -18,6 +18,8 @@ local DEFAULTS = {
     initiativeScale  = 1.00,
 
     resourceHUDScale = 1.00,
+    actionScale      = 1.00,
+    showTargetOfTarget = true,
     -- Phrases farfelues par défaut : voir HandleRaidWarningTrigger dans
     -- Core.lua — chacun doit garder des phrases DIFFÉRENTES des autres pour
     -- que seul l'expéditeur d'un /rw démarre/termine le combat chez lui.
@@ -40,6 +42,8 @@ function C:GetSettings()
     if s.mjScale         == nil then s.mjScale         = DEFAULTS.mjScale         end
     if s.groupScale      == nil then s.groupScale      = DEFAULTS.groupScale      end
     if s.initiativeScale == nil then s.initiativeScale = DEFAULTS.initiativeScale end
+    if s.actionScale     == nil then s.actionScale     = DEFAULTS.actionScale     end
+    if s.showTargetOfTarget == nil then s.showTargetOfTarget = DEFAULTS.showTargetOfTarget end
     if s.rwTrigger        == nil then s.rwTrigger        = DEFAULTS.rwTrigger        end
     if s.rwEndTrigger     == nil then s.rwEndTrigger     = DEFAULTS.rwEndTrigger     end
     s.resourceHUDEnabled = nil -- Permanent personal HUD replaces the optional display.
@@ -264,18 +268,24 @@ local refreshInitiative = MakeScaleControl(
     function(v) C:SetInitiativeScale(v) end
 )
 
+local refreshAction = MakeScaleControl(
+    "Taille — Bouton Action", -280,
+    function() return C:GetSettings().actionScale end,
+    function(v) if C.SetActionScale then C:SetActionScale(v) end end
+)
+
 -- ── Phrases déclencheuses /rw ────────────────────────────────────────────────
 -- Envoyer ces textes en /rw démarre/termine le combat chez SOI (voir
 -- HandleRaidWarningTrigger, Core.lua). Garder des phrases différentes des
 -- autres joueurs pour ne pas déclencher leur combat en même temps.
 
 local rwTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-rwTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -280)
+rwTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -324)
 rwTriggerLbl:SetText("Phrase déclencheuse /rw")
 UI.ApplyLabel(rwTriggerLbl)
 
 local rwTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
-rwTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -296)
+rwTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -340)
 rwTriggerEB:SetScript("OnEnterPressed", function(self)
     C:SetRWTrigger(self:GetText())
     self:ClearFocus()
@@ -285,12 +295,12 @@ rwTriggerEB:SetScript("OnEditFocusLost", function(self)
 end)
 
 local rwEndTriggerLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-rwEndTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -332)
+rwEndTriggerLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -376)
 rwEndTriggerLbl:SetText("Phrase de fin /rw")
 UI.ApplyLabel(rwEndTriggerLbl)
 
 local rwEndTriggerEB = UI.CreateStyledEditBox(panel, PANEL_W - 28, 22)
-rwEndTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -348)
+rwEndTriggerEB:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -392)
 rwEndTriggerEB:SetScript("OnEnterPressed", function(self)
     C:SetRWEndTrigger(self:GetText())
     self:ClearFocus()
@@ -302,7 +312,7 @@ end)
 -- ── Base de données de compétences ───────────────────────────────────────────
 
 local skillsDbBtn = UI.CreatePanelButton(panel, PANEL_W - 28, 24, "Base de données")
-skillsDbBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -384)
+skillsDbBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -428)
 skillsDbBtn:SetScript("OnClick", function()
     if C.ToggleSkillsBuilder then C:ToggleSkillsBuilder() end
 end)
@@ -310,10 +320,18 @@ end)
 -- ── Sync & toggle ─────────────────────────────────────────────────────────────
 
 local hudHint=panel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-hudHint:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-422)
+hudHint:SetPoint("TOPLEFT",panel,"TOPLEFT",14,-466)
 hudHint:SetText("Maintenir et glisser le portrait : déplacer")
 hudHint:SetWidth(PANEL_W-28);hudHint:SetJustifyH("LEFT");hudHint:SetWordWrap(true)
 UI.ApplyMutedText(hudHint)
+
+-- Petit portrait de la cible de votre cible, sur la carte de cible.
+local totCheck = UI.CreateStyledCheckbox(panel, "Cible de la cible")
+totCheck:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -494)
+totCheck:SetScript("OnClick", function(self)
+    C:GetSettings().showTargetOfTarget = self:GetChecked() and true or false
+    if C.RefreshTargetCard then C.RefreshTargetCard() end
+end)
 local function SyncControls()
     local s = C:GetSettings()
     opacitySlider:SetValue(s.windowOpacity)
@@ -322,10 +340,12 @@ local function SyncControls()
     refreshMJ()
     refreshGroup()
     refreshInitiative()
+    refreshAction()
 
 
     rwTriggerEB:SetText(s.rwTrigger or "")
     rwEndTriggerEB:SetText(s.rwEndTrigger or "")
+    totCheck:SetChecked(s.showTargetOfTarget)
 end
 
 panel:SetScript("OnShow", SyncControls)
