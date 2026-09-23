@@ -20,6 +20,21 @@ local function StopDrag()
 end
 hud:SetScript("OnDragStart",function() hud.dragging=true;hud:StartMoving() end)
 hud:SetScript("OnDragStop",StopDrag)
+-- Clic droit sur le cadre (nom compris : une FontString ne capte pas la
+-- souris) : menu natif du joueur, comme sur le PlayerFrame masqué
+-- (Convertir en raid, difficulté, butin, TRP3...). Client 9.2.7 : menu de
+-- PlayerFrameDropDown ; client récent : UnitPopup.
+local function OpenPlayerMenu()
+    if PlayerFrameDropDown and ToggleDropDownMenu then
+        ToggleDropDownMenu(1,nil,PlayerFrameDropDown,"cursor",0,0)
+    elseif UnitPopup_OpenMenu then
+        UnitPopup_OpenMenu("SELF",{unit="player"})
+    end
+end
+C.OpenPlayerMenu=OpenPlayerMenu
+hud:SetScript("OnMouseUp",function(_,button)
+    if button=="RightButton" and not hud.dragging then OpenPlayerMenu() end
+end)
 
 local background=hud:CreateTexture(nil,"BACKGROUND")
 background:SetPoint("TOPLEFT",hud,"TOPLEFT",42,-8)
