@@ -5,6 +5,7 @@ const code=basic+extra+`
 function M:RegisterEvent(event) self.events=self.events or {};self.events[event]=true end
 function M:GetAlpha() return self.alpha or 1 end
 function M:SetToplevel() end
+function M:SetMaxBytes() end
 function M:SetShadowColor() end
 function M:SetShadowOffset() end
 function M:SetScale(v) self.scale=v end
@@ -421,6 +422,43 @@ local del;for _,o in ipairs(objects) do if o.kind=='Button' and o.del and o.owne
 assert(del and del.shown,'croix sur la bibliothèque reçue')
 del.scripts.OnClick(del);assert(CharacterDB.skillLibraries['raid8-Realm'],'premier clic : confirmation')
 del.scripts.OnClick(del);assert(not CharacterDB.skillLibraries['raid8-Realm'],'second clic : supprimée')
+-- Utilisable: storage, transfer, consultation and raid message round trip.
+pickLibrary(false)
+assert(C:SaveSkill('base',nil,'Usable Test','134400','Description',true))
+local usable=C:GetSkill('base','Usable Test');assert(usable.usable==true)
+local decodedUse=Codec.Decode(Codec.Encode(C:GetOwnedSkillLibrary(),{['raid4-Realm']=true}))
+assert(decodedUse.base['Usable Test'].usable==true)
+assert(not decodedUse.base.Collab.usable)
+local mergedUse;for _,sk in ipairs(C:ListAllSkills('base')) do if sk.name=='Usable Test' then mergedUse=sk end end
+assert(mergedUse and mergedUse.usable)
+C:ShowSkillTooltip(UIParent,mergedUse);assert(CharacterSkillCard1.useButton:IsShown())
+C:ShowSkillTooltip(UIParent,{name='Normal',description='x'});assert(not CharacterSkillCard1.useButton:IsShown())
+local filters={};function ChatFrame_AddMessageEventFilter(event,fn) filters[event]=fn end
+local nativeLinks=0;function ChatFrame_OnHyperlinkShow() nativeLinks=nativeLinks+1 end
+local raid=true;IsInRaid=function() return raid end
+local sentUse;function SendChatMessage(message,channel) sentUse={message,channel} end
+dofile('Modules/Character/UI_SkillUse.lua')
+local id=C:SkillChatID(mergedUse);assert(#id==16)
+local link=C:SkillChatLink(mergedUse,id)
+local message=C:PrepareSkillRaidMessage('Avant '..link..' apres',mergedUse)
+assert(message and not message:find('|',1,true))
+assert(C:FilterSkillRaidMessage(message)=='Avant '..link..' apres')
+assert(C:FindChatSkill(id).name==mergedUse.name)
+assert(not C:PrepareSkillRaidMessage('sans lien',mergedUse))
+local long=C:PrepareSkillRaidMessage(string.rep('x ',200)..link,mergedUse);assert(long)
+local parts=C:SplitSkillRaidMessage(long);assert(#parts>1)
+for _,part in ipairs(parts) do assert(#part<=255) end
+assert(table.concat(parts,' '):find('[Omega:'..id..']',1,true))
+raid=false;assert(not C:PrepareSkillRaidMessage(link,mergedUse));raid=true
+ChatFrame_OnHyperlinkShow(UIParent,'item:123');assert(nativeLinks==1)
+ChatFrame_OnHyperlinkShow(UIParent,'omegaskill:'..id);assert(nativeLinks==1 and CharacterSkillCard1.useButton:IsShown())
+function M:SetCursorPosition(v) self.cursor=v end
+function M:HighlightText() end
+C:OpenSkillUse(mergedUse)
+local composer=CharacterSkillUsePopup;assert(composer:IsShown())
+local input=composer.edit;assert(input:GetText()=='*Votre émote ici.* '..link)
+assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPressed(input)
+assert(sentUse and sentUse[1]==message and sentUse[2]=='RAID' and not composer:IsShown())
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

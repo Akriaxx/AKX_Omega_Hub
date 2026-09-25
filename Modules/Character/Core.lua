@@ -520,7 +520,7 @@ local function UnpackInitiative(payload)
     end
 
     local phase = t[idx]
-    C.initiative.phase = (phase == "resolve_start" or phase == "transition") and phase or "play"
+    C.initiative.phase = (phase == "resolve_start" or phase == "resolution_end" or phase == "counter_focus" or phase == "round_end" or phase == "transition" or phase == "round_start") and phase or "play"
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
     C.initiative.round        = round
@@ -1199,17 +1199,41 @@ function C:NextTurn()
 
     local token = {}
     C.initiative._pendingRound = token
-    C.initiative.phase = "transition"
     C.initiative._roundTransition = true
-    C.initiative.round = (C.initiative.round or 0) + 1
-    BroadcastInitiative()
-    if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    local function Valid()
+        return C.initiative._pendingRound == token and C.initiative.active and C.initiative.isHost
+    end
+    local function Phase(phase)
+        C.initiative.phase = phase
+        BroadcastInitiative()
+        if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    end
+    -- Fin de résolution, arrivée du curseur, annonce de fin, compteur, début,
+    -- puis seulement le premier participant. Chaque délai reste annulable.
+    Phase("resolution_end")
     C_Timer.After(ROUND_STEP_DELAY, function()
-        if C.initiative._pendingRound ~= token or not C.initiative.active or not C.initiative.isHost then return end
-        C.initiative._roundTransition = nil
-        C.initiative._pendingRound = nil
-        C.initiative.phase = "play"
-        ApplyTurnAdvance(nextIdx, ending, true)
+        if not Valid() then return end
+        Phase("counter_focus")
+        C_Timer.After(.35, function()
+            if not Valid() then return end
+            Phase("round_end")
+            C_Timer.After(ROUND_STEP_DELAY + .3, function()
+                if not Valid() then return end
+                C.initiative.round = (C.initiative.round or 0) + 1
+                Phase("transition")
+                C_Timer.After(ROUND_STEP_DELAY, function()
+                    if not Valid() then return end
+                    Phase("round_start")
+                    C_Timer.After(1, function()
+                        if not Valid() then return end
+                        C.initiative._roundTransition = nil
+                        C.initiative._pendingRound = nil
+                        C.initiative.phase = "play"
+                        ApplyTurnAdvance(nextIdx, ending, true)
+                    end)
+                end)
+            end)
+        end)
     end)
     return true
 end
@@ -1486,6 +1510,7 @@ function C:Disable()
     if self.StopSkillTransfers then self:StopSkillTransfers() end
     if CharacterSkillsBuilder then CharacterSkillsBuilder:Hide() end
     if CharacterIconPicker then CharacterIconPicker:Hide() end
+    if CharacterSkillUsePopup then CharacterSkillUsePopup:Hide() end
     if C.DisableResourceHUD then C:DisableResourceHUD() end
     eventFrame:UnregisterEvent("CHAT_MSG_ADDON")
     eventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")

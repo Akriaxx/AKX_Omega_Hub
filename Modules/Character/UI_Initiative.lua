@@ -17,6 +17,31 @@ local EVENT_CARD_W   = 40
 local cards      = {}
 local eventCards = {}
 
+-- Même texture en neuf parties que les cartes de compétences : les coins
+-- gardent leur forme quelle que soit la longueur de la frise.
+local function ApplyInitiativeFrame(frame)
+    local cuts={0,24/128,104/128,1}
+    local parts={}
+    for row=1,3 do for col=1,3 do
+        local tex=frame:CreateTexture(nil,"BACKGROUND")
+        tex:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\SkillCard")
+        tex:SetTexCoord(cuts[col],cuts[col+1],cuts[row],cuts[row+1])
+        parts[#parts+1]=tex
+    end end
+    local function Layout()
+        local w,h=frame:GetWidth(),frame:GetHeight()
+        local k=math.min(12,w/2,h/2)
+        local xs,ys={0,k,w-k,w},{0,k,h-k,h}
+        for i,tex in ipairs(parts) do
+            local row,col=math.floor((i-1)/3)+1,(i-1)%3+1
+            tex:ClearAllPoints()
+            tex:SetPoint("TOPLEFT",frame,"TOPLEFT",xs[col],-ys[row])
+            tex:SetPoint("BOTTOMRIGHT",frame,"TOPLEFT",xs[col+1],-ys[row+1])
+        end
+    end
+    frame:HookScript("OnSizeChanged",Layout);Layout()
+end
+
 -- Défini plus bas (popup "Ajouter un évènement") ; référencé depuis MakeCard
 -- avant sa définition, d'où le forward-declare. Le popup "Ajouter un état",
 -- lui, est exposé en méthode (C:OpenStatusPopup) : ouvert depuis d'autres
@@ -99,10 +124,10 @@ banner:Hide()
 
 local bg = banner:CreateTexture(nil, "BACKGROUND")
 bg:SetAllPoints()
-UI.ApplyWindowBackground(bg)
+bg:SetColorTexture(0,0,0,0)
 banner.bg = bg
 
-UI.ApplyBorder(banner)
+ApplyInitiativeFrame(banner)
 
 -- ── Header draggable ──────────────────────────────────────────────────────────
 
@@ -117,7 +142,7 @@ header:SetScript("OnMouseUp", function() banner:StopMovingOrSizing() end)
 
 local headerBg = header:CreateTexture(nil, "BACKGROUND")
 headerBg:SetAllPoints()
-headerBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+headerBg:SetColorTexture(0,0,0,0)
 
 local headerTitle = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 headerTitle:SetPoint("LEFT", header, "LEFT", 8, 0)
@@ -125,43 +150,39 @@ headerTitle:SetText("Initiative")
 UI.ApplyTitle(headerTitle)
 
 local headerSep = banner:CreateTexture(nil, "ARTWORK")
-headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
-headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
+headerSep:SetPoint("TOPLEFT", header, "BOTTOMLEFT",10,0)
+headerSep:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT",-10,0)
 headerSep:SetHeight(1)
 UI.ApplySeparator(headerSep, true)
 
--- Bouton "+ Évt" (hôte uniquement) : ajoute un évènement GÉNÉRAL, dissocié
--- de tout participant — il est injecté dans la rotation d'initiative (ancré
--- au participant en cours à l'instant de la création, voir AddEvent côté
--- Core.lua). Le compteur descend de 1 à chaque tour de table complet comme
--- n'importe quel évènement, mais ne se déclenche qu'au retour du bandeau sur
--- cette ancre (voir TickEventsFor). Une fois ajouté, il s'affiche comme une
--- carte dédiée tout à droite de la rangée de participants — voir la boucle
--- sur `st.events` dans Rebuild plus bas. Voir OpenEventPopup(nil) plus bas /
--- C:AddEvent + TickEventsFor côté Core.lua.
-local addGlobalEventBtn = UI.CreatePanelButton(header, 54, 16, "+ Évt")
-addGlobalEventBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
-addGlobalEventBtn:SetFrameLevel(header:GetFrameLevel() + 2)
-addGlobalEventBtn:SetScript("OnClick", function()
+function C:OpenGlobalEventPopup()
     if OpenEventPopup then OpenEventPopup(nil) end
-end)
-addGlobalEventBtn:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine("Ajouter un évènement général", unpack(UI.colors.title))
-    GameTooltip:AddLine("Dissocié de tout participant : décompte une fois par tour de table complet, peu importe qui joue en premier.", unpack(UI.colors.textMuted))
-    GameTooltip:Show()
-end)
-addGlobalEventBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-addGlobalEventBtn:Hide()
+end
 
 -- The start-of-round resolution precedes the participant row.
 local function MakeResolutionStep(phase,label)
-    local button=UI.CreatePanelButton(banner,30,CARD_H,"")
+    local button=CreateFrame("Button",nil,banner)
+    button:SetSize(44,BANNER_H)
+    ApplyInitiativeFrame(button)
     local symbol=button:CreateTexture(nil,"OVERLAY")
-    symbol:SetSize(28,28);symbol:SetPoint("CENTER",0,0)
-    symbol:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResolutionSigil.tga")
+    symbol:SetSize(34,34);symbol:SetPoint("CENTER",0,-2)
+    symbol:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResolutionHourglass.tga")
+    local elapsed=0
+    local function DrawHourglass(frame)
+        local col,row=frame%8,math.floor(frame/8)
+        symbol:SetTexCoord(col/8,(col+1)/8,row/8,(row+1)/8)
+    end
+    DrawHourglass(0)
+    local function AnimateHourglass(_,dt)
+        elapsed=(elapsed+dt)%3.2
+        DrawHourglass(math.floor(elapsed/3.2*64))
+    end
+    local validate=button:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    validate:SetPoint("BOTTOM",0,10);validate:SetText("Valider")
+    UI.ApplyTitle(validate);validate:Hide()
     local selected=button:CreateTexture(nil,"ARTWORK")
-    selected:SetAllPoints();selected:SetColorTexture(.78,.59,.24,.28)
+    selected:SetPoint("TOPLEFT",8,-22);selected:SetPoint("BOTTOMRIGHT",-8,8)
+    selected:SetColorTexture(.78,.59,.24,.10)
     selected:Hide()
     button:SetScript("OnClick",function()
         if C.initiative.isHost and C.initiative.phase==phase then C:NextTurn() end
@@ -178,8 +199,13 @@ local function MakeResolutionStep(phase,label)
     function button:Refresh()
         local active=C.initiative.phase==phase
         selected:SetShown(active)
+        validate:SetShown(active and C.initiative.isHost)
+        self:SetScript("OnUpdate",active and AnimateHourglass or nil)
+        if not active then elapsed=0;DrawHourglass(0) end
         self:SetAlpha(active and 1 or .55)
     end
+    button:SetScript("OnHide",function(self) self:SetScript("OnUpdate",nil);elapsed=0;DrawHourglass(0) end)
+    button:SetScript("OnShow",function(self) self:Refresh() end)
     return button
 end
 local startResolution=MakeResolutionStep("resolve_start","entre deux tours")
@@ -188,7 +214,6 @@ startResolution:SetPoint("TOPLEFT",banner,"TOPRIGHT",6,0)
 local stateHeading=startResolution:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
 stateHeading:SetPoint("CENTER",startResolution,"TOP",0,-HEADER_H/2)
 stateHeading:SetText("États");UI.ApplyTitle(stateHeading)
-UI.ApplyBorder(startResolution)
 
 -- ── Saisie "Initiative" (à gauche) ───────────────────────────────────────────
 
@@ -226,7 +251,8 @@ local function MakeCard(parent)
 
     local cbg = card:CreateTexture(nil, "BACKGROUND")
     cbg:SetAllPoints()
-    cbg:SetColorTexture(unpack(UI.colors.rowBg))
+    cbg:SetColorTexture(0,0,0,0)
+    ApplyInitiativeFrame(card)
 
     -- Surbrillance légère quand ce participant est sélectionné dans le
     -- Gestionnaire de ressources (Vue MJ) : juste un repère visuel pour le
@@ -249,9 +275,17 @@ local function MakeCard(parent)
     icon:AddMaskTexture(iconMask)
     card.icon = icon
     local portraitRim=card:CreateTexture(nil,"OVERLAY")
-    portraitRim:SetSize(CARD_W-6,CARD_W-6)
+    portraitRim:SetSize(CARD_W-5,CARD_W-5)
     portraitRim:SetPoint("CENTER",icon,"CENTER",0,0)
     portraitRim:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\InitiativeRing.tga")
+
+    local valuePlate=card:CreateTexture(nil,"ARTWORK")
+    valuePlate:SetPoint("BOTTOMLEFT",12,4);valuePlate:SetPoint("BOTTOMRIGHT",-12,4)
+    valuePlate:SetHeight(15);valuePlate:SetColorTexture(.018,.026,.039,.96)
+    local valueRule=card:CreateTexture(nil,"ARTWORK")
+    valueRule:SetPoint("BOTTOMLEFT",valuePlate,"BOTTOMLEFT",2,0)
+    valueRule:SetPoint("BOTTOMRIGHT",valuePlate,"BOTTOMRIGHT",-2,0)
+    valueRule:SetHeight(1);valueRule:SetColorTexture(.72,.57,.32,.8)
 
     -- Juste la valeur d'initiative suffit, pas besoin du nom.
     local initFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -259,7 +293,8 @@ local function MakeCard(parent)
     initFS:SetPoint("TOPRIGHT", card, "TOPRIGHT", -2, -(CARD_W - 4))
     initFS:SetJustifyH("CENTER")
     initFS:SetWordWrap(false)
-    UI.ApplyBodyText(initFS)
+    UI.ApplyTitle(initFS)
+    initFS:SetShadowColor(0,0,0,1);initFS:SetShadowOffset(1,-1)
     card.initFS = initFS
 
     local closeBtn = UI.CreateCloseButton(card, nil)
@@ -278,7 +313,7 @@ local function MakeCard(parent)
     -- C:AddEvent peut réellement l'enregistrer).
     local addEventBtn = CreateFrame("Button", nil, card)
     addEventBtn:SetSize(12, 12)
-    addEventBtn:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", -2, -2)
+    addEventBtn:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 1, 2)
     local aebBg = addEventBtn:CreateTexture(nil, "BACKGROUND")
     aebBg:SetAllPoints()
     aebBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
@@ -311,7 +346,7 @@ local function MakeCard(parent)
     -- MakeEventCard).
     local eventBadge = CreateFrame("Frame", nil, card)
     eventBadge:SetSize(14, 12)
-    eventBadge:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 2, -2)
+    eventBadge:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -1, 2)
     eventBadge:EnableMouse(true)
     local ebBg = eventBadge:CreateTexture(nil, "BACKGROUND")
     ebBg:SetAllPoints()
@@ -538,9 +573,9 @@ roundBox:SetPoint("TOPLEFT", startResolution, "TOPRIGHT", 6, 0)
 
 local roundBoxBg = roundBox:CreateTexture(nil, "BACKGROUND")
 roundBoxBg:SetAllPoints()
-UI.ApplyWindowBackground(roundBoxBg)
+roundBoxBg:SetColorTexture(0,0,0,0)
 roundBox.bg = roundBoxBg
-UI.ApplyBorder(roundBox)
+ApplyInitiativeFrame(roundBox)
 banner.roundBox = roundBox
 
 local roundLabel = roundBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1249,13 +1284,13 @@ end
 local turnMarker=CreateFrame("Frame",nil,banner)
 turnMarker:SetFrameLevel(banner:GetFrameLevel()+20)
 turnMarker:EnableMouse(false)
-for _,edge in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
+-- Open corner accents preserve the sliding marker without boxing in portraits.
+for _,corner in ipairs({"TOPLEFT","TOPRIGHT","BOTTOMLEFT","BOTTOMRIGHT"}) do
+    for _,horizontal in ipairs({true,false}) do
     local line=turnMarker:CreateTexture(nil,"OVERLAY")
     line:SetColorTexture(unpack(UI.colors.turnHighlight))
-    if edge=="TOP" or edge=="BOTTOM" then
-        line:SetPoint(edge.."LEFT");line:SetPoint(edge.."RIGHT");line:SetHeight(2)
-    else
-        line:SetPoint("TOP"..edge);line:SetPoint("BOTTOM"..edge);line:SetWidth(2)
+    line:SetPoint(corner,turnMarker,corner,0,0)
+    line:SetSize(horizontal and 9 or 2,horizontal and 2 or 9)
     end
 end
 turnMarker:Hide()
@@ -1328,7 +1363,7 @@ local function Rebuild()
     local participants = st.participants or {}
     local current = participants[st.currentIndex]
 
-    addGlobalEventBtn:SetShown(st.isHost)
+
     roundBox:Refresh()
     local phase=C.initiative.phase
     startResolution:Refresh()
@@ -1382,9 +1417,9 @@ local function Rebuild()
 
     local width=math.max(200,x+6)
     banner:SetWidth(width)
-    if phase=="resolve_start" then
+    if phase=="resolve_start" or phase=="resolution_end" then
         MoveTurnMarker(width+6,0,44,BANNER_H)
-    elseif phase=="transition" then
+    elseif phase=="counter_focus" or phase=="round_end" or phase=="transition" or phase=="round_start" then
         MoveTurnMarker(width+56,0,ROUND_BOX_W,BANNER_H)
     elseif activeX then
         MoveTurnMarker(activeX,-HEADER_H-5,CARD_W,CARD_H)
@@ -1438,7 +1473,8 @@ function NextNotice()
         phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil)
     end
 end
-function PlayNotice(title,detail,fromPhase,sticky)
+function PlayNotice(title,detail,fromPhase,sticky,duration)
+    duration=duration or 4
     local current=phaseNotice.current
     if fromPhase and current and current[3] and phaseNotice:IsShown() then table.insert(noticeQueue,1,current) end
     phaseNotice.fromPhase=fromPhase
@@ -1473,8 +1509,8 @@ function PlayNotice(title,detail,fromPhase,sticky)
             if elapsed>=.2 then self:SetScript("OnUpdate",nil) end
             return
         end
-        self:SetAlpha(math.max(0,math.min(1,elapsed/.2,(4-elapsed)/.5)))
-        if elapsed>=4 then NextNotice() end
+        self:SetAlpha(math.max(0,math.min(1,elapsed/.2,(duration-elapsed)/.5)))
+        if elapsed>=duration then NextNotice() end
     end)
 end
 -- sticky : reste affiché jusqu'à la croix (états du personnage).
@@ -1496,10 +1532,14 @@ local function RefreshPhaseNotice()
     local first=lastNoticeKey==nil
     lastNoticeKey=key
     local title,detail
-    if phase=="transition" then
-        title="Début du tour "..st.round;detail=""
+    if phase=="resolution_end" then
+        title="Fin de résolution d’état";detail=""
+    elseif phase=="round_end" then
+        title="Fin du tour "..st.round;detail=""
     elseif phase=="resolve_start" then
-        title="Fin du tour "..st.round;detail="Résolution d'états · Validation du MJ"
+        title="Phase de résolution d'état";detail=""
+    elseif phase=="round_start" then
+        title="Début du tour "..st.round;detail=""
     elseif first then
         title="Début du tour "..st.round;detail="Le combat commence"
     else
@@ -1507,7 +1547,8 @@ local function RefreshPhaseNotice()
         if phaseNotice.fromPhase then NextNotice() end
         return
     end
-    PlayNotice(title,detail,true)
+    local duration=phase=="round_start" and 1 or phase=="round_end" and 1.5 or phase=="resolution_end" and 1.2 or nil
+    PlayNotice(title,detail,true,nil,duration)
 end
 
 local function Refresh()

@@ -80,9 +80,19 @@ local function Encode(db,editors)
     end
     local payload=Field(count)..table.concat(parts)
     local names={};for name in pairs(editors or {}) do names[#names+1]=name end;table.sort(names)
-    if #names>0 then
+    local usable={}
+    for _,category in ipairs(categories) do
+        for name,skill in pairs(db[category] or {}) do
+            if skill.usable==true then usable[#usable+1]={category,name} end
+        end
+    end
+    if #names>0 or #usable>0 then
         payload=payload..Field(#names)
         for _,name in ipairs(names) do payload=payload..Field(name) end
+    end
+    if #usable>0 then
+        payload=payload..Field("U1")..Field(#usable)
+        for _,entry in ipairs(usable) do payload=payload..Field(entry[1])..Field(entry[2]) end
     end
     if #payload>MAX_BYTES then return nil,"Bibliothèque trop volumineuse (128 Ko maximum)" end
     return payload
@@ -115,6 +125,17 @@ local function Decode(payload)
             local name=Read(64)
             if not name or not name:match("^[^%-]+%-%S+$") then return end
             editors[name]=true
+        end
+    end
+    if pos<=#payload then
+        if Read(2)~="U1" then return end
+        local raw=Read(3);local total=raw and tonumber(raw)
+        if not total or total%1~=0 or total<0 or total>MAX_SKILLS then return end
+        for i=1,total do
+            local category,name=Read(16),Read(128)
+            local skill=category and name and db[category] and db[category][name]
+            if not skill or skill.usable then return end
+            skill.usable=true
         end
     end
     if pos~=#payload+1 then return end

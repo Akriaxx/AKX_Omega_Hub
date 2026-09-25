@@ -429,8 +429,19 @@ impactStatus:Hide()
 -- Enfants d'impactPanel : ils apparaissent/disparaissent avec lui automatiquement.
 
 local combatToggleBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Début de combat")
-combatToggleBtn:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -248)
 combatToggleBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+local combatTint=combatToggleBtn:CreateTexture(nil,"ARTWORK")
+combatTint:SetAllPoints()
+combatTint:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga")
+local function RefreshCombatTint(hover)
+    if C.initiative.active then
+        combatTint:SetVertexColor(hover and .65 or .46,.10,.09,1)
+    else
+        combatTint:SetVertexColor(.08,hover and .48 or .33,.16,1)
+    end
+end
+combatToggleBtn:HookScript("OnEnter",function() RefreshCombatTint(true) end)
+combatToggleBtn:HookScript("OnLeave",function() RefreshCombatTint(false) end)
 combatToggleBtn:SetScript("OnClick", function()
     if C.initiative.active then
         -- "Fin de combat" ne fait rien si un AUTRE client est l'hôte (combat
@@ -445,7 +456,7 @@ combatToggleBtn:SetScript("OnClick", function()
 end)
 
 local nextTurnBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Joueur suivant")
-nextTurnBtn:SetPoint("TOPLEFT", combatToggleBtn, "BOTTOMLEFT", 0, -4)
+nextTurnBtn:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", 10, -248)
 nextTurnBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 nextTurnBtn:SetScript("OnClick", function()
     if not C:NextTurn() and not C.initiative.isHost and ShowImpactStatus then
@@ -453,8 +464,15 @@ nextTurnBtn:SetScript("OnClick", function()
     end
 end)
 
+local addGlobalEventBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Ajouter un événement global")
+addGlobalEventBtn:SetPoint("TOPLEFT", nextTurnBtn, "BOTTOMLEFT", 0, -4)
+addGlobalEventBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+addGlobalEventBtn:SetScript("OnClick", function()
+    if C.OpenGlobalEventPopup then C:OpenGlobalEventPopup() end
+end)
+
 local addNpcBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Rajouter un NPC")
-addNpcBtn:SetPoint("TOPLEFT", nextTurnBtn, "BOTTOMLEFT", 0, -4)
+addNpcBtn:SetPoint("TOPLEFT", addGlobalEventBtn, "BOTTOMLEFT", 0, -4)
 addNpcBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 
 -- Rouvre le panneau "Vue MJ — PNJ" une fois fermé : sans ce bouton, le
@@ -467,13 +485,14 @@ togglePnjBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 togglePnjBtn:SetScript("OnClick", function()
     if TogglePnjPanel then TogglePnjPanel() end
 end)
+combatToggleBtn:SetPoint("TOPLEFT",togglePnjBtn,"BOTTOMLEFT",0,-16)
 
 -- Qui pilote le combat : sans ça, un non-hôte qui clique Fin de combat /
 -- Joueur suivant / Rajouter un NPC pendant qu'un combat est en cours ne
 -- comprend pas pourquoi rien ne se passe (ces actions n'ont d'effet que
 -- pour l'hôte, celui qui a cliqué Début de combat).
 local hostStatus = impactPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-hostStatus:SetPoint("TOPLEFT", togglePnjBtn, "BOTTOMLEFT", 2, -3)
+hostStatus:SetPoint("TOPLEFT", combatToggleBtn, "BOTTOMLEFT", 2, -3)
 hostStatus:SetPoint("RIGHT", impactPanel, "RIGHT", -10, 0)
 hostStatus:SetJustifyH("LEFT")
 UI.ApplyMutedText(hostStatus)
@@ -661,18 +680,20 @@ local function RefreshCombatControls()
     local hasParticipants = #C.initiative.participants > 0
 
     combatToggleBtn:SetText(active and "Fin de combat" or "Début de combat")
+    RefreshCombatTint(false)
     local phase = C.initiative.phase
-    nextTurnBtn:SetText(phase == "resolve_start" and "Valider les états / Jouer" or phase == "transition" and "Changement de tour…" or "Joueur suivant")
+    nextTurnBtn:SetText(phase == "resolve_start" and "Valider les états" or phase == "round_end" and "Fin de tour…" or phase == "transition" and "Changement de tour…" or C.initiative._roundTransition and "Transition de tour…" or "Joueur suivant")
     nextTurnBtn:SetEnabled(active and hasParticipants and not C.initiative._roundTransition)
     nextTurnBtn:SetAlpha((active and hasParticipants) and 1 or 0.45)
     addNpcBtn:SetAlpha(active and 1 or 0.45)
+    addGlobalEventBtn:SetEnabled(active and C.initiative.isHost)
     if not active then npcPopup:Hide() end
 
     if active then
-        impactPanel:SetHeight(362)
+        impactPanel:SetHeight(398)
         hostStatus:SetText(C.initiative.isHost and "Hôte : vous" or "Hôte : un autre MJ")
     else
-        impactPanel:SetHeight(346)
+        impactPanel:SetHeight(382)
         hostStatus:SetText("")
     end
 end

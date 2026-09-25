@@ -134,7 +134,7 @@ C:ToggleGroupView();assert(not CharacterGroupViewPanel:IsShown())
 dofile('Modules/Character/UI_MJ.lua')
 dofile('Modules/Character/UI_Initiative.lua')
 assert(CharacterMJPanel:GetWidth()==276)
-assert(CharacterMJImpactPanel:GetHeight()==346)
+assert(CharacterMJImpactPanel:GetHeight()==382)
 -- Annonce commune (Début du tour, conditions) : les messages attendent leur tour.
 function M:SetFont(path,size) self.fontPath=path;self.fontSize=size;return true end
 C:ShowNotice('Premier','a');C:ShowNotice('Second','b')

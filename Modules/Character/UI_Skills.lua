@@ -11,6 +11,45 @@
 local C = Character
 local UI = C.RPGUI or OS2.UI
 
+-- Bouton de fermeture rond (anneau doré, croix fine) : cartes ouvertes
+-- depuis le chat et fenêtre « Utiliser ».
+function C:CreateRoundCloseButton(parent,onClick)
+    local close=CreateFrame("Button",nil,parent)
+    close:SetSize(20,20)
+    local closeMask=close:CreateMaskTexture()
+    closeMask:SetAllPoints()
+    closeMask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask","CLAMPTOBLACKADDITIVE","CLAMPTOBLACKADDITIVE")
+    local closeBg=close:CreateTexture(nil,"BACKGROUND")
+    closeBg:SetAllPoints();closeBg:SetColorTexture(.025,.035,.055,1);closeBg:AddMaskTexture(closeMask)
+    local closeRim=close:CreateTexture(nil,"ARTWORK")
+    closeRim:SetAllPoints()
+    closeRim:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\InitiativeRing.tga")
+    closeRim:SetVertexColor(.75,.64,.43,.85)
+    local strokes={}
+    for i=1,2 do
+        local stroke=close:CreateTexture(nil,"OVERLAY")
+        stroke:SetSize(9,1.4);stroke:SetPoint("CENTER")
+        stroke:SetColorTexture(.88,.76,.52,1)
+        stroke:SetRotation(i==1 and math.pi/4 or -math.pi/4)
+        strokes[i]=stroke
+    end
+    close:SetScript("OnClick",onClick)
+    local function CloseStyle(hover,pressed)
+        closeBg:SetColorTexture(hover and .15 or .025,hover and .12 or .035,hover and .07 or .055,1)
+        closeRim:SetVertexColor(hover and 1 or .75,hover and .9 or .64,hover and .65 or .43,1)
+        for _,stroke in ipairs(strokes) do
+            stroke:SetColorTexture(hover and 1 or .88,hover and .92 or .76,hover and .72 or .52,1)
+            stroke:SetSize(pressed and 7 or 9,1.4)
+        end
+    end
+    close:SetScript("OnEnter",function() CloseStyle(true,false) end)
+    close:SetScript("OnLeave",function() CloseStyle(false,false) end)
+    close:SetScript("OnMouseDown",function() CloseStyle(true,true) end)
+    close:SetScript("OnMouseUp",function() CloseStyle(true,false) end)
+    close:SetScript("OnHide",function() CloseStyle(false,false) end)
+    return close
+end
+
 C.SKILL_CATEGORIES = {
     { key = "base",      label = "Actions de base",       tag = "Action",    aliases = { "action" } },
     { key = "offensive", label = "Compétence Offensive",  tag = "Offensive", aliases = { "offensive" } },
@@ -178,10 +217,10 @@ function C:ListAllSkills(catKey)
     local list, seen = {}, {}
     local function add(categories, owner)
         for _, skill in pairs(categories and categories[catKey] or {}) do
-            local key = self:StripSkillMarkup(skill.name):lower() .. "\0" .. tostring(skill.icon) .. "\0" .. tostring(skill.description)
+            local key = self:StripSkillMarkup(skill.name):lower() .. "\0" .. tostring(skill.icon) .. "\0" .. tostring(skill.description) .. "\0" .. tostring(skill.usable == true)
             if not seen[key] then
                 seen[key] = true
-                list[#list + 1] = { name = skill.name, icon = skill.icon, description = skill.description, owner = owner }
+                list[#list + 1] = { name = skill.name, icon = skill.icon, description = skill.description, usable = skill.usable == true, owner = owner }
             end
         end
     end
@@ -287,7 +326,7 @@ function C:SkillOwnerSuffix(skill)
 end
 
 -- oldName nil/absent = création ; renommage géré en retirant l'ancienne clé.
-function C:SaveSkill(catKey, oldName, name, icon, description)
+function C:SaveSkill(catKey, oldName, name, icon, description, usable)
     if self:IsSkillLibraryReadOnly() then return false,"Lecture seule : seuls le créateur et ses éditeurs peuvent modifier" end
     if not FindCategory(catKey) then return false, "Catégorie inconnue" end
     name = tostring(name or ""):match("^%s*(.-)%s*$")
@@ -300,6 +339,7 @@ function C:SaveSkill(catKey, oldName, name, icon, description)
         name = name,
         icon = (icon and icon ~= "") and icon or "Interface\\Icons\\INV_Misc_QuestionMark",
         description = description or "",
+        usable = usable == true,
     }
     if self.OnSkillsChanged then self.OnSkillsChanged() end
     return true
@@ -565,6 +605,15 @@ local function GetCard(depth)
     -- la carte grandit par-dessus et le dévoile (panneau de données).
     local content = CreateFrame("Frame", nil, card)
     card.content = content
+    -- Sibling of the clipped card so its corner ornament can protrude.
+    local close=C:CreateRoundCloseButton(UIParent,function() card:Hide() end)
+    close:SetFrameStrata("TOOLTIP")
+    card.closeButton=close
+    close:SetPoint("CENTER",card,"TOPRIGHT",-2,-2)
+    card.closeButton:Hide()
+    if depth==1 and UISpecialFrames then
+        UISpecialFrames[#UISpecialFrames+1]="CharacterSkillCard1"
+    end
     card.title = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     card.title:SetPoint("TOP", 0, -11)
     card.title:SetJustifyH("CENTER"); card.title:SetWordWrap(false)
@@ -573,6 +622,46 @@ local function GetCard(depth)
     rule:SetPoint("TOPLEFT", CARD_PAD, -CARD_HEAD); rule:SetPoint("TOPRIGHT", -CARD_PAD, -CARD_HEAD)
     rule:SetHeight(1); UI.ApplySeparator(rule, true)
     card.rule = rule
+    local use=CreateFrame("Button",nil,content)
+    card.useButton=use
+    use:SetSize(132,32)
+    use:SetPoint("BOTTOM",content,"BOTTOM",0,12)
+    BuildCardFrame(use)
+    use.gem:SetSize(7,18);use.gem:SetPoint("CENTER",use,"LEFT",1,0)
+    local rightGem=use:CreateTexture(nil,"OVERLAY",nil,2)
+    rightGem:SetTexture(CARD_GEM);rightGem:SetSize(7,18)
+    rightGem:SetPoint("CENTER",use,"RIGHT",-1,0)
+    local glow=use:CreateTexture(nil,"ARTWORK")
+    glow:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Nexus\\NexusGlow")
+    glow:SetBlendMode("ADD");glow:SetPoint("CENTER");glow:SetSize(122,30);glow:SetAlpha(.12)
+    local emblem=use:CreateTexture(nil,"OVERLAY")
+    emblem:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Nexus\\IconActions")
+    emblem:SetSize(20,20);emblem:SetPoint("LEFT",12,0)
+    local label=use:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    label:SetPoint("CENTER",9,0);label:SetText("Utiliser")
+    label:SetTextColor(.94,.81,.53);label:SetShadowColor(0,0,0,1);label:SetShadowOffset(1,-1)
+    local shine,target=.12,.12
+    local function FadeTo(value)
+        target=value
+        use:SetScript("OnUpdate",function(self,dt)
+            local step=dt*3
+            if shine<target then shine=math.min(target,shine+step) else shine=math.max(target,shine-step) end
+            glow:SetAlpha(shine)
+            if shine==target then self:SetScript("OnUpdate",nil) end
+        end)
+    end
+    use:SetScript("OnEnter",function() FadeTo(.6);label:SetTextColor(1,.93,.72) end)
+    use:SetScript("OnLeave",function() FadeTo(.12);label:SetTextColor(.94,.81,.53) end)
+    use:SetScript("OnMouseDown",function() label:SetPoint("CENTER",9,-1);glow:SetAlpha(.8) end)
+    use:SetScript("OnMouseUp",function() label:SetPoint("CENTER",9,0);glow:SetAlpha(shine) end)
+    use:SetScript("OnHide",function(self)
+        self:SetScript("OnUpdate",nil);shine=.12;target=.12;glow:SetAlpha(.12)
+        label:SetPoint("CENTER",9,0);label:SetTextColor(.94,.81,.53)
+    end)
+    card.useButton:SetScript("OnClick",function()
+        if card.skill and C.OpenSkillUse then C:OpenSkillUse(card.skill) end
+    end)
+    card.useButton:Hide()
     -- Filet de balayage sur le bord qui avance pendant l'ouverture.
     card.edge = card:CreateTexture(nil, "OVERLAY")
     card.edge:SetColorTexture(.85, .70, .42, 1)
@@ -581,6 +670,7 @@ local function GetCard(depth)
     -- Corps : texte enrichi (C.RichText), blanc par défaut, posé dans le contenu.
     C:EnableSkillLinks(content, depth)
     card:SetScript("OnHide", function()
+        card.closeButton:Hide()
         card.linkHovered = false
         card:SetScript("OnUpdate", nil)
         card.flux:Hide()
@@ -660,6 +750,8 @@ end
 
 function ShowCard(depth, anchor, skill)
     local card = GetCard(depth)
+    local fromChat=depth==1 and anchor.isSkillChatAnchor
+    card.closeButton:SetShown(fromChat or false)
     if cards[depth + 1] then cards[depth + 1]:Hide() end
     local content = card.content
     -- Fiche de consultation : le nom seul, sans son créateur.
@@ -679,6 +771,10 @@ function ShowCard(depth, anchor, skill)
     card.title:SetWidth(width - CARD_PAD * 2)
     local _, bodyHeight = RT.Render(content, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
     local height = body ~= "" and (CARD_HEAD + 18 + bodyHeight) or CARD_HEAD + 8
+    card.skill=skill
+    local usable=skill.usable == true and not skill.missing
+    card.useButton:SetShown(usable)
+    if usable then height=height+46 end
     card.rule:SetShown(body ~= "")
     content:SetSize(width, height)
 
@@ -693,6 +789,7 @@ function ShowCard(depth, anchor, skill)
         card.linkY = cy and cy / UIParent:GetEffectiveScale() or nil
     end
     card:SetFrameLevel((below:GetFrameLevel() or 0) + 20)
+    card.closeButton:SetFrameLevel(card:GetFrameLevel()+3)
     card:ClearAllPoints()
     local side = "UP"
     if depth == 1 then
@@ -753,6 +850,7 @@ local LIST_W = 196
 local panel, tabButtons, listContent, listViewport
 local nameEB, iconEB, iconPreview, descEB, descPreview, statusFS, colorTarget
 local searchEB, listCount, descViewport, previewViewport
+local usableCB
 local saveControl,deleteControl
 local pendingDelete
 local activeCat, editingName
@@ -768,6 +866,7 @@ end
 
 local function ClearForm()
     editingName = nil
+    if usableCB then usableCB:SetChecked(false) end
     pendingDelete=nil
     nameEB:SetText("")
     iconEB:SetText("")
@@ -780,6 +879,7 @@ end
 local function LoadIntoForm(skill)
     SetFormShown(true)
     editingName = skill.name
+    if usableCB then usableCB:SetChecked(skill.usable == true) end
     pendingDelete=nil
     if descViewport then descViewport:SetVerticalScroll(0) end
     if previewViewport then previewViewport:SetVerticalScroll(0) end
@@ -1453,6 +1553,7 @@ local function Build()
         rightsBtn:SetShown(selectedOwner==nil)
         if rightsPanel and selectedOwner then rightsPanel:Hide() end
         if saveControl then saveControl:SetEnabled(editable);deleteControl:SetEnabled(editable) end
+        if usableCB then usableCB:SetEnabled(editable) end
     end
     local libraryMenu
     local libraryRows={}
@@ -1695,6 +1796,10 @@ local function Build()
         iconPreview.tex:SetTexture(C:ResolveIconValue(self:GetText()) or "Interface\\Icons\\INV_Misc_QuestionMark")
     end)
 
+    usableCB = UI.CreateStyledCheckbox(panel,"Utilisable")
+    usableCB:SetPoint("TOPRIGHT",panel,"TOPRIGHT",-100,-140)
+    usableCB:SetChecked(false)
+    panel.usableCB=usableCB
     local descLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     descLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -150)
     descLbl:SetText("Description"); UI.ApplyLabel(descLbl)
@@ -1886,7 +1991,7 @@ local function Build()
     saveControl=saveBtn
     saveBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", formX, 32)
     saveBtn:SetScript("OnClick", function()
-        local ok, err = C:SaveSkill(activeCat.key, editingName, nameEB:GetText(), iconEB:GetText(), descEB:GetText())
+        local ok, err = C:SaveSkill(activeCat.key, editingName, nameEB:GetText(), iconEB:GetText(), descEB:GetText(), usableCB:GetChecked())
         if ok then
             ShowStatus("Enregistré")
             editingName = nameEB:GetText():match("^%s*(.-)%s*$")
