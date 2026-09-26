@@ -80,19 +80,27 @@ local function Encode(db,editors)
     end
     local payload=Field(count)..table.concat(parts)
     local names={};for name in pairs(editors or {}) do names[#names+1]=name end;table.sort(names)
-    local usable={}
+    local usable,costs={},{}
     for _,category in ipairs(categories) do
         for name,skill in pairs(db[category] or {}) do
             if skill.usable==true then usable[#usable+1]={category,name} end
+            if skill.cost then
+                if not C:ValidateSkillCost(skill.cost) then return nil,"Coût invalide" end
+                costs[#costs+1]={category,name,skill.cost}
+            end
         end
     end
-    if #names>0 or #usable>0 then
+    if #names>0 or #usable>0 or #costs>0 then
         payload=payload..Field(#names)
         for _,name in ipairs(names) do payload=payload..Field(name) end
     end
-    if #usable>0 then
+    if #usable>0 or #costs>0 then
         payload=payload..Field("U1")..Field(#usable)
         for _,entry in ipairs(usable) do payload=payload..Field(entry[1])..Field(entry[2]) end
+    end
+    if #costs>0 then
+        payload=payload..Field("C1")..Field(#costs)
+        for _,entry in ipairs(costs) do payload=payload..Field(entry[1])..Field(entry[2])..Field(entry[3].resource)..Field(entry[3].amount) end
     end
     if #payload>MAX_BYTES then return nil,"Bibliothèque trop volumineuse (128 Ko maximum)" end
     return payload
@@ -136,6 +144,18 @@ local function Decode(payload)
             local skill=category and name and db[category] and db[category][name]
             if not skill or skill.usable then return end
             skill.usable=true
+        end
+    end
+    if pos<=#payload then
+        if Read(2)~="C1" then return end
+        local raw=Read(3);local total=raw and tonumber(raw)
+        if not total or total%1~=0 or total<0 or total>MAX_SKILLS then return end
+        for i=1,total do
+            local category,name,resource,amount=Read(16),Read(128),Read(16),Read(7)
+            local skill=category and name and db[category] and db[category][name]
+            local cost={resource=resource,amount=tonumber(amount)}
+            if not skill or skill.cost or not C:ValidateSkillCost(cost) then return end
+            skill.cost=cost
         end
     end
     if pos~=#payload+1 then return end

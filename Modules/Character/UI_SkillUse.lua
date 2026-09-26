@@ -5,7 +5,7 @@ local UI=C.RPGUI or OS2.UI
 local popup,edit,errorText,viewport
 
 local function Signature(skill)
-    return tostring(skill.name).."\0"..tostring(skill.icon).."\0"..tostring(skill.description).."\0"..tostring(skill.usable==true)
+    return tostring(skill.name).."\0"..tostring(skill.icon).."\0"..tostring(skill.description).."\0"..tostring(skill.usable==true)..C:SkillCostKey(skill)
 end
 function C:SkillChatID(skill)
     local a,b=5381.0,7919.0
@@ -47,7 +47,23 @@ function C:PrepareSkillRaidMessage(text,skill)
     text=text:sub(1,start-1)..marker..text:sub(finish+1)
     text=text:gsub("[\r\n]+"," ")
     if text:find("[|]") then return nil,"Utilisez du texte simple autour du lien." end
+    -- Le coût termine toujours l'émote, même déplacé ou effacé à la saisie.
+    local tag=self:SkillCostTag(skill)
+    if tag then
+        local start,finish=text:find(tag,1,true)
+        while start do
+            text=text:sub(1,start-1)..text:sub(finish+1)
+            start,finish=text:find(tag,1,true)
+        end
+        text=text:gsub("%s+$","").." "..tag
+    end
     return text
+end
+-- Coût en abrégé, écrit en dernier dans l'émote : [Coût : 50 MP].
+function C:SkillCostTag(skill)
+    local cost=skill and skill.cost
+    if not cost then return end
+    return "[Coût : "..cost.amount.." "..(({hp="HP",mana="MP",endurance="End."})[cost.resource] or "").."]"
 end
 -- Split on words where possible, never inside UTF-8 or an Omega reference.
 function C:SplitSkillRaidMessage(text)
@@ -77,9 +93,30 @@ function C:SendSkillRaidMessage(message)
     for _,chunk in ipairs(self:SplitSkillRaidMessage(message)) do outgoing[#outgoing+1]=chunk end
     if not busy then busy=true;SendNext() end
 end
+function C:SetSkillCostReservation(cost)
+    self.skillCostReservation=cost and {resource=cost.resource,amount=cost.amount} or nil
+    if CharacterResourceHUD and CharacterResourceHUD.Refresh then CharacterResourceHUD:Refresh() end
+end
+function C:CanPaySkillCost(cost)
+    if not cost then return true end
+    if not self:ValidateSkillCost(cost) then return false end
+    local stat=self:GetMyChar()[cost.resource]
+    return stat and (stat.cur or 0)+(stat.temp or 0)>=cost.amount
+end
+-- « La Vie n'est pas suffisante… » : la ressource dans sa couleur de jauge.
+local SHORTFALL={
+    hp={"La ","Vie","statHP","e"},mana={"Le ","Mana","statMana",""},endurance={"L’","Endurance","statEnd","e"},
+}
+function C:SkillCostShortfallText(cost)
+    local entry=SHORTFALL[cost and cost.resource] or SHORTFALL.mana
+    local color=(UI.colors[entry[3]] or {}).fg or {1,1,1}
+    local hex=string.format("%02x%02x%02x",math.floor(color[1]*255+.5),math.floor(color[2]*255+.5),math.floor(color[3]*255+.5))
+    return entry[1].."|cff"..hex..entry[2].."|r n’est pas suffisant"..entry[4].." pour lancer cette compétence."
+end
 function C:OpenSkillUse(skill)
     if not self.enabled or not skill or skill.usable~=true then return end
     self:HideSkillTooltip()
+    if popup then popup:Hide() end
     if not popup then
         popup=CreateFrame("Frame","CharacterSkillUsePopup",UIParent)
         popup:SetSize(540,302);popup:SetPoint("CENTER");popup:SetFrameStrata("DIALOG")
@@ -93,7 +130,7 @@ function C:OpenSkillUse(skill)
         viewport=CreateFrame("ScrollFrame",nil,popup)
         viewport:SetPoint("TOPLEFT",12,-36);viewport:SetSize(516,198)
         local field=viewport:CreateTexture(nil,"BACKGROUND")
-        field:SetAllPoints();field:SetColorTexture(.012,.019,.028,1);UI.ApplyBorder(viewport)
+        field:SetAllPoints();field:SetColorTexture(.012,.019,.028,1);UI.ApplyInputBorder(viewport)
         edit=CreateFrame("EditBox",nil,viewport)
         edit:SetSize(516,198);edit:SetMultiLine(true);edit:SetAutoFocus(false)
         edit:SetFontObject("GameFontHighlight");edit:SetTextInsets(10,10,8,8)
@@ -120,15 +157,25 @@ function C:OpenSkillUse(skill)
         edit:SetScript("OnEnterPressed",function()
             local message,err=C:PrepareSkillRaidMessage(edit:GetText(),popup.skill)
             if not message then errorText:SetText(err);return end
+            local cost=popup.skill.cost
+            if not C:CanPaySkillCost(cost) then errorText:SetText(C:SkillCostShortfallText(cost));return end
+            -- Commit once, only after message validation; cancel never edits stats.
+            C:SetSkillCostReservation(nil)
+            if cost then C:Delta(cost.resource,-cost.amount,true) end
             C:SendSkillRaidMessage(message)
             popup:Hide()
         end)
-        popup:SetScript("OnHide",function() edit:ClearFocus();popup.skill=nil end)
+        popup:SetScript("OnHide",function() edit:ClearFocus();popup.skill=nil;C:SetSkillCostReservation(nil) end)
     end
     popup.skill=skill
     local link=self:SkillChatLink(skill,self:SkillChatID(skill))
-    errorText:SetText("");edit:SetText("*Votre émote ici.* "..link);viewport:SetVerticalScroll(0)
-    popup:Show();edit:SetFocus();edit:HighlightText(0,0);edit:SetCursorPosition(0)
+    errorText:SetText("");local tag=self:SkillCostTag(skill)
+    local placeholder="Votre émote ici."
+    edit:SetText("*"..placeholder.."* "..link..(tag and (" "..tag) or ""));viewport:SetVerticalScroll(0)
+    -- Texte d'exemple déjà sélectionné entre les astérisques : il suffit
+    -- d'écrire (positions en octets, comme l'EditBox de WoW).
+    popup:Show();self:SetSkillCostReservation(skill.cost);edit:SetFocus()
+    edit:SetCursorPosition(1+#placeholder);edit:HighlightText(1,1+#placeholder)
 end
 
 function C:FilterSkillRaidMessage(message)

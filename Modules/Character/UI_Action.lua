@@ -5,7 +5,7 @@
 --  est retenu par personnage d'un /reload à l'autre. Apparaît au centre
 --  de l'écran la première fois, puis garde sa position glissée
 --  (par personnage, comme le portrait/ressources).
---  Clic : ouvre un triangle de 4 catégories (Offensive en haut,
+--  Clic : ouvre un losange de 5 catégories (Offensive en haut,
 --  Défensive en bas à droite, Distance en bas à gauche, Actions
 --  de base au centre). Clic sur une catégorie : le triangle se
 --  referme, le bouton pressé se pose à gauche, et une ligne
@@ -24,27 +24,29 @@ local BTN = 36
 local ICON = 29
 local GAP = 4
 
--- Icônes fixes des 4 catégories (pas éditables, contrairement aux
+-- Icônes fixes des 5 catégories (pas éditables, contrairement aux
 -- compétences elles-mêmes) + tooltip qui affiche le libellé complet.
 local CATEGORY_ICON = {
     offensive = "Interface\\Icons\\Ability_Warrior_Savageblow",
     defensive = "Interface\\Icons\\Ability_Defend",
     ranged    = "Interface\\Icons\\Ability_Marksmanship",
+    grimoire  = "Interface\\Icons\\INV_Misc_Book_09",
     base      = "Interface\\Icons\\INV_Misc_Gear_01",
 }
 -- Logo d'Eindhill (Media/EindhillLogo.blp, généré par Tests/logo-blp.py).
 local IDLE_ICON = "Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\EindhillLogo"
 
--- Décalages (centre-à-centre) des 4 boutons du triangle, relatifs au coin
+-- Décalages (centre-à-centre) des 5 boutons du losange, relatifs au coin
 -- TOPLEFT de `root`. "base" partage la position de repos (0,0) : c'est
--- elle qui occupe le centre du triangle ET la position repliée où
--- atterrissent les 3 autres catégories une fois sélectionnées.
+-- elle qui occupe le centre du losange ET la position repliée où
+-- atterrissent les 4 autres catégories une fois sélectionnées.
 local RESET_X, RESET_Y = BTN / 2, -BTN / 2
 local OFFSETS = {
     offensive = { 0, 70 },
-    ranged    = { -61, -35 },
-    defensive = { 61, -35 },
+    ranged    = { -70, 0 },
+    defensive = { 70, 0 },
     base      = { 0, 0 },
+    grimoire  = { 0, -70 },
 }
 
 -- Fenêtre indépendante (pas un enfant positionné sous le cadre) : elle
@@ -197,7 +199,7 @@ idleBtn:SetScript("OnEnter", function(self)
 end)
 idleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- ── Les 4 boutons de catégorie (positions du triangle OU repliées) ─────────
+-- ── Les 5 boutons de catégorie (positions du triangle OU repliées) ─────────
 local catButtons = {}
 for _, cat in ipairs(C.SKILL_CATEGORIES) do
   if not cat.hidden then -- l'Index n'a pas de place dans le triangle
@@ -219,15 +221,15 @@ for _, cat in ipairs(C.SKILL_CATEGORIES) do
   end
 end
 
--- An actual triangle plate, kept behind the four category buttons.
+-- Diamond plate behind the five category buttons.
 local plate=root:CreateTexture(nil,"BACKGROUND")
-plate:SetSize(172,152);plate:SetPoint("CENTER",root,"TOPLEFT",RESET_X,RESET_Y+12)
-plate:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ActionTriangle.tga")
+plate:SetSize(172,172);plate:SetPoint("CENTER",root,"TOPLEFT",RESET_X,RESET_Y)
+plate:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ActionDiamond.tga")
 plate:Hide()
 for key,b in pairs(catButtons) do
     local label=b:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     label:SetPoint("TOP",b,"BOTTOM",0,-4)
-    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Actions"})[key])
+    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Actions",grimoire="Grimoire"})[key])
     UI.ApplyTitle(label);b.label=label;label:Hide()
     -- Lisibilité sur la plaque et sur les icônes : ombre portée noire.
     label:SetShadowColor(0,0,0,1);label:SetShadowOffset(1.5,-1.5)
@@ -248,6 +250,11 @@ viewport:SetScrollChild(skillRow)
 local pageIndex,pageCount,targetWidth=0,1,72
 local RefreshSkillRow
 local pinnedSkill
+-- Épinglée = sa carte est encore affichée : une carte fermée ailleurs
+-- (« Utiliser », croix) libère la compétence, qui flotte de nouveau.
+local function IsPinned(b)
+    return pinnedSkill==b and C:IsSkillTooltipOpenFor(b)
+end
 local selectedKey,state=nil,"idle"
 local pageMotion
 local function ResetPageMotion()
@@ -321,12 +328,12 @@ RefreshSkillRow=function()
             b.hoverVeil:SetAlpha(0)
             b:SetScript("OnClick",function(self)
                 C:HideSkillName()
-                if pinnedSkill==self then pinnedSkill=nil;C:HideSkillTooltip();return end
+                if IsPinned(self) then pinnedSkill=nil;C:HideSkillTooltip();return end
                 pinnedSkill=self
                 C:ShowSkillTooltip(self,self.skill)
             end)
             -- Survol : le nom seul ; le clic ouvre la carte avec la description.
-            b:SetScript("OnEnter",function(self) if pinnedSkill~=self then C:ShowSkillName(self,self.skill) end end)
+            b:SetScript("OnEnter",function(self) if not IsPinned(self) then C:ShowSkillName(self,self.skill) end end)
             b:SetScript("OnLeave",function() C:HideSkillName() end)
         end
         b.skill=skill;b.tex:SetTexture(C:ResolveIconValue(skill.icon))
@@ -348,7 +355,7 @@ C.ActionFrames={
     viewport=viewport,skillButtons=skillButtons,empty=empty,
     BTN=BTN,ICON=ICON,RESET_X=RESET_X,RESET_Y=RESET_Y,OFFSETS=OFFSETS,
     -- Compétence ouverte (carte affichée) : l'habillage la fige au centre du flux.
-    IsPinned=function(b) return pinnedSkill==b end,
+    IsPinned=function(b) return IsPinned(b) end,
 }
 local function Place(b,x,y)
     b:ClearAllPoints();b:SetPoint("CENTER",root,"TOPLEFT",RESET_X+x,RESET_Y+y)
@@ -433,6 +440,8 @@ end
 idleBtn:SetScript("OnClick",function(_,mouse)
     if idleBtn.suppressClick or root.dragging or state=="animating" then return end
     if mouse=="RightButton" then C:ToggleActionLayout(idleBtn);return end
+    -- Maj + clic gauche : raccourci vers la bibliothèque de compétences.
+    if IsShiftKeyDown() then C:ToggleSkillsBuilder();return end
     ShowTriangle()
 end)
 for key,b in pairs(catButtons) do
@@ -542,7 +551,7 @@ local function BuildLayout()
         tab.cat = cat
         local label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         label:SetAllPoints(); label:SetJustifyH("CENTER")
-        label:SetText(({ base = "Actions", offensive = "Offensive", defensive = "Défensive", ranged = "Distance" })[cat.key] or cat.tag)
+        label:SetText(({ base = "Actions", offensive = "Offensive", defensive = "Défensive", ranged = "Distance", grimoire = "Grimoire" })[cat.key] or cat.tag)
         local line = tab:CreateTexture(nil, "ARTWORK")
         line:SetPoint("BOTTOMLEFT"); line:SetPoint("BOTTOMRIGHT"); line:SetHeight(2)
         tab.label, tab.line = label, line

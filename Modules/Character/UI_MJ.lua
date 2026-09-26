@@ -36,12 +36,12 @@ local function MakeTitleBar(parent, text)
 
     local bgTex = bar:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints()
-    bgTex:SetColorTexture(unpack(UI.colors.panelButtonBg))
+    bgTex:SetColorTexture(0,0,0,0)
 
     local lbl = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     UI.ApplyTitle(lbl)
     lbl:SetText(text)
-    lbl:SetPoint("LEFT", bar, "LEFT", 8, 0)
+    lbl:SetPoint("LEFT", bar, "LEFT", 12, -2)
     return bar
 end
 
@@ -317,6 +317,14 @@ impactPanel.bg = impactBg
 local impactTitleBar = MakeTitleBar(impactPanel, "Actions du MJ")
 impactTitleBar:SetFrameLevel(impactPanel:GetFrameLevel() + 1)
 
+-- La croix des Actions du MJ ferme toute la Vue MJ ; celle du groupe ne
+-- ferme que le groupe (rouvrable par « Voir le groupe »).
+local impactCloseBtn = UI.CreateCloseButton(impactPanel, function() impactPanel:Hide() end)
+impactCloseBtn:ClearAllPoints()
+impactCloseBtn:SetPoint("TOPRIGHT", impactPanel, "TOPRIGHT", -3, -3)
+impactCloseBtn:SetSize(18, 16)
+impactCloseBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 50)
+
 local function ImpactLabel(text, x, y)
     local fs = impactPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     fs:SetPoint("TOPLEFT", impactPanel, "TOPLEFT", x, y)
@@ -431,7 +439,7 @@ impactStatus:Hide()
 local combatToggleBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Début de combat")
 combatToggleBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 local combatTint=combatToggleBtn:CreateTexture(nil,"ARTWORK")
-combatTint:SetAllPoints()
+combatTint:SetPoint("TOPLEFT",5,-4);combatTint:SetPoint("BOTTOMRIGHT",-5,4)
 combatTint:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ResourceFill.tga")
 local function RefreshCombatTint(hover)
     if C.initiative.active then
@@ -479,8 +487,18 @@ addNpcBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 -- fermer alors qu'il y a déjà des PNJ ne laissait aucun moyen de le
 -- rouvrir (il ne réapparaît automatiquement que sur un 0 → ≥1 PNJ, voir
 -- TogglePnjPanel / RebuildPnj plus bas).
+local toggleGroupBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Voir le groupe")
+toggleGroupBtn:SetPoint("TOPLEFT", addNpcBtn, "BOTTOMLEFT", 0, -4)
+toggleGroupBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
+toggleGroupBtn:SetScript("OnClick", function()
+    if mjPanel:IsShown() then mjPanel:Hide() else mjPanel:Show() end
+end)
+local function RefreshGroupButton()
+    toggleGroupBtn:SetText(mjPanel:IsShown() and "Masquer le groupe" or "Voir le groupe")
+end
+
 local togglePnjBtn = UI.CreatePanelButton(impactPanel, 198, 20, "Voir les PNJ")
-togglePnjBtn:SetPoint("TOPLEFT", addNpcBtn, "BOTTOMLEFT", 0, -4)
+togglePnjBtn:SetPoint("TOPLEFT", toggleGroupBtn, "BOTTOMLEFT", 0, -4)
 togglePnjBtn:SetFrameLevel(impactPanel:GetFrameLevel() + 2)
 togglePnjBtn:SetScript("OnClick", function()
     if TogglePnjPanel then TogglePnjPanel() end
@@ -690,10 +708,10 @@ local function RefreshCombatControls()
     if not active then npcPopup:Hide() end
 
     if active then
-        impactPanel:SetHeight(398)
+        impactPanel:SetHeight(422)
         hostStatus:SetText(C.initiative.isHost and "Hôte : vous" or "Hôte : un autre MJ")
     else
-        impactPanel:SetHeight(382)
+        impactPanel:SetHeight(406)
         hostStatus:SetText("")
     end
 end
@@ -984,20 +1002,34 @@ end
 mjPanel:SetScript("OnShow", function()
     local myName = UnitName("player")
     if myName then C.groupData[myName] = C:GetMyChar() end
-    if impactPanel then
+    if impactPanel:IsShown() then
+        -- Groupe rouvert depuis les Actions du MJ : il se recolle à leur droite.
+        mjPanel:ClearAllPoints()
+        mjPanel:SetPoint("TOPLEFT", impactPanel, "TOPRIGHT", 2, 0)
+    else
+        -- Détache le groupe s'il était collé aux Actions : sinon ancrage circulaire.
+        local left, top = mjPanel:GetLeft(), mjPanel:GetTop()
+        if left and top then
+            mjPanel:ClearAllPoints()
+            mjPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        end
         impactPanel:ClearAllPoints()
         impactPanel:SetPoint("TOPRIGHT", mjPanel, "TOPLEFT", -2, 0)
         impactPanel:Show()
     end
+    RefreshGroupButton()
     Rebuild()
 end)
 
-mjPanel:SetScript("OnHide", function()
-    if impactPanel then impactPanel:Hide() end
-end)
+mjPanel:SetScript("OnHide", RefreshGroupButton)
 
+-- Fermer les Actions du MJ ferme toute la Vue MJ.
+impactPanel:SetScript("OnHide", function() mjPanel:Hide() end)
+
+-- La Vue MJ est ouverte tant que les Actions du MJ le sont (le groupe peut
+-- être fermé seul).
 function mjPanel:Toggle()
-    if self:IsShown() then self:Hide() else self:Show() end
+    if impactPanel:IsShown() then impactPanel:Hide() else self:Show() end
 end
 
 -- ── Panneau MJ — PNJ (à droite de la Vue MJ — Groupe) ────────────────────────
@@ -1256,7 +1288,7 @@ local function RebuildPnj()
     pnjContent:SetHeight(math.max(1, totalH))
     UpdatePnjScrollRange()
 
-    if #npcs > 0 and mjPanel:IsShown() and not pnjManuallyClosed then
+    if #npcs > 0 and impactPanel:IsShown() and not pnjManuallyClosed then
         pnjPanel:Show()
     else
         pnjPanel:Hide()
@@ -1296,4 +1328,4 @@ end
 
 -- Ajoutés en plus des OnShow/OnHide déjà posés sur mjPanel plus haut.
 mjPanel:HookScript("OnShow", function() RebuildPnj() end)
-mjPanel:HookScript("OnHide", function() pnjPanel:Hide() end)
+impactPanel:HookScript("OnHide", function() pnjPanel:Hide() end)

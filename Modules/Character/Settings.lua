@@ -64,12 +64,8 @@ end
 function C:SetWindowOpacity(value)
     local s = C:GetSettings()
     s.windowOpacity = Clamp(value, 0.05, 1.00)
-    for _, frame in ipairs({
-        CharacterMJPanel, CharacterMJImpactPanel, CharacterMJPnjPanel,
-        CharacterGroupViewPanel, CharacterInitiativeBanner,
-        CharacterInitiativeBanner and CharacterInitiativeBanner.roundBox,
-    }) do
-        if frame and frame.bg then UI.ApplyWindowBackground(frame.bg, s.windowOpacity) end
+    for frame in pairs(UI.windowSkins) do
+        UI.SetWindowSkinOpacity(frame,s.windowOpacity)
     end
 end
 
@@ -164,11 +160,17 @@ local function MakeSlider(labelText, y, minValue, maxValue, step, formatter, onC
     slider:SetObeyStepOnDrag(true)
 
     local sliderBg = slider:CreateTexture(nil, "BACKGROUND")
-    sliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
-    sliderBg:SetHeight(8)
+    sliderBg:SetColorTexture(.035,.05,.075,1)
+    sliderBg:SetHeight(4)
     sliderBg:SetPoint("LEFT", slider)
     sliderBg:SetPoint("RIGHT", slider)
-    slider:SetThumbTexture("Interface/Buttons/UI-SliderBar-Button-Horizontal")
+    local track=slider:CreateTexture(nil,"BORDER")
+    track:SetPoint("LEFT");track:SetPoint("RIGHT");track:SetHeight(1)
+    track:SetColorTexture(.64,.51,.29,.85)
+    local thumb=slider:CreateTexture(nil,"OVERLAY")
+    thumb:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\SkillCardGem")
+    thumb:SetSize(12,24)
+    slider:SetThumbTexture(thumb)
 
     local valueText = slider:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     valueText:SetPoint("TOP", slider, "BOTTOM", 0, -4)

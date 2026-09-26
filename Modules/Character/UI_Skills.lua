@@ -11,50 +11,12 @@
 local C = Character
 local UI = C.RPGUI or OS2.UI
 
--- Bouton de fermeture rond (anneau doré, croix fine) : cartes ouvertes
--- depuis le chat et fenêtre « Utiliser ».
-function C:CreateRoundCloseButton(parent,onClick)
-    local close=CreateFrame("Button",nil,parent)
-    close:SetSize(20,20)
-    local closeMask=close:CreateMaskTexture()
-    closeMask:SetAllPoints()
-    closeMask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask","CLAMPTOBLACKADDITIVE","CLAMPTOBLACKADDITIVE")
-    local closeBg=close:CreateTexture(nil,"BACKGROUND")
-    closeBg:SetAllPoints();closeBg:SetColorTexture(.025,.035,.055,1);closeBg:AddMaskTexture(closeMask)
-    local closeRim=close:CreateTexture(nil,"ARTWORK")
-    closeRim:SetAllPoints()
-    closeRim:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\InitiativeRing.tga")
-    closeRim:SetVertexColor(.75,.64,.43,.85)
-    local strokes={}
-    for i=1,2 do
-        local stroke=close:CreateTexture(nil,"OVERLAY")
-        stroke:SetSize(9,1.4);stroke:SetPoint("CENTER")
-        stroke:SetColorTexture(.88,.76,.52,1)
-        stroke:SetRotation(i==1 and math.pi/4 or -math.pi/4)
-        strokes[i]=stroke
-    end
-    close:SetScript("OnClick",onClick)
-    local function CloseStyle(hover,pressed)
-        closeBg:SetColorTexture(hover and .15 or .025,hover and .12 or .035,hover and .07 or .055,1)
-        closeRim:SetVertexColor(hover and 1 or .75,hover and .9 or .64,hover and .65 or .43,1)
-        for _,stroke in ipairs(strokes) do
-            stroke:SetColorTexture(hover and 1 or .88,hover and .92 or .76,hover and .72 or .52,1)
-            stroke:SetSize(pressed and 7 or 9,1.4)
-        end
-    end
-    close:SetScript("OnEnter",function() CloseStyle(true,false) end)
-    close:SetScript("OnLeave",function() CloseStyle(false,false) end)
-    close:SetScript("OnMouseDown",function() CloseStyle(true,true) end)
-    close:SetScript("OnMouseUp",function() CloseStyle(true,false) end)
-    close:SetScript("OnHide",function() CloseStyle(false,false) end)
-    return close
-end
-
 C.SKILL_CATEGORIES = {
     { key = "base",      label = "Actions de base",       tag = "Action",    aliases = { "action" } },
     { key = "offensive", label = "Compétence Offensive",  tag = "Offensive", aliases = { "offensive" } },
     { key = "defensive", label = "Compétence Défensive",  tag = "Défensive", aliases = { "defensive", "défensive" } },
     { key = "ranged",    label = "Compétence à Distance", tag = "Distance",  aliases = { "distance" } },
+    { key = "grimoire", label = "Grimoire", tag = "Grimoire", aliases = { "grimoire" } },
     -- Index : fiches consultables par référence {{Index : Nom}} et dans le
     -- builder, mais sans bouton dans le triangle du bouton Action.
     { key = "index",     label = "Index",                 tag = "Index",     aliases = { "index" }, hidden = true },
@@ -118,7 +80,10 @@ local function GetSkillDB()
     if selectedOwner then
         local stores=CharacterDB.skillLibraries or {}
         local library=stores[selectedOwner]
-        if library then return library.categories end
+        if library then
+            for _,cat in ipairs(CATEGORIES) do library.categories[cat.key]=library.categories[cat.key] or {} end
+            return library.categories
+        end
         selectedOwner=nil
     end
     return GetOwnedSkillDB()
@@ -217,10 +182,10 @@ function C:ListAllSkills(catKey)
     local list, seen = {}, {}
     local function add(categories, owner)
         for _, skill in pairs(categories and categories[catKey] or {}) do
-            local key = self:StripSkillMarkup(skill.name):lower() .. "\0" .. tostring(skill.icon) .. "\0" .. tostring(skill.description) .. "\0" .. tostring(skill.usable == true)
+            local key = self:StripSkillMarkup(skill.name):lower() .. "\0" .. tostring(skill.icon) .. "\0" .. tostring(skill.description) .. "\0" .. tostring(skill.usable == true) .. self:SkillCostKey(skill)
             if not seen[key] then
                 seen[key] = true
-                list[#list + 1] = { name = skill.name, icon = skill.icon, description = skill.description, usable = skill.usable == true, owner = owner }
+                list[#list + 1] = { name = skill.name, icon = skill.icon, description = skill.description, usable = skill.usable == true, cost = skill.cost, owner = owner }
             end
         end
     end
@@ -326,12 +291,23 @@ function C:SkillOwnerSuffix(skill)
 end
 
 -- oldName nil/absent = création ; renommage géré en retirant l'ancienne clé.
-function C:SaveSkill(catKey, oldName, name, icon, description, usable)
+function C:ValidateSkillCost(cost)
+    if cost==nil then return true end
+    if type(cost)~="table" or (cost.resource~="hp" and cost.resource~="mana" and cost.resource~="endurance") then return false end
+    local n=tonumber(cost.amount)
+    return n and n>=1 and n<=1000000 and n%1==0 or false
+end
+function C:SkillCostKey(skill)
+    local cost=skill.cost
+    return cost and (":"..tostring(cost.resource)..":"..tostring(cost.amount)) or ""
+end
+function C:SaveSkill(catKey, oldName, name, icon, description, usable, cost)
     if self:IsSkillLibraryReadOnly() then return false,"Lecture seule : seuls le créateur et ses éditeurs peuvent modifier" end
     if not FindCategory(catKey) then return false, "Catégorie inconnue" end
     name = tostring(name or ""):match("^%s*(.-)%s*$")
     if name == "" then return false, "Nom requis" end
     if #name>128 or #tostring(icon or "")>512 or #tostring(description or "")>8000 then return false,"Texte trop long" end
+    if not self:ValidateSkillCost(cost) then return false,"Coût : choisissez une ressource et un entier de 1 à 1 000 000." end
     local db = GetSkillDB()
     if db[catKey][name] and oldName ~= name then return false, "Ce nom existe déjà dans cette catégorie" end
     if oldName and oldName ~= name then db[catKey][oldName] = nil end
@@ -340,6 +316,7 @@ function C:SaveSkill(catKey, oldName, name, icon, description, usable)
         icon = (icon and icon ~= "") and icon or "Interface\\Icons\\INV_Misc_QuestionMark",
         description = description or "",
         usable = usable == true,
+        cost = cost and {resource=cost.resource,amount=tonumber(cost.amount)} or nil,
     }
     if self.OnSkillsChanged then self.OnSkillsChanged() end
     return true
@@ -448,6 +425,22 @@ local ShowCard
 -- disparaît. "Sur son lien" exige aussi la souris sur ce cadre : un
 -- OnHyperlinkLeave peut ne jamais arriver (aperçu du builder redessiné sous
 -- la souris, builder fermé), et la carte restait alors ouverte.
+-- Un passage rapide peut aussi perdre le Leave alors que la souris reste dans
+-- le cadre : le lien ne compte que tant que le curseur reste sur sa ligne.
+local LINK_LINE_TOLERANCE = 9
+local function CursorY()
+    local _, y = GetCursorPosition()
+    return y / UIParent:GetEffectiveScale()
+end
+-- Hauteur du lien à l'écran, recalculée depuis le haut de sa source : elle
+-- suit la fenêtre quand on la déplace (une position figée laissait le flux
+-- et la zone du lien derrière).
+local function CardLinkY(card)
+    local source, offset = card.source, card.linkOffset
+    local top = source and offset and source:GetTop()
+    if not top then return end
+    return top * source:GetEffectiveScale() / UIParent:GetEffectiveScale() + offset
+end
 local function CheckCards()
     for depth = #cards, 2, -1 do
         local card = cards[depth]
@@ -456,6 +449,7 @@ local function CheckCards()
             local source = card.source
             local sourceGone = not source or not source:IsVisible()
             local onLink = card.linkHovered and source and source:IsMouseOver()
+                and math.abs(CursorY() - (CardLinkY(card) or CursorY())) <= LINK_LINE_TOLERANCE
             if sourceGone or (not onLink and not card:IsMouseOver() and not (deeper and deeper:IsShown())) then
                 card:Hide()
             end
@@ -735,7 +729,7 @@ local function PlayOpen(card, width, height, side)
         local _, sourceBottom = source:GetCenter()
         if not (edge and target) then return end
         local sx = ToUI(source, edge, 0)
-        local y = card.linkY or select(2, ToUI(source, 0, sourceBottom or 0))
+        local y = CardLinkY(card) or select(2, ToUI(source, 0, sourceBottom or 0))
         return sx, y, target, y, false
     end
     card.flux:Show()
@@ -775,6 +769,17 @@ function ShowCard(depth, anchor, skill)
     local usable=skill.usable == true and not skill.missing
     card.useButton:SetShown(usable)
     if usable then height=height+46 end
+    if not card.costLabel then
+        card.costLabel=content:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        UI.ApplyTitle(card.costLabel)
+    end
+    card.costLabel:ClearAllPoints()
+    card.costLabel:SetPoint("BOTTOM",content,"BOTTOM",0,usable and 51 or 12)
+    card.costLabel:SetShown(skill.cost~=nil)
+    if skill.cost then
+        card.costLabel:SetText("Coût : "..skill.cost.amount.." "..(({hp="Vie",mana="Mana",endurance="Endurance"})[skill.cost.resource] or ""))
+        height=height+22
+    end
     card.rule:SetShown(body ~= "")
     content:SetSize(width, height)
 
@@ -784,9 +789,11 @@ function ShowCard(depth, anchor, skill)
     card.source = anchor
     if depth > 1 then
         cardWatcher:Show()
-        -- Hauteur du lien survolé (curseur), pour la pointe de l'accolade.
-        local cy = GetCursorPosition and select(2, GetCursorPosition())
-        card.linkY = cy and cy / UIParent:GetEffectiveScale() or nil
+        -- Hauteur du lien survolé (curseur), relative au haut de la source.
+        local top = anchor:GetTop()
+        card.linkOffset = top and (CursorY() - select(2, ToUI(anchor, 0, top))) or nil
+    else
+        card.linkOffset = nil
     end
     card:SetFrameLevel((below:GetFrameLevel() or 0) + 20)
     card.closeButton:SetFrameLevel(card:GetFrameLevel()+3)
@@ -799,8 +806,7 @@ function ShowCard(depth, anchor, skill)
         local screen = UIParent:GetRight() or 0
         -- Centrée sur la hauteur du lien survolé : le flux arrive au milieu
         -- de son bord (l'écran la garde entière, SetClampedToScreen).
-        local anchorTop = anchor:GetTop()
-        local dy = (card.linkY and anchorTop) and (card.linkY - anchorTop) or -height / 2
+        local dy = card.linkOffset or -height / 2
         if right + LINK_GAP + width <= screen then
             card:SetPoint("LEFT", anchor, "TOPRIGHT", LINK_GAP, dy); side = "RIGHT"
         else
@@ -818,6 +824,11 @@ function C:ShowSkillTooltip(owner, skill)
 end
 
 function C:HideSkillTooltip() if cards[1] then cards[1]:Hide() end end
+-- Vrai seulement si la carte principale est affichée pour ce cadre.
+function C:IsSkillTooltipOpenFor(owner)
+    local card = cards[1]
+    return card ~= nil and card:IsShown() and card.source == owner
+end
 
 -- Survol d'un bouton de compétence : juste le nom, même habillage.
 local nameTip
@@ -844,13 +855,22 @@ function C:HideSkillName() if nameTip then nameTip:Hide() end end
 -- ============================================================
 --  Builder : Paramètres -> Base de données
 -- ============================================================
-local PANEL_W, PANEL_H = 660, 592
+local PANEL_W, PANEL_H = 740, 650
 local LIST_W = 196
 
 local panel, tabButtons, listContent, listViewport
 local nameEB, iconEB, iconPreview, descEB, descPreview, statusFS, colorTarget
 local searchEB, listCount, descViewport, previewViewport
+local costCB,costAmount,costHolder,costChoices
 local usableCB
+local costResource="mana"
+-- A cost only exists on usable skills: the whole cost row follows the Usable box.
+local function SyncCostVisibility()
+    if not costCB then return end
+    local usable=usableCB:GetChecked()
+    costCB:SetShown(usable);costCB.label:SetShown(usable)
+    costHolder:SetShown(usable and costCB:GetChecked())
+end
 local saveControl,deleteControl
 local pendingDelete
 local activeCat, editingName
@@ -867,6 +887,7 @@ end
 local function ClearForm()
     editingName = nil
     if usableCB then usableCB:SetChecked(false) end
+    if costCB then costCB:SetChecked(false);costAmount:SetText("");costResource="mana";costChoices:Refresh();SyncCostVisibility() end
     pendingDelete=nil
     nameEB:SetText("")
     iconEB:SetText("")
@@ -880,6 +901,7 @@ local function LoadIntoForm(skill)
     SetFormShown(true)
     editingName = skill.name
     if usableCB then usableCB:SetChecked(skill.usable == true) end
+    if costCB then costCB:SetChecked(skill.cost~=nil);costResource=skill.cost and skill.cost.resource or "mana";costAmount:SetText(skill.cost and tostring(skill.cost.amount) or "");costChoices:Refresh();SyncCostVisibility() end
     pendingDelete=nil
     if descViewport then descViewport:SetVerticalScroll(0) end
     if previewViewport then previewViewport:SetVerticalScroll(0) end
@@ -1521,28 +1543,78 @@ local function Build()
 
     -- Colonne gauche : liste + bouton nouvelle compétence
     -- Bibliothèque affichée : menu déroulant (la vôtre, puis chaque créateur).
-    local ownerBtn=UI.CreatePanelButton(panel,LIST_W,22,"Ma bibliothèque")
+    local function HeaderIcon(button,kind)
+        local icon=CreateFrame("Frame",nil,button)
+        icon:SetSize(22,22);icon:SetPoint("LEFT",8,0);icon:EnableMouse(false)
+        local function Path(points)
+            for i=1,#points-1 do
+                local a,b=points[i],points[i+1]
+                local dx,dy=b[1]-a[1],b[2]-a[2]
+                local stroke=icon:CreateTexture(nil,"OVERLAY")
+                stroke:SetColorTexture(.88,.74,.46,1)
+                stroke:SetSize(math.sqrt(dx*dx+dy*dy),1.3)
+                stroke:SetPoint("CENTER",icon,"CENTER",(a[1]+b[1])/2,(a[2]+b[2])/2)
+                local angle=dx==0 and (dy>0 and math.pi/2 or -math.pi/2) or math.atan(dy/dx)+(dx<0 and math.pi or 0)
+                stroke:SetRotation(angle)
+            end
+        end
+        if kind=="books" then
+            Path({{-9,-7},{-9,7},{-4,7},{-4,-7},{-9,-7}})
+            Path({{-2,-7},{-2,9},{3,9},{3,-7},{-2,-7}})
+            Path({{6,-7},{3,6},{7,7},{10,-6},{6,-7}})
+            Path({{-8,-3},{-5,-3}});Path({{-1,5},{2,5}})
+        elseif kind=="lock" then
+            Path({{-7,-8},{-7,2},{7,2},{7,-8},{-7,-8}})
+            Path({{-4,2},{-4,7},{-2,9},{2,9},{4,7},{4,2}})
+            Path({{0,-1},{0,-5}})
+        else
+            Path({{-9,-6},{-9,6},{9,6},{9,-6},{-9,-6}})
+            Path({{-9,6},{0,-1},{9,6}})
+            Path({{-9,-6},{-3,-1}});Path({{9,-6},{3,-1}})
+        end
+        return icon
+    end
+    local ownerBtn=UI.CreatePanelButton(panel,PANEL_W-270,28,"Ma bibliothèque")
     ownerBtn:SetPoint("TOPLEFT",10,-60)
     ownerBtn.library=true
     local ownerText=ownerBtn:GetFontString()
-    ownerText:ClearAllPoints();ownerText:SetPoint("LEFT",8,0);ownerText:SetPoint("RIGHT",-22,0);ownerText:SetJustifyH("LEFT")
+    ownerText:ClearAllPoints();ownerText:SetPoint("LEFT",36,0);ownerText:SetPoint("RIGHT",-30,0);ownerText:SetJustifyH("CENTER")
+    HeaderIcon(ownerBtn,"books")
     local arrow=ownerBtn:CreateTexture(nil,"OVERLAY")
-    arrow:SetSize(14,14);arrow:SetPoint("RIGHT",-5,-1)
+    arrow:SetSize(12,12);arrow:SetPoint("RIGHT",-10,0)
     arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
-    local sendBtn=UI.CreatePanelButton(panel,102,22,"Envoyer au raid")
+    local sendBtn=UI.CreatePanelButton(panel,152,28,"Envoyer au raid")
     sendBtn:SetPoint("TOPRIGHT",-10,-60)
+    local envelope=HeaderIcon(sendBtn,"envelope")
+    sendBtn:GetFontString():SetPoint("LEFT",34,0)
+    local function ResetEnvelope()
+        envelope:SetScript("OnUpdate",nil);envelope:SetAlpha(1)
+        envelope:ClearAllPoints();envelope:SetPoint("LEFT",sendBtn,"LEFT",8,0)
+    end
+    sendBtn:HookScript("OnHide",ResetEnvelope)
+    local function FlyEnvelope()
+        local elapsed=0
+        envelope:SetScript("OnUpdate",function(_,dt)
+            elapsed=elapsed+dt;local t=math.min(1,elapsed/.65)
+            envelope:ClearAllPoints()
+            envelope:SetPoint("LEFT",sendBtn,"LEFT",8+110*t*t,12*math.sin(t*math.pi/2))
+            envelope:SetAlpha(1-t)
+            if t>=1 then ResetEnvelope() end
+        end)
+    end
     local function OwnerName(owner)
         if owner==COMMON then return "Bibliothèque commune" end
-        local name,realm=owner:match("^([^-]+)%-(.+)$")
-        return name and (name.."|cff8a8a8a-"..realm.."|r") or owner
+        return owner:match("^[^-]+") or owner
     end
     local function LibraryCount(categories)
         local count=0
         for _,cat in ipairs(CATEGORIES) do for _ in pairs(categories and categories[cat.key] or {}) do count=count+1 end end
         return count
     end
-    local rightsBtn=UI.CreatePanelButton(panel,70,22,"Droits")
+    local rightsBtn=UI.CreatePanelButton(panel,86,28,"Droits")
     rightsBtn:SetPoint("RIGHT",sendBtn,"LEFT",-6,0)
+    HeaderIcon(rightsBtn,"lock")
+    rightsBtn:GetFontString():SetPoint("LEFT",32,0)
     local rightsPanel
     local function OwnerLabel()
         local editable=C:CanEditSkillLibrary(selectedOwner)
@@ -1554,6 +1626,7 @@ local function Build()
         if rightsPanel and selectedOwner then rightsPanel:Hide() end
         if saveControl then saveControl:SetEnabled(editable);deleteControl:SetEnabled(editable) end
         if usableCB then usableCB:SetEnabled(editable) end
+        if costCB then costCB:SetEnabled(editable) end
     end
     local libraryMenu
     local libraryRows={}
@@ -1585,7 +1658,7 @@ local function Build()
             local row=libraryRows[i]
             if not row then
                 row=CreateFrame("Button",nil,libraryMenu)
-                row:SetSize(LIST_W-8,22);row:SetPoint("TOPLEFT",4,-4-(i-1)*22)
+                row:SetSize(ownerBtn:GetWidth()-16,26);row:SetPoint("TOPLEFT",8,-8-(i-1)*26)
                 row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
                 row.label:SetPoint("LEFT",8,0);row.label:SetPoint("RIGHT",-40,0);row.label:SetJustifyH("LEFT");row.label:SetWordWrap(false)
                 row.count=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
@@ -1634,17 +1707,19 @@ local function Build()
             row:Show()
         end
         for i=#owners+1,#libraryRows do libraryRows[i]:Hide() end
-        libraryMenu:SetSize(LIST_W,#owners*22+8)
+        libraryMenu:SetSize(ownerBtn:GetWidth(),#owners*26+16)
         libraryMenu:ClearAllPoints();libraryMenu:SetPoint("TOPLEFT",ownerBtn,"BOTTOMLEFT",0,-2)
         libraryMenu:Show()
     end
     panel.OpenLibraryMenu=OpenLibraryMenu
     ownerBtn:SetScript("OnClick",function()
+        GameTooltip:Hide()
         if libraryMenu and libraryMenu:IsShown() then libraryMenu:Hide() else OpenLibraryMenu() end
     end)
     sendBtn:SetScript("OnClick",function()
         local ok,message=C:SendSkillLibrary()
         ShowStatus(message,not ok)
+        if ok then FlyEnvelope() end
     end)
     -- ── Droits d'édition : les éditeurs peuvent modifier votre bibliothèque
     -- reçue et la renvoyer au raid sous votre nom.
@@ -1710,6 +1785,7 @@ local function Build()
     rightsBtn:HookScript("OnLeave",function() GameTooltip:Hide() end)
     panel:HookScript("OnHide",function() if rightsPanel then rightsPanel:Hide() end end)
     ownerBtn:HookScript("OnEnter",function(self)
+        if libraryMenu and libraryMenu:IsShown() then return end
         GameTooltip:SetOwner(self,"ANCHOR_BOTTOM")
         GameTooltip:AddLine("Bibliothèque affichée",unpack(UI.colors.title))
         GameTooltip:AddLine("La vôtre, la bibliothèque commune (tout ce qui existe, fusionné) ou celle d'un créateur reçue du raid. Seules la vôtre et celles dont vous êtes éditeur se modifient ; × supprime une bibliothèque reçue.",1,1,1,true)
@@ -1761,14 +1837,14 @@ local function Build()
     local formW = PANEL_W - formX - 10
 
     local nameLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX + 50, -96)
-    nameLbl:SetText("Nom"); UI.ApplyLabel(nameLbl)
-    nameEB = UI.CreateStyledEditBox(panel, formW - 50, 24)
-    nameEB:SetPoint("TOPLEFT", panel, "TOPLEFT", formX + 50, -112)
+    nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX + 62, -96)
+    nameLbl:SetText("Nom de l’entrée"); UI.ApplyLabel(nameLbl)
+    nameEB = UI.CreateStyledEditBox(panel, formW - 62, 24)
+    nameEB:SetPoint("TOPLEFT", panel, "TOPLEFT", formX + 62, -112)
     nameEB:SetMaxLetters(128)
 
     iconPreview = CreateFrame("Button", nil, panel)
-    iconPreview:SetSize(40, 40)
+    iconPreview:SetSize(48, 48)
     iconPreview:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -96)
     local iconPreviewTex = iconPreview:CreateTexture(nil, "ARTWORK")
     iconPreviewTex:SetAllPoints(); iconPreviewTex:SetTexCoord(.08, .92, .08, .92)
@@ -1797,23 +1873,60 @@ local function Build()
     end)
 
     usableCB = UI.CreateStyledCheckbox(panel,"Utilisable")
-    usableCB:SetPoint("TOPRIGHT",panel,"TOPRIGHT",-100,-140)
+    usableCB:SetPoint("TOPLEFT",panel,"TOPLEFT",formX,-154)
     usableCB:SetChecked(false)
     panel.usableCB=usableCB
+    costCB=UI.CreateStyledCheckbox(panel,"Coût")
+    costCB:SetPoint("TOPLEFT",panel,"TOPLEFT",formX+110,-154)
+    costHolder=CreateFrame("Frame",nil,panel)
+    costHolder:SetPoint("TOPLEFT",panel,"TOPLEFT",formX+176,-152);costHolder:SetSize(formW-176,24)
+    costChoices=UI.CreateChoiceStrip(costHolder,222,nil,{
+        {label="Vie",value="hp"},{label="Mana",value="mana"},{label="End.",value="endurance"}
+    },function() return costResource end,function(value) if not C:IsSkillLibraryReadOnly() then costResource=value end end)
+    costChoices:SetPoint("LEFT",0,0)
+    costAmount=UI.CreateStyledEditBox(costHolder,64,22)
+    costAmount:SetPoint("LEFT",costChoices,"RIGHT",8,0);costAmount:SetNumeric(true);costAmount:SetMaxLetters(7)
+    costCB:SetScript("OnClick",SyncCostVisibility)
+    usableCB:SetScript("OnClick",SyncCostVisibility)
+    SyncCostVisibility();panel.costCB=costCB;panel.costAmount=costAmount
     local descLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    descLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -150)
+    descLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -184)
     descLbl:SetText("Description"); UI.ApplyLabel(descLbl)
     -- Barre d'outils : agit sur le texte sélectionné dans la description.
     local RT = C.RichText
     local NOTO = "Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Fonts\\NotoSans-"
-    local toolbar = CreateFrame("Frame", nil, panel)
-    toolbar:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -168)
-    toolbar:SetSize(formW, 20)
+    local editor=CreateFrame("Frame",nil,panel)
+    editor:SetPoint("TOPLEFT",panel,"TOPLEFT",formX,-204)
+    editor:SetSize(formW,230);UI.ApplyInputBorder(editor)
+    panel.descriptionEditor=editor
+    local headerBg=editor:CreateTexture(nil,"ARTWORK")
+    headerBg:SetPoint("TOPLEFT",1,-1);headerBg:SetPoint("TOPRIGHT",-1,-1)
+    headerBg:SetHeight(37);headerBg:SetColorTexture(.035,.049,.071,1)
+    local headerRule=editor:CreateTexture(nil,"OVERLAY")
+    headerRule:SetPoint("TOPLEFT",1,-38);headerRule:SetPoint("TOPRIGHT",-1,-38)
+    headerRule:SetHeight(1);headerRule:SetColorTexture(.62,.49,.28,.65)
+    local toolbar = CreateFrame("Frame", nil, editor)
+    toolbar:SetPoint("TOPLEFT",8,-6)
+    toolbar:SetSize(formW-16, 26)
     panel.toolbar = toolbar
-    local toolX = 0
+    local toolX,toolY = 0,0
     local function Tool(key, w, label, tip, onClick)
-        local btn = UI.CreatePanelButton(toolbar, w, 20, label)
-        btn:SetPoint("LEFT", toolbar, "LEFT", toolX, 0)
+        w=math.max(w,24)
+        local btn=CreateFrame("Button",nil,toolbar)
+        btn:SetSize(w,26)
+        local backing=btn:CreateTexture(nil,"BACKGROUND")
+        backing:SetAllPoints();backing:SetColorTexture(.065,.083,.11,.9)
+        local accent=btn:CreateTexture(nil,"BORDER")
+        accent:SetPoint("BOTTOMLEFT",3,0);accent:SetPoint("BOTTOMRIGHT",-3,0)
+        accent:SetHeight(1);accent:SetColorTexture(.65,.51,.29,.5)
+        local text=btn:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        text:SetPoint("LEFT",4,0);text:SetPoint("RIGHT",-4,0)
+        text:SetJustifyH("CENTER");text:SetWordWrap(false);text:SetText(label);UI.ApplyTitle(text)
+        btn:SetFontString(text)
+        local hover=btn:CreateTexture(nil,"HIGHLIGHT")
+        hover:SetPoint("TOPLEFT",1,-1);hover:SetPoint("BOTTOMRIGHT",-1,1)
+        hover:SetColorTexture(.7,.53,.25,.18)
+        btn:SetPoint("TOPLEFT",toolbar,"TOPLEFT",toolX,toolY)
         toolX = toolX + w + 2
         btn.toolKey = key
         btn:SetScript("OnClick", onClick)
@@ -1826,7 +1939,12 @@ local function Build()
         toolbar[key] = btn
         return btn
     end
-    local function Gap() toolX = toolX + 5 end
+    local function Gap()
+        local divider=toolbar:CreateTexture(nil,"ARTWORK")
+        divider:SetPoint("TOPLEFT",toolX+1,toolY-5);divider:SetSize(1,16)
+        divider:SetColorTexture(.62,.49,.28,.35)
+        toolX=toolX+5
+    end
     local function Glyph(btn, file, size)
         local fs = btn:GetFontString()
         if fs and fs.SetFont then fs:SetFont(NOTO .. file, size or 12, "") end
@@ -1879,7 +1997,7 @@ local function Build()
     local function Step(delta) sizeLabel:SetText(StepSize(descEB, delta)) end
     Tool("tailleMoins", 18, "-", "Réduire la taille", function() Step(-1) end)
     sizeLabel = toolbar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    sizeLabel:SetPoint("LEFT", toolbar, "LEFT", toolX, 0); sizeLabel:SetWidth(22)
+    sizeLabel:SetPoint("TOPLEFT", toolbar, "TOPLEFT", toolX, -7); sizeLabel:SetWidth(22)
     sizeLabel:SetJustifyH("CENTER"); sizeLabel:SetText(RT.DEFAULT_SIZE)
     toolX = toolX + 24
     Tool("taillePlus", 18, "+", "Augmenter la taille", function() Step(1) end)
@@ -1898,44 +2016,29 @@ local function Build()
     strike:SetSize(10, 1); strike:SetPoint("CENTER", 0, 0); strike:SetColorTexture(.92, .84, .67, 1)
     Gap()
 
-    -- Alignement : trois petits paragraphes dessinés.
-    for _, align in ipairs({ { "gauche", "LEFT", "Aligner à gauche" }, { "centre", "CENTER", "Centrer" }, { "droite", "RIGHT", "Aligner à droite" } }) do
-        local btn = Tool(align[1], 20, "", align[3], function() SetAlign(descEB, align[1]) end)
-        for row, width in ipairs({ 10, 6, 10, 6 }) do
-            local line = btn:CreateTexture(nil, "OVERLAY")
-            line:SetSize(width, 1); line:SetColorTexture(.92, .84, .67, 1)
-            local y = 5 - (row - 1) * 3
-            if align[2] == "LEFT" then line:SetPoint("LEFT", btn, "CENTER", -5, y)
-            elseif align[2] == "RIGHT" then line:SetPoint("RIGHT", btn, "CENTER", 5, y)
-            else line:SetPoint("CENTER", btn, "CENTER", 0, y) end
-        end
-    end
-    Gap()
-
     -- Référence, couleur du texte, surlignage, effacer la mise en forme.
-    Tool("lien", 22, "{{", "Insérer une référence (puis choisir dans la liste)", function() InsertReference(descEB) end)
+    Tool("lien", 50, "{{ Lien", "Insérer une référence (puis choisir dans la liste)", function() InsertReference(descEB) end)
     local colorBtn = Tool("couleur", 20, "A", "Couleur du texte", function() PickColor(colorTarget or descEB, "couleur") end)
     Glyph(colorBtn, "Bold.ttf", 12)
     local colorBar = colorBtn:CreateTexture(nil, "OVERLAY")
     colorBar:SetSize(12, 3); colorBar:SetPoint("BOTTOM", 0, 3)
     colorBar:SetColorTexture(lastColor.r, lastColor.g, lastColor.b)
     toolbarSwatches.couleur = colorBar
-    local bgBtn = Tool("fond", 20, "ab", "Surligner", function() PickColor(colorTarget or descEB, "fond") end)
+    local bgBtn = Tool("fond", 26, "ab", "Surligner", function() PickColor(colorTarget or descEB, "fond") end)
     Glyph(bgBtn, "Regular.ttf", 11)
     local bgSwatch = bgBtn:CreateTexture(nil, "ARTWORK")
     bgSwatch:SetPoint("TOPLEFT", 3, -4); bgSwatch:SetPoint("BOTTOMRIGHT", -3, 4)
     bgSwatch:SetColorTexture(lastBg.r, lastBg.g, lastBg.b)
     toolbarSwatches.fond = bgSwatch
-    local clearBtn = Tool("effacer", 20, "", "Effacer la mise en forme de la sélection", function() ClearFormatting(colorTarget or descEB) end)
+    local clearBtn = Tool("effacer", 58, "Effacer", "Effacer la mise en forme de la sélection", function() ClearFormatting(colorTarget or descEB) end)
     local clearIcon = clearBtn:CreateTexture(nil, "OVERLAY")
-    clearIcon:SetSize(12, 12); clearIcon:SetPoint("CENTER")
+    clearIcon:SetSize(12, 12); clearIcon:SetPoint("CENTER");clearIcon:Hide()
     clearIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
 
-    descViewport=CreateFrame("ScrollFrame",nil,panel)
-    descViewport:SetPoint("TOPLEFT",panel,"TOPLEFT",formX,-192);descViewport:SetSize(formW,162)
-    local editorBg=descViewport:CreateTexture(nil,"BACKGROUND");editorBg:SetAllPoints();editorBg:SetColorTexture(.015,.02,.023,1);UI.ApplyBorder(descViewport)
+    descViewport=CreateFrame("ScrollFrame",nil,editor)
+    descViewport:SetPoint("TOPLEFT",1,-39);descViewport:SetSize(formW-2,190)
     descEB=CreateFrame("EditBox",nil,descViewport)
-    descEB:SetWidth(formW);descEB:SetHeight(162);descEB:SetMultiLine(true);descEB:SetAutoFocus(false)
+    descEB:SetWidth(formW-2);descEB:SetHeight(190);descEB:SetMultiLine(true);descEB:SetAutoFocus(false)
     descEB:SetFontObject("GameFontHighlightSmall");descEB:SetTextInsets(6,6,6,6);descEB:SetMaxLetters(6000)
     descViewport:SetScrollChild(descEB);descViewport:EnableMouseWheel(true)
     -- Any click in the framed area focuses the editor, even below the last line.
@@ -1945,21 +2048,22 @@ local function Build()
     descEB:SetScript("OnCursorChanged",function(_,_,y,_,height)
         local top=math.abs(y);local scroll=descViewport:GetVerticalScroll()
         if top<scroll then descViewport:SetVerticalScroll(top)
-        elseif top+height>scroll+162 then descViewport:SetVerticalScroll(math.max(0,top+height-162)) end
+        elseif top+height>scroll+190 then descViewport:SetVerticalScroll(math.max(0,top+height-190)) end
     end)
 
     local legend = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    legend:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -362)
+    legend:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -444)
     legend:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
     legend:SetJustifyH("LEFT"); legend:SetWordWrap(true)
-    legend:SetText("Sélectionnez du texte puis un outil de la barre (couleur et effacer marchent aussi sur le nom).  Référence : tapez {{ puis choisissez dans la liste (clic ou Tab).")
+    legend:SetText("Sélectionnez un texte pour le mettre en forme. Tapez {{ pour lier une fiche. Couleur et Effacer fonctionnent aussi sur le nom.")
     UI.ApplyMutedText(legend)
 
     local previewLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    previewLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -420)
-    previewLbl:SetText("Aperçu"); UI.ApplyLabel(previewLbl)
+    previewLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", formX, -478)
+    previewLbl:SetText("Aperçu de la fiche"); UI.ApplyLabel(previewLbl)
     previewViewport=CreateFrame("ScrollFrame",nil,panel)
-    previewViewport:SetPoint("TOPLEFT",panel,"TOPLEFT",formX,-438);previewViewport:SetSize(formW,90)
+    previewViewport:SetPoint("TOPLEFT",panel,"TOPLEFT",formX,-496);previewViewport:SetSize(formW,84)
+    UI.ApplyInputBorder(previewViewport)
     previewViewport:EnableMouseWheel(true)
     local previewContent=CreateFrame("Frame",nil,previewViewport);previewContent:SetSize(formW-8,90)
     previewViewport:SetScrollChild(previewContent)
@@ -1987,11 +2091,11 @@ local function Build()
     descEB:SetScript("OnEscapePressed",function(self) if autocomplete:IsShown() then autocomplete.Dismiss() else self:ClearFocus() end end)
     previewViewport:SetScript("OnMouseWheel",function(self,d) self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-d*18))) end)
 
-    local saveBtn = UI.CreatePanelButton(panel, 90, 22, "Enregistrer")
+    local saveBtn = UI.CreatePanelButton(panel, 126, 28, "Enregistrer")
     saveControl=saveBtn
-    saveBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", formX, 32)
+    saveBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 32)
     saveBtn:SetScript("OnClick", function()
-        local ok, err = C:SaveSkill(activeCat.key, editingName, nameEB:GetText(), iconEB:GetText(), descEB:GetText(), usableCB:GetChecked())
+        local ok, err = C:SaveSkill(activeCat.key, editingName, nameEB:GetText(), iconEB:GetText(), descEB:GetText(), usableCB:GetChecked(), usableCB:GetChecked() and costCB:GetChecked() and {resource=costResource,amount=costAmount:GetText()} or nil)
         if ok then
             ShowStatus("Enregistré")
             editingName = nameEB:GetText():match("^%s*(.-)%s*$")
@@ -2003,7 +2107,7 @@ local function Build()
 
     local deleteBtn = UI.CreatePanelButton(panel, 90, 22, "Supprimer")
     deleteControl=deleteBtn
-    deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
+    deleteBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", formX, 35)
     deleteBtn:SetScript("OnClick", function()
         if C:IsSkillLibraryReadOnly() then ShowStatus("Lecture seule : seuls le créateur et ses éditeurs peuvent supprimer",true);return end
         if not editingName then ShowStatus("Rien à supprimer", true); return end

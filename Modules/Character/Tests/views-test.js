@@ -6,6 +6,9 @@ mock=mock.slice(mock.indexOf('unpack='),mock.indexOf('ZoneGate={'));
 const code=mock+`
 function M:GetParent() return self.parent end
 function M:SetWordWrap() end
+function M:GetLeft() return self.left or 100 end
+function M:GetValue() return self.value or 0 end
+function M:GetTop() return self.top or 500 end
 function M:SetSnapToPixelGrid() end
 function M:SetTexelSnappingBias() end
 function M:SetThumbTexture() end
@@ -19,6 +22,7 @@ function M:SetFontString(fs) self.fontString=fs;self.text=fs.text end
 function M:GetFontString() return self.fontString end
 function M:GetFrameLevel() return 10 end
 function M:SetRotation() end
+function M:SetBlendMode() end
 function M:SetEnabled() end
 function M:SetAttribute(key,value) self.attributes=self.attributes or {};self.attributes[key]=value end
 function M:SetHorizontalScroll() end
@@ -131,10 +135,17 @@ for _,o in ipairs(objects) do if o.playerName=='Tester' and o.scripts.PostClick 
 for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='Appliquer' then o.scripts.OnClick(o) end end
 assert(C.lastTemp and C.lastTemp[1]=='mana' and C.lastTemp[2]==8,'Direct choices must apply the selected resource and action')
 C:ToggleGroupView();assert(not CharacterGroupViewPanel:IsShown())
+do local col=Character.RPGUI.colors;if not (col.statMana and col.statMana.fg) then col.statMana={fg={.2,.45,1,1},bg={.03,.07,.2,1}} end end
 dofile('Modules/Character/UI_MJ.lua')
 dofile('Modules/Character/UI_Initiative.lua')
 assert(CharacterMJPanel:GetWidth()==276)
-assert(CharacterMJImpactPanel:GetHeight()==382)
+assert(CharacterMJImpactPanel:GetHeight()==406)
+-- Vue MJ : la croix du groupe ne ferme que lui ; celle des Actions ferme tout.
+CharacterMJPanel:Toggle();assert(CharacterMJPanel:IsShown() and CharacterMJImpactPanel:IsShown())
+CharacterMJPanel:Hide();assert(CharacterMJImpactPanel:IsShown(),'fermer le groupe garde les Actions du MJ')
+local groupBtn;for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='Voir le groupe' then groupBtn=o end end
+assert(groupBtn,'bouton Voir le groupe');groupBtn.scripts.OnClick(groupBtn);assert(CharacterMJPanel:IsShown() and groupBtn.text=='Masquer le groupe')
+CharacterMJPanel:Toggle();assert(not CharacterMJPanel:IsShown() and not CharacterMJImpactPanel:IsShown(),'fermer les Actions ferme tout')
 -- Annonce commune (Début du tour, conditions) : les messages attendent leur tour.
 function M:SetFont(path,size) self.fontPath=path;self.fontSize=size;return true end
 C:ShowNotice('Premier','a');C:ShowNotice('Second','b')

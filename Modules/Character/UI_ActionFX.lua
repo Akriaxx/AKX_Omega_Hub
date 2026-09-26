@@ -32,7 +32,7 @@ local THEME = {
     dataRing = NEXUS .. "DataRing",       -- 128², anneau segmenté qui tourne
     stream = NEXUS .. "DataStream",       -- 256x64, flux ; doit se répéter en largeur sans raccord
     -- Petites icônes des cercles de données ; nil = icône actuelle du jeu.
-    categoryIcons = { base = NEXUS .. "IconActions", offensive = NEXUS .. "IconOffensive", defensive = NEXUS .. "IconDefensive", ranged = NEXUS .. "IconDistance" },
+    categoryIcons = { base = NEXUS .. "IconActions", offensive = NEXUS .. "IconOffensive", defensive = NEXUS .. "IconDefensive", ranged = NEXUS .. "IconDistance", grimoire = NEXUS .. "IconGrimoire" },
     ringPeriod = 14,                      -- secondes par tour, anneau du nexus
     dataRingPeriod = 9,                   -- secondes par tour, cercles de données
     glowPulse = 1.8,                      -- secondes par respiration du halo

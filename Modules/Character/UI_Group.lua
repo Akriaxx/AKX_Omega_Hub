@@ -297,7 +297,7 @@ local function Build()
     title:SetScript("OnMouseUp", function() panel:StopMovingOrSizing() end)
 
     local titleFS = title:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    titleFS:SetPoint("LEFT", title, "LEFT", 5, 0)
+    titleFS:SetPoint("LEFT", title, "LEFT", 10, -2)
     titleFS:SetText("Compagnons")
     UI.ApplyTitle(titleFS)
 

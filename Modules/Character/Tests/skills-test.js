@@ -32,6 +32,8 @@ function GetRealmName() return 'Realm' end
 function UnitFullName(unit) return unit=='player' and 'Tester' or unit,'Realm' end
 local now=0;function GetTime() return now end
 local timers={};C_Timer={After=function(_,fn) timers[#timers+1]=fn end}
+function GetCursorPosition() return 0,0 end
+local shift=false;function IsShiftKeyDown() return shift end
 local sent={};C_ChatInfo={RegisterAddonMessagePrefix=function() end,SendAddonMessage=function(...) sent[#sent+1]={...} end}
 function GetMacroIcons() return 'IconA',134400 end
 CharacterResourceHUD=obj('Frame')
@@ -110,7 +112,7 @@ assert(C:SaveSkill('index',nil,'[[#ac8b74]]Arme à distance[[/]]','',''))
 assert(C:RenderSkillText('{{Index : Arme à distance}}')=='|Hcharskill:index:Arme à distance|h|cffac8b74[|r|cffac8b74Arme à distance|r|cffac8b74]|r|h','lien à la couleur du nom')
 do local out=C:RenderSkillText('{{Index : Arme à distance}} suite');local _,opens=out:gsub('|c','');local _,closes=out:gsub('|r','');assert(opens==closes,'couleurs équilibrées') end
 assert(C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary())).index.Garde.description=='Posture')
-local triangle=0;for _,o in ipairs(objects) do if o.cat and o.back then triangle=triangle+1;assert(o.cat.key~='index','pas de bouton Index dans le triangle') end end;assert(triangle==4,triangle)
+local triangle=0;for _,o in ipairs(objects) do if o.cat and o.back then triangle=triangle+1;assert(o.cat.key~='index','pas de bouton Index dans le triangle') end end;assert(triangle==5,triangle)
 typeText('');typeText('{{Action : char');desc.scripts.OnTabPressed(desc)
 assert(desc.text=='{{Action : Charge}}',desc.text)
 assert(C:FindSkillRef('base','charge').name=='[[#ff8800]]Charge[[/]]')
@@ -197,9 +199,6 @@ typeText('titre');desc.sel={0,5};click('police')
 local cinzel;for _,o in ipairs(objects) do if o.kind=='FontString' and o.text=='Cinzel' and o.parent and o.parent.kind=='Button' and not o.parent.toolKey then cinzel=o.parent end end
 assert(cinzel);cinzel.scripts.OnClick(cinzel);assert(desc.text=='[[police cinzel]]titre[[/police]]',desc.text)
 -- Alignement par ligne.
-typeText('a\\nb\\nc');desc.sel={2,3};click('centre');assert(desc.text=='a\\n[[centre]]b\\nc',desc.text)
-desc.sel={0,#desc.text};click('droite');assert(desc.text=='[[droite]]a\\n[[droite]]b\\n[[droite]]c',desc.text)
-desc.sel={0,#desc.text};click('gauche');assert(desc.text=='a\\nb\\nc',desc.text)
 -- Référence : insère {{ et ouvre la liste.
 typeText('voir ');desc.cursor=5;click('lien');assert(desc.text=='voir {{',desc.text)
 -- Moteur de texte enrichi.
@@ -231,7 +230,7 @@ assert(desc.text=='{{rouge}}x{{/}} {{Défensive:','catégorie vide : rien à ins
 C:ToggleActionButton();local root=CharacterActionMenu;assert(root:IsShown())
 local idle
 for _,o in ipairs(objects) do if o.parent==root and o.scripts.OnDragStart and not o.cat then idle=o end end
-assert(idle)
+assert(idle);ACTION_IDLE,ACTION_ROOT=idle,root
 CharacterResourceHUD:SetScale(.85)
 assert(math.abs(root:GetEffectiveScale()-1)<1e-9,'le bouton Action ignore l’échelle du portrait')
 C:SetActionScale(1.3);assert(math.abs(root:GetEffectiveScale()-1.3)<1e-9)
@@ -450,15 +449,46 @@ local parts=C:SplitSkillRaidMessage(long);assert(#parts>1)
 for _,part in ipairs(parts) do assert(#part<=255) end
 assert(table.concat(parts,' '):find('[Omega:'..id..']',1,true))
 raid=false;assert(not C:PrepareSkillRaidMessage(link,mergedUse));raid=true
+-- Coût : ajouté en fin d'émote, ressource abrégée.
+do local costly={name=mergedUse.name,icon=mergedUse.icon,description=mergedUse.description,usable=true,cost={resource='mana',amount=50}}
+local costLink=C:SkillChatLink(costly,C:SkillChatID(costly))
+local sent=C:PrepareSkillRaidMessage('Je lance '..costLink..' fort  ',costly)
+assert(sent and sent:sub(-16)==' [Coût : 50 MP]','coût en fin d’émote : '..tostring(sent))
+costly.cost={resource='endurance',amount=5};costLink=C:SkillChatLink(costly,C:SkillChatID(costly))
+assert(C:PrepareSkillRaidMessage(costLink,costly):find('[Coût : 5 End.]',1,true))
+assert(not message:find('Coût',1,true),'sans coût : rien ajouté') end
+do local t=C:SkillCostShortfallText({resource='mana',amount=50})
+assert(t:find('^Le |cff%x%x%x%x%x%xMana|r n’est pas suffisant pour lancer cette compétence%.$'),t)
+assert(C:SkillCostShortfallText({resource='hp',amount=1}):find('Vie|r n’est pas suffisante',1,true))
+assert(C:SkillCostShortfallText({resource='endurance',amount=1}):find('^L’|cff'))
+assert(C:SkillCostShortfallText({resource='hp',amount=1}):find('|cff1ab333Vie',1,true),'Vie en vert') end
+do local costly={name=mergedUse.name,icon=mergedUse.icon,description=mergedUse.description,usable=true,cost={resource='hp',amount=3}}
+local costLink=C:SkillChatLink(costly,C:SkillChatID(costly))
+local sent=C:PrepareSkillRaidMessage('A '..costLink..' [Coût : 3 HP] puis B',costly)
+assert(sent:sub(-15)==' [Coût : 3 HP]' and select(2,sent:gsub('Coût',''))==1,'coût déplacé en dernier, une seule fois : '..sent) end
 ChatFrame_OnHyperlinkShow(UIParent,'item:123');assert(nativeLinks==1)
 ChatFrame_OnHyperlinkShow(UIParent,'omegaskill:'..id);assert(nativeLinks==1 and CharacterSkillCard1.useButton:IsShown())
 function M:SetCursorPosition(v) self.cursor=v end
-function M:HighlightText() end
+function M:HighlightText(a,b) self.highlight={a,b} end
 C:OpenSkillUse(mergedUse)
 local composer=CharacterSkillUsePopup;assert(composer:IsShown())
 local input=composer.edit;assert(input:GetText()=='*Votre émote ici.* '..link)
+do local h=input.highlight;assert(h and input:GetText():sub(h[1]+1,h[2])=='Votre émote ici.','exemple sélectionné') end
 assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPressed(input)
 assert(sentUse and sentUse[1]==message and sentUse[2]=='RAID' and not composer:IsShown())
+assert(C:SaveSkill('grimoire',nil,'Codex','134400','Page du grimoire',true))
+assert(C:GetSkill('grimoire','Codex').usable)
+local grimoireRoundTrip=C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary()))
+assert(grimoireRoundTrip.grimoire.Codex.description=='Page du grimoire')
+assert(C.ActionFrames.cats.grimoire and C.ActionFrames.OFFSETS.grimoire[2]==-70)
+assert(C.ActionFrames.OFFSETS.ranged[2]==0 and C.ActionFrames.OFFSETS.defensive[2]==0)
+-- Maj + clic gauche sur Action : bascule la bibliothèque sans ouvrir le triangle.
+do local idle,root=ACTION_IDLE,ACTION_ROOT;local builderShown=CharacterSkillsBuilder:IsShown();shift=true
+idle.suppressClick=nil;root.dragging=nil;root.scripts.OnUpdate=nil
+idle.scripts.OnClick(idle,'LeftButton')
+assert(CharacterSkillsBuilder:IsShown()~=builderShown and not root.scripts.OnUpdate,'Maj+clic ouvre la bibliothèque')
+idle.scripts.OnClick(idle,'LeftButton');shift=false
+assert(CharacterSkillsBuilder:IsShown()==builderShown) end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

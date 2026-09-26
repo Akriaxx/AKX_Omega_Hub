@@ -176,6 +176,14 @@ for i,def in ipairs(definitions) do
     border:SetTexture(MEDIA.."ResourceBorder.tga")
     local text=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall");text:SetPoint("LEFT",5,0);text:SetText(label);text:SetTextColor(1,1,1)
     row.fill=fill;row.temp=temp;rows[key]=row
+    row.reserved=row:CreateTexture(nil,"ARTWORK",nil,2)
+    row.reserved:SetColorTexture(.38,.40,.44,.8);row.reserved:Hide()
+    row.costStripes={}
+    for n=1,46 do
+        local stripe=row:CreateLine(nil,"ARTWORK",nil,3)
+        stripe:SetColorTexture(.75,.77,.80,.85);stripe:SetThickness(1.3);stripe:Hide()
+        row.costStripes[n]=stripe
+    end
     row.fields={cur=InlineField(row,key,"cur",-121),max=InlineField(row,key,"max",-66),temp=InlineField(row,key,"temp",-10)}
     for _,mark in ipairs({{"/",-113},{"(",-61},{")",-3}}) do
         local punctuation=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
@@ -194,10 +202,31 @@ function hud:Refresh()
         local width=row:GetWidth()
         local filled=width*math.min(1,stat.cur/maximum)
         row.fill:SetWidth(math.max(.01,filled));row.fill:SetShown(stat.cur>0)
+        local reservation=C.skillCostReservation
+        local cost=reservation and reservation.resource==key and reservation.amount or 0
+        local mainCost=math.min(stat.cur,math.max(0,cost-bonus))
+        local reservedWidth=math.min(filled,width*mainCost/maximum)
+        local offset=filled-reservedWidth
+        row.reserved:ClearAllPoints();row.reserved:SetPoint("TOPLEFT",row,"TOPLEFT",offset,0)
+        row.reserved:SetSize(math.max(.01,reservedWidth),15);row.reserved:SetShown(reservedWidth>0)
+        for n,stripe in ipairs(row.costStripes) do
+            local x=(n-2)*6
+            local left,right=math.max(0,x),math.min(reservedWidth,x+6)
+            if right>left then
+                stripe:SetStartPoint("TOPLEFT",row,offset+left,-15+(left-x)*2.5)
+                stripe:SetEndPoint("TOPLEFT",row,offset+right,-15+(right-x)*2.5)
+            end
+            stripe:SetShown(right>left)
+        end
         -- Clockwise perimeter; a bonus equal to the maximum fills the outline.
         -- Bonuses never reduce the main gauge's fill or cover the values.
         local remaining=row.temp.perimeter*math.min(1,bonus/maximum)
+        local availablePerimeter=row.temp.perimeter*math.min(1,math.max(0,bonus-cost)/maximum)
+        local traversed=0
         for _,segment in ipairs(row.temp.edges) do
+            if cost>0 and traversed>=availablePerimeter then segment:SetColorTexture(.65,.67,.71,1)
+            else segment:SetColorTexture(unpack(bonusColors[key])) end
+            traversed=traversed+segment.length
             local length=math.min(remaining,segment.length)
             if length>0 then
                 local portion=length/segment.length

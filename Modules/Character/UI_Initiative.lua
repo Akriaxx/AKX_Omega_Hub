@@ -20,26 +20,7 @@ local eventCards = {}
 -- Même texture en neuf parties que les cartes de compétences : les coins
 -- gardent leur forme quelle que soit la longueur de la frise.
 local function ApplyInitiativeFrame(frame)
-    local cuts={0,24/128,104/128,1}
-    local parts={}
-    for row=1,3 do for col=1,3 do
-        local tex=frame:CreateTexture(nil,"BACKGROUND")
-        tex:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\SkillCard")
-        tex:SetTexCoord(cuts[col],cuts[col+1],cuts[row],cuts[row+1])
-        parts[#parts+1]=tex
-    end end
-    local function Layout()
-        local w,h=frame:GetWidth(),frame:GetHeight()
-        local k=math.min(12,w/2,h/2)
-        local xs,ys={0,k,w-k,w},{0,k,h-k,h}
-        for i,tex in ipairs(parts) do
-            local row,col=math.floor((i-1)/3)+1,(i-1)%3+1
-            tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT",frame,"TOPLEFT",xs[col],-ys[row])
-            tex:SetPoint("BOTTOMRIGHT",frame,"TOPLEFT",xs[col+1],-ys[row+1])
-        end
-    end
-    frame:HookScript("OnSizeChanged",Layout);Layout()
+    UI.RegisterWindowSkin(frame)
 end
 
 -- Défini plus bas (popup "Ajouter un évènement") ; référencé depuis MakeCard
@@ -673,7 +654,7 @@ eventPopupBar:SetScript("OnMouseUp", function() eventPopup:StopMovingOrSizing() 
 
 local eventPopupBarBg = eventPopupBar:CreateTexture(nil, "BACKGROUND")
 eventPopupBarBg:SetAllPoints()
-eventPopupBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+eventPopupBarBg:SetColorTexture(0,0,0,0)
 
 local eventPopupTitle = eventPopupBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 eventPopupTitle:SetPoint("LEFT", eventPopupBar, "LEFT", 8, 0)
@@ -699,7 +680,7 @@ eventDescArea:SetPoint("TOPLEFT",eventPopup,"TOPLEFT",10,-64)
 eventDescArea:EnableMouseWheel(true)
 local descBackground=eventDescArea:CreateTexture(nil,"BACKGROUND")
 descBackground:SetAllPoints();descBackground:SetColorTexture(.015,.02,.023,.95)
-UI.ApplyBorder(eventDescArea)
+UI.ApplyInputBorder(eventDescArea)
 local eventDescEB=CreateFrame("EditBox",nil,eventDescArea)
 eventDescEB:SetWidth(208);eventDescEB:SetHeight(44)
 eventDescEB:SetMultiLine(true);eventDescEB:SetAutoFocus(false)
@@ -890,7 +871,7 @@ statusPopupBar:SetScript("OnMouseUp", function() statusPopup:StopMovingOrSizing(
 
 local statusPopupBarBg = statusPopupBar:CreateTexture(nil, "BACKGROUND")
 statusPopupBarBg:SetAllPoints()
-statusPopupBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+statusPopupBarBg:SetColorTexture(0,0,0,0)
 
 local statusPopupTitle = statusPopupBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 statusPopupTitle:SetPoint("LEFT", statusPopupBar, "LEFT", 8, 0)
@@ -934,7 +915,7 @@ statusDescArea:SetPoint("TOPLEFT",statusPopup,"TOPLEFT",10,-98)
 statusDescArea:EnableMouseWheel(true)
 local statusDescBackground=statusDescArea:CreateTexture(nil,"BACKGROUND")
 statusDescBackground:SetAllPoints();statusDescBackground:SetColorTexture(.015,.02,.023,.95)
-UI.ApplyBorder(statusDescArea)
+UI.ApplyInputBorder(statusDescArea)
 local statusDescEB=CreateFrame("EditBox",nil,statusDescArea)
 statusDescEB:SetWidth(188);statusDescEB:SetHeight(44)
 statusDescEB:SetMultiLine(true);statusDescEB:SetAutoFocus(false)
@@ -995,7 +976,7 @@ statusTargetsPanelBar:SetScript("OnMouseUp", function() statusTargetsPanel:StopM
 
 local statusTargetsPanelBarBg = statusTargetsPanelBar:CreateTexture(nil, "BACKGROUND")
 statusTargetsPanelBarBg:SetAllPoints()
-statusTargetsPanelBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+statusTargetsPanelBarBg:SetColorTexture(0,0,0,0)
 
 local statusTargetsPanelTitle = statusTargetsPanelBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 statusTargetsPanelTitle:SetPoint("LEFT", statusTargetsPanelBar, "LEFT", 8, 0)
@@ -1158,7 +1139,7 @@ statusManageBar:SetScript("OnMouseUp", function() statusManagePopup:StopMovingOr
 
 local statusManageBarBg = statusManageBar:CreateTexture(nil, "BACKGROUND")
 statusManageBarBg:SetAllPoints()
-statusManageBarBg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+statusManageBarBg:SetColorTexture(0,0,0,0)
 
 local statusManageTitle = statusManageBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 statusManageTitle:SetPoint("LEFT", statusManageBar, "LEFT", 8, 0)
@@ -1445,8 +1426,7 @@ phaseNotice:SetSize(440,76)
 phaseNotice:SetPoint("CENTER",UIParent,"CENTER",0,90)
 phaseNotice:SetFrameStrata("DIALOG")
 phaseNotice:EnableMouse(false)
-local noticeBg=phaseNotice:CreateTexture(nil,"BACKGROUND")
-noticeBg:SetAllPoints();noticeBg:SetColorTexture(.025,.03,.035,.88)
+-- Le cadre arrondi porte son propre fond : pas de fond carré dessous.
 UI.ApplyBorder(phaseNotice)
 local noticeTitle=phaseNotice:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
 noticeTitle:SetPoint("TOPLEFT",12,-14);noticeTitle:SetPoint("TOPRIGHT",-12,-14)
