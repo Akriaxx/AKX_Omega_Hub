@@ -38,6 +38,47 @@ function UI.ApplyBorder(frame)
     end
     frame:HookScript("OnSizeChanged",Layout);Layout()
 end
+-- Case de joueur / PNJ : le même cadre arrondi que les fenêtres, en plus
+-- petit (coins de 10 px), fond opaque compris. Discret au repos, plein une
+-- fois sélectionnée ; le tour en cours ajoute une lueur dorée intérieure.
+function UI.ApplyRowCard(frame)
+    local cuts,parts={0,24/128,104/128,1},{}
+    for row=1,3 do for col=1,3 do
+        local tex=frame:CreateTexture(nil,"BACKGROUND")
+        tex:SetTexture(MEDIA.."SkillCard")
+        tex:SetTexCoord(cuts[col],cuts[col+1],cuts[row],cuts[row+1])
+        parts[#parts+1]=tex
+    end end
+    local function Layout()
+        local w,h=frame:GetWidth() or 0,frame:GetHeight() or 0
+        local k=math.max(1,math.min(10,w/2,h/2))
+        local xs,ys={0,k,w-k,w},{0,k,h-k,h}
+        for i,tex in ipairs(parts) do
+            local row,col=math.floor((i-1)/3)+1,(i-1)%3+1
+            tex:ClearAllPoints()
+            tex:SetPoint("TOPLEFT",frame,"TOPLEFT",xs[col],-ys[row])
+            tex:SetPoint("BOTTOMRIGHT",frame,"TOPLEFT",xs[col+1],-ys[row+1])
+        end
+    end
+    frame:HookScript("OnSizeChanged",Layout);Layout()
+    -- Teinte et lueur restent à l'intérieur du filet bronze.
+    local tint=frame:CreateTexture(nil,"BORDER")
+    tint:SetPoint("TOPLEFT",4,-4);tint:SetPoint("BOTTOMRIGHT",-4,4)
+    tint:SetColorTexture(unpack(UI.colors.rowSelection))
+    local glow=frame:CreateTexture(nil,"BORDER",nil,1)
+    glow:SetPoint("TOPLEFT",4,-4);glow:SetPoint("BOTTOMRIGHT",-4,4)
+    glow:SetTexture(MEDIA.."Nexus\\NexusGlow");glow:SetBlendMode("ADD")
+    local hl=UI.colors.turnHighlight;glow:SetVertexColor(hl[1],hl[2],hl[3],1);glow:SetAlpha(.35)
+    local selected,turn=false,false
+    local function Paint()
+        local lit=(selected or turn) and 1 or .72
+        for _,tex in ipairs(parts) do tex:SetVertexColor(lit,lit,lit,1) end
+        tint:SetShown(selected);glow:SetShown(turn)
+    end
+    function frame:SetCardSelected(value) selected=value and true or false;Paint() end
+    function frame:SetCardTurn(value) turn=value and true or false;Paint() end
+    Paint()
+end
 UI.windowSkins=setmetatable({}, {__mode="k"})
 function UI.SetWindowSkinOpacity(frame,alpha)
     for _,part in ipairs(frame.rpgSkin or {}) do part:SetAlpha(alpha) end

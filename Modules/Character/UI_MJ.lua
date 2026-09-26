@@ -110,30 +110,6 @@ local function MiniStatRow(parent, col)
     return row
 end
 
--- ── Surbrillance "tour en cours" (cadre cyan, partagé joueurs/PNJ) ────────────
-
-local function AddTurnBorder(frame)
-    local function Line(p1, p1x, p1y, p2, p2x, p2y, isVert)
-        local t = frame:CreateTexture(nil, "BORDER")
-        t:SetColorTexture(unpack(UI.colors.turnHighlight))
-        t:SetPoint(p1, frame, p1, p1x, p1y)
-        t:SetPoint(p2, frame, p2, p2x, p2y)
-        if isVert then t:SetWidth(2) else t:SetHeight(2) end
-        t:Hide()
-        return t
-    end
-    return {
-        Line("TOPLEFT",     0,  0, "TOPRIGHT",    0,  0, false),
-        Line("BOTTOMLEFT",  0,  0, "BOTTOMRIGHT", 0,  0, false),
-        Line("TOPLEFT",     0,  0, "BOTTOMLEFT",  0,  0, true),
-        Line("TOPRIGHT",    0,  0, "BOTTOMRIGHT", 0,  0, true),
-    }
-end
-
-local function SetTurnBorderShown(lines, shown)
-    for _, line in ipairs(lines) do line:SetShown(shown) end
-end
-
 -- ── Ligne de joueur ───────────────────────────────────────────────────────────
 
 local ROW_H = 76
@@ -165,33 +141,15 @@ local function PlayerRow(parent, playerName)
     row:RegisterForClicks("AnyUp")
     ApplyTargetAttribute(row, playerName)
 
-    -- Fond
-    local bgTex = row:CreateTexture(nil, "BACKGROUND")
-    bgTex:SetAllPoints()
-    bgTex:SetColorTexture(unpack(UI.colors.rowBg))
-    row.bgTex = bgTex
-
-    local selectedTex = row:CreateTexture(nil, "BORDER")
-    selectedTex:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
-    selectedTex:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
-    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
-    selectedTex:Hide()
-    row.selectedTex = selectedTex
-
-    local turnBorder = AddTurnBorder(row)
-    function row:SetTurn(isCurrent) SetTurnBorderShown(turnBorder, isCurrent) end
-
-    -- Séparateur bas
-    local sep = row:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("BOTTOMLEFT"); sep:SetPoint("BOTTOMRIGHT")
-    sep:SetHeight(1)
-    UI.ApplySeparator(sep, true)
+    -- Case arrondie (cadre bronze), comme le reste de Character.
+    UI.ApplyRowCard(row)
+    function row:SetTurn(isCurrent) row:SetCardTurn(isCurrent) end
 
     -- Nom du joueur
     local nameTxt = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     UI.ApplyBodyText(nameTxt)
     nameTxt:SetText(playerName)
-    nameTxt:SetPoint("TOPLEFT", PAD, -4)
+    nameTxt:SetPoint("TOPLEFT", PAD + 2, -6)
 
     -- Labels des stats
     local function StatLabel(txt, col, yOff)
@@ -226,15 +184,7 @@ local function PlayerRow(parent, playerName)
     noData:SetText("En attente de données...")
     noData:SetPoint("LEFT", PAD, 0); noData:Hide()
 
-    function row:SetSelected(selected)
-        if selected then
-            selectedTex:Show()
-            bgTex:SetColorTexture(unpack(UI.colors.rowBgSelected))
-        else
-            selectedTex:Hide()
-            bgTex:SetColorTexture(unpack(UI.colors.rowBg))
-        end
-    end
+    function row:SetSelected(selected) row:SetCardSelected(selected) end
 
     row:SetScript("PostClick", function()
         if SelectPlayerForImpact then SelectPlayerForImpact(playerName) end
@@ -745,8 +695,8 @@ UI.ApplySeparator(titleSep, true)
 -- ── ScrollFrame ───────────────────────────────────────────────────────────────
 
 local scrollFrame = CreateFrame("ScrollFrame", nil, mjPanel)
-scrollFrame:SetPoint("TOPLEFT",     mjPanel, "TOPLEFT",     2,  -24)
-scrollFrame:SetPoint("BOTTOMRIGHT", mjPanel, "BOTTOMRIGHT", -18,  4)
+scrollFrame:SetPoint("TOPLEFT",     mjPanel, "TOPLEFT",     8,  -26)
+scrollFrame:SetPoint("BOTTOMRIGHT", mjPanel, "BOTTOMRIGHT", -20,  8)
 scrollFrame:EnableMouseWheel(true)
 
 local content = CreateFrame("Frame", nil, scrollFrame)
@@ -961,7 +911,7 @@ local function Rebuild()
 
         local data = (name == myName) and C:GetMyChar() or C.groupData[name]
         row:Refresh(data)
-        totalH = totalH + ROW_H + 2
+        totalH = totalH + ROW_H + 4
     end
 
     content:SetHeight(math.max(1, totalH))
@@ -1053,35 +1003,11 @@ local function NpcRow(parent, npcId)
     row:EnableMouse(true)
     row:RegisterForClicks("AnyUp")
 
-    local bgTex = row:CreateTexture(nil, "BACKGROUND")
-    bgTex:SetAllPoints()
-    bgTex:SetColorTexture(unpack(UI.colors.rowBg))
-    row.bgTex = bgTex
+    -- Case arrondie (cadre bronze), comme le reste de Character.
+    UI.ApplyRowCard(row)
+    function row:SetTurn(isCurrent) row:SetCardTurn(isCurrent) end
 
-    local selectedTex = row:CreateTexture(nil, "BORDER")
-    selectedTex:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
-    selectedTex:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
-    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
-    selectedTex:Hide()
-    row.selectedTex = selectedTex
-
-    local sep = row:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("BOTTOMLEFT"); sep:SetPoint("BOTTOMRIGHT")
-    sep:SetHeight(1)
-    UI.ApplySeparator(sep, true)
-
-    local turnBorder = AddTurnBorder(row)
-    function row:SetTurn(isCurrent) SetTurnBorderShown(turnBorder, isCurrent) end
-
-    function row:SetSelected(selected)
-        if selected then
-            selectedTex:Show()
-            bgTex:SetColorTexture(unpack(UI.colors.rowBgSelected))
-        else
-            selectedTex:Hide()
-            bgTex:SetColorTexture(unpack(UI.colors.rowBg))
-        end
-    end
+    function row:SetSelected(selected) row:SetCardSelected(selected) end
 
     row:SetScript("PostClick", function()
         if SelectPlayerForImpact then SelectPlayerForImpact(row.npcId) end
@@ -1089,7 +1015,7 @@ local function NpcRow(parent, npcId)
 
     local iconTex = row:CreateTexture(nil, "ARTWORK")
     iconTex:SetSize(16, 16)
-    iconTex:SetPoint("TOPLEFT", row, "TOPLEFT", PAD, -4)
+    iconTex:SetPoint("TOPLEFT", row, "TOPLEFT", PAD + 2, -5)
     iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row.iconTex = iconTex
 
@@ -1202,8 +1128,8 @@ pnjTitleSep:SetHeight(1)
 UI.ApplySeparator(pnjTitleSep, true)
 
 local pnjScrollFrame = CreateFrame("ScrollFrame", nil, pnjPanel)
-pnjScrollFrame:SetPoint("TOPLEFT",     pnjPanel, "TOPLEFT",     2,  -24)
-pnjScrollFrame:SetPoint("BOTTOMRIGHT", pnjPanel, "BOTTOMRIGHT", -18,  4)
+pnjScrollFrame:SetPoint("TOPLEFT",     pnjPanel, "TOPLEFT",     8,  -26)
+pnjScrollFrame:SetPoint("BOTTOMRIGHT", pnjPanel, "BOTTOMRIGHT", -20,  8)
 pnjScrollFrame:EnableMouseWheel(true)
 
 local pnjContent = CreateFrame("Frame", nil, pnjScrollFrame)
@@ -1289,7 +1215,7 @@ local function RebuildPnj()
         row:SetPoint("TOPRIGHT", pnjContent, "TOPRIGHT", 0, -totalH)
         row:Show()
         row:Refresh(p)
-        totalH = totalH + ROW_H + 2
+        totalH = totalH + ROW_H + 4
     end
 
     pnjContent:SetHeight(math.max(1, totalH))

@@ -7,7 +7,7 @@ local C  = Character
 local UI = C.RPGUI or OS2.UI
 
 local W, PAD = 244, 6
-local ROW_H = 32
+local ROW_H = 36
 
 -- Les commandes suivent la zone visible de la liste (huit alliés au maximum).
 -- Leur hauteur inclut les deux menus côte à côte et les actions groupées.
@@ -134,31 +134,21 @@ local function MakeRow(parent, name)
     row:RegisterForClicks("AnyUp")
     ApplyTargetAttribute(row, name)
 
-    local bg = row:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(unpack(UI.colors.rowBg))
-    row.bg = bg
-
-    local selectedTex = row:CreateTexture(nil, "BORDER")
-    selectedTex:SetAllPoints()
-    selectedTex:SetColorTexture(unpack(UI.colors.rowSelection))
-    selectedTex:Hide()
-    row.selectedTex = selectedTex
+    -- Case arrondie (cadre bronze), comme le reste de Character.
+    UI.ApplyRowCard(row)
 
     local nameFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    nameFS:SetPoint("TOPLEFT", row, "TOPLEFT", 6, -5)
-    nameFS:SetPoint("TOPRIGHT", row, "TOPRIGHT", -6, -5)
+    nameFS:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -6)
+    nameFS:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -6)
     nameFS:SetJustifyH("LEFT")
     nameFS:SetWordWrap(false)
     UI.ApplyBodyText(nameFS)
 
     -- Vue alliés : seulement la proportion de PV, jamais de valeurs chiffrées.
-    local healthBar = UI.HealthMini(row, -20)
-    local sep = row:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("BOTTOMLEFT")
-    sep:SetPoint("BOTTOMRIGHT")
-    sep:SetHeight(1)
-    UI.ApplySeparator(sep, true)
+    local healthBar = UI.HealthMini(row, -21)
+    -- Retrait de la barre : elle reste dans le filet arrondi de la case.
+    healthBar:ClearAllPoints()
+    healthBar:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -21); healthBar:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -21)
 
     function row:Refresh(playerName)
         row.playerName = playerName
@@ -169,15 +159,7 @@ local function MakeRow(parent, name)
         row:SetSelected(selectedPlayers[playerName])
     end
 
-    function row:SetSelected(selected)
-        if selected then
-            selectedTex:Show()
-            bg:SetColorTexture(unpack(UI.colors.rowBgSelected))
-        else
-            selectedTex:Hide()
-            bg:SetColorTexture(unpack(UI.colors.rowBg))
-        end
-    end
+    function row:SetSelected(selected) row:SetCardSelected(selected) end
 
     row:SetScript("PostClick", function(self, button)
         if button == "LeftButton" then
