@@ -161,14 +161,29 @@ local function Decode(payload)
     if pos~=#payload+1 then return end
     return db,editors
 end
--- Envoie la bibliothèque affichée : la vôtre (avec vos éditeurs), ou celle
--- d'un créateur dont vous êtes éditeur (sous son nom, révision suivante).
-function C:SendSkillLibrary()
+-- Partage partiel : seules les entrées cochées ({[catégorie]={[nom]=true}}).
+-- Le raid remplace sa copie par cet envoi, les autres entrées n'y sont plus.
+local function Pick(db,picked)
+    if not picked then return db end
+    local out,count={},0
+    for _,category in ipairs(categories) do
+        out[category]={}
+        for name,skill in pairs(db[category] or {}) do
+            if picked[category] and picked[category][name] then out[category][name]=skill;count=count+1 end
+        end
+    end
+    return out,count
+end
+-- Envoie la bibliothèque affichée : la vôtre (avec vos éditeurs), en entier
+-- ou seulement les entrées choisies (picked), ou celle d'un créateur dont
+-- vous êtes éditeur (toujours entière, sous son nom, révision suivante).
+function C:SendSkillLibrary(picked)
     local owner=self:GetSkillLibraryOwner()
     if owner==self.COMMON_SKILL_LIBRARY then return false,"La bibliothèque commune ne s'envoie pas" end
     if self:IsSkillLibraryReadOnly() then return false,"Seul le créateur ou un éditeur peut envoyer cette bibliothèque" end
     if not self.enabled or not IsInRaid() then return false,"Rejoignez un raid pour envoyer" end
     if next(offered) or #queue>0 then return false,"Un envoi est déjà en cours" end
+    if picked and owner then return false,"Seule votre bibliothèque se partage en partie" end
     local payload,err,revision,suffix
     if owner then
         local library=CharacterDB.skillLibraries[owner]
@@ -177,7 +192,9 @@ function C:SendSkillLibrary()
         library.revision=(library.revision or 0)+1
         revision,suffix=library.revision,"|"..owner
     else
-        payload,err=Encode(self:GetOwnedSkillLibrary(),self:GetSkillEditors())
+        local db,count=Pick(self:GetOwnedSkillLibrary(),picked)
+        if picked and count==0 then return false,"Cochez au moins une entrée à partager" end
+        payload,err=Encode(db,self:GetSkillEditors())
         if not payload then return false,err end
         CharacterDB.skillRevision=(CharacterDB.skillRevision or 0)+1
         revision,suffix=CharacterDB.skillRevision,""

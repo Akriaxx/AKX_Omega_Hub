@@ -1004,6 +1004,13 @@ mjPanel:SetScript("OnShow", function()
     if myName then C.groupData[myName] = C:GetMyChar() end
     if impactPanel:IsShown() then
         -- Groupe rouvert depuis les Actions du MJ : il se recolle à leur droite.
+        -- Les Actions peuvent encore être ancrées au groupe (ouverture
+        -- précédente) : on les fixe d'abord à l'écran, sinon ancrage circulaire.
+        local left, top = impactPanel:GetLeft(), impactPanel:GetTop()
+        if left and top then
+            impactPanel:ClearAllPoints()
+            impactPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        end
         mjPanel:ClearAllPoints()
         mjPanel:SetPoint("TOPLEFT", impactPanel, "TOPRIGHT", 2, 0)
     else

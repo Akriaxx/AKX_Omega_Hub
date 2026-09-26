@@ -58,3 +58,17 @@ Tous les participants doivent avoir cette version et la bibliothèque correspond
 ## Menu Action en losange
 
 Cinq catégories visibles : Actions au centre, Offensive en haut, Distance à gauche, Défensive à droite et Grimoire en bas. Grimoire possède sa propre catégorie dans le builder, les références `{{Grimoire : Nom}}`, le panneau de sélection et la synchronisation. Les bibliothèques existantes sont conservées ; la nouvelle catégorie commence vide. Index reste réservé aux références. `Tests/grimoire-art.py` génère la plaque ActionDiamond et le livre IconGrimoire. Tous les destinataires doivent être mis à jour pour recevoir une bibliothèque contenant des entrées Grimoire.
+
+## Coût des entrées
+
+Le builder propose « Coût » : Vie, Mana ou Endurance et un entier positif. Le coût est affiché sur la fiche et synchronisé avec les bibliothèques. « Utiliser » réserve visuellement les ressources sur votre ATH (gris strié sur la jauge, gris sur les bonus consommés en premier), sans modifier les valeurs pendant la rédaction. Annuler libère la réservation ; valider vérifie les ressources puis retire le coût une seule fois, via le setter habituel, avant l’envoi. Une ressource devenue insuffisante laisse le formulaire ouvert.
+
+Une entrée dont le coût dépasse la ressource restante garde son bouton « Utiliser » grisé ; le survol en donne la raison (« L’Endurance n’est pas suffisante pour utiliser ceci. »).
+
+## États
+
+Onglet indicatif comme l’Index : consultable dans le builder et par `{{États : Nom}}`, sans place dans le menu Action. Tous les destinataires doivent être mis à jour pour recevoir une bibliothèque contenant des entrées États.
+
+## Partage partiel
+
+« Envoyer au raid » propose Tout ou Certaines entrées (cases à cocher, choix retenu). Chaque envoi remplace la copie du raid : une entrée décochée disparaît chez les autres. Seule votre propre bibliothèque se partage en partie ; un éditeur renvoie toujours la bibliothèque d’un créateur entière.

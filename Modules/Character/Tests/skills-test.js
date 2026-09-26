@@ -18,6 +18,7 @@ function M:SetFrameStrata(v) self.strata=v end
 function M:SetFrameLevel(v) self.level=v end
 function M:GetFrameLevel() return self.level or 1 end
 function M:IsMouseOver() return false end
+function M:SetDesaturated(v) self.desaturated=v end
 function M:GetRight() return 100 end
 function M:SetSpacing() end
 function M:SetWordWrap() end
@@ -336,6 +337,7 @@ assert(C:IsSkillLibraryReadOnly())
 assert(not C:SaveSkill('offensive',nil,'Bad','',''))
 assert(not C:DeleteSkill('offensive','Legacy'))
 assert(not C:SendSkillLibrary())
+assert(select(2,C:SendSkillLibrary({offensive={Legacy=true}}))~=nil)
 -- Sending requires addon discovery; snapshots are never sent to silent peers.
 pickLibrary(false)
 assert(not C:IsSkillLibraryReadOnly())
@@ -354,6 +356,31 @@ for _,fn in ipairs(timers) do fn() end
 network.scripts.OnUpdate(network,.1)
 assert(C:SendSkillLibrary())
 C:StopSkillTransfers()
+-- Partage partiel : seules les entrées cochées partent, les autres restent chez soi.
+do local own=C:GetOwnedSkillLibrary();local keepCat,keepName,total
+total=0;for _,cat in ipairs(C.SKILL_CATEGORIES) do for name in pairs(own[cat.key]) do total=total+1;if not keepCat then keepCat,keepName=cat.key,name end end end
+assert(total>1,'au moins deux entrées pour tester')
+assert(not C:SendSkillLibrary({}),'rien de coché : refusé')
+sent={};assert(C:SendSkillLibrary({[keepCat]={[keepName]=true}}))
+for i=1,12 do network.scripts.OnUpdate(network,.1) end
+local pid,_,chunks=sent[1][2]:match('^H|([^|]+)|(%d+)|(%d+)');receive('Y|'..pid)
+for i=1,40 do network.scripts.OnUpdate(network,.1) end
+local parts={};for _,m in ipairs(sent) do local id2,idx,chunk=m[2]:match('^D|([^|]+)|(%d+)|(.*)$');if id2==pid then parts[tonumber(idx)]=chunk end end
+assert(#parts==tonumber(chunks),'tous les fragments')
+local db=C.SkillLibraryCodec.Decode(table.concat(parts));local got=0
+for _,cat in ipairs(C.SKILL_CATEGORIES) do for _ in pairs(db[cat.key]) do got=got+1 end end
+assert(got==1 and db[keepCat][keepName],'seule l’entrée cochée est envoyée')
+C:StopSkillTransfers()
+-- Panneau : « Envoyer au raid » ouvre le choix, « Certaines entrées » montre la liste.
+local sendButton;for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='Envoyer au raid' and o.parent==CharacterSkillsBuilder then sendButton=o end end
+assert(sendButton,'bouton Envoyer');sendButton.scripts.OnClick(sendButton)
+local share=CharacterSkillShare;assert(share and share:IsShown() and not share.viewport:IsShown(),'Tout par défaut')
+CharacterDB.skillShare.mode='some';share.choice:Refresh()
+share.allBtn.scripts.OnClick(share.allBtn);assert(share.viewport:IsShown())
+local n=0;for _,names in pairs(CharacterDB.skillShare.picked) do for _ in pairs(names) do n=n+1 end end
+assert(n==total,'Tout cocher');share.noneBtn.scripts.OnClick(share.noneBtn);assert(not next(CharacterDB.skillShare.picked))
+sendButton.scripts.OnClick(sendButton);assert(not share:IsShown())
+CharacterDB.skillShare=nil end
 -- Consultation : bibliothèques fusionnées, créateur affiché, doublons identiques retirés.
 CharacterDB.skillLibraries['zed-Realm']={revision=1,categories={base={},offensive={Frappe={name='Frappe',icon='x',description='zed'},Esquive={name='Esquive',icon='',description=''}},defensive={},ranged={},index={}}}
 CharacterDB.skillLibraries['amy-Realm']={revision=1,categories={base={},offensive={Frappe={name='Frappe',icon='x',description='zed'}},defensive={},ranged={},index={}}}
@@ -458,10 +485,20 @@ costly.cost={resource='endurance',amount=5};costLink=C:SkillChatLink(costly,C:Sk
 assert(C:PrepareSkillRaidMessage(costLink,costly):find('[Coût : 5 End.]',1,true))
 assert(not message:find('Coût',1,true),'sans coût : rien ajouté') end
 do local t=C:SkillCostShortfallText({resource='mana',amount=50})
-assert(t:find('^Le |cff%x%x%x%x%x%xMana|r n’est pas suffisant pour lancer cette compétence%.$'),t)
+assert(t:find('^Le |cff%x%x%x%x%x%xMana|r n’est pas suffisant pour utiliser ceci%.$'),t)
 assert(C:SkillCostShortfallText({resource='hp',amount=1}):find('Vie|r n’est pas suffisante',1,true))
 assert(C:SkillCostShortfallText({resource='endurance',amount=1}):find('^L’|cff'))
 assert(C:SkillCostShortfallText({resource='hp',amount=1}):find('|cff1ab333Vie',1,true),'Vie en vert') end
+-- Ressource insuffisante : « Utiliser » grisé, la raison au survol, rien ne s'ouvre.
+do local poor={name=mergedUse.name,icon=mergedUse.icon,description=mergedUse.description,usable=true,cost={resource='mana',amount=1000000}}
+assert(C:SkillCostBlockedText(poor):find('pour utiliser ceci',1,true) and not C:SkillCostBlockedText(mergedUse))
+C:ShowSkillTooltip(UIParent,poor);local use=CharacterSkillCard1.useButton
+assert(use:IsShown() and use.blocked and use.emblem.desaturated,'Utiliser grisé')
+use.scripts.OnClick(use);C:OpenSkillUse(poor)
+assert(not (CharacterSkillUsePopup and CharacterSkillUsePopup:IsShown()),'rien ne s’ouvre')
+use.scripts.OnEnter(use);assert(CharacterSkillNameTip:IsShown() and CharacterSkillNameTip.note.text==use.blocked,'raison au survol')
+use.scripts.OnLeave(use);C:ShowSkillTooltip(UIParent,mergedUse)
+assert(not CharacterSkillCard1.useButton.blocked and not use.emblem.desaturated) end
 do local costly={name=mergedUse.name,icon=mergedUse.icon,description=mergedUse.description,usable=true,cost={resource='hp',amount=3}}
 local costLink=C:SkillChatLink(costly,C:SkillChatID(costly))
 local sent=C:PrepareSkillRaidMessage('A '..costLink..' [Coût : 3 HP] puis B',costly)
@@ -482,6 +519,11 @@ local grimoireRoundTrip=C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:
 assert(grimoireRoundTrip.grimoire.Codex.description=='Page du grimoire')
 assert(C.ActionFrames.cats.grimoire and C.ActionFrames.OFFSETS.grimoire[2]==-70)
 assert(C.ActionFrames.OFFSETS.ranged[2]==0 and C.ActionFrames.OFFSETS.defensive[2]==0)
+-- États : onglet de bibliothèque indicatif, comme l'Index, sans place dans Action.
+assert(C:SaveSkill('etats',nil,'Étourdi','134400','Ne peut pas agir'))
+assert(C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary())).etats['Étourdi'])
+assert(not C.ActionFrames.cats.etats and not C.ActionFrames.cats.index)
+assert(C:RenderSkillText('{{États : Étourdi}}'):find('|Hcharskill:etats:',1,true) and C:RenderSkillText('{{etat : Étourdi}}'):find('|Hcharskill:etats:',1,true),'références {{États : …}}')
 -- Maj + clic gauche sur Action : bascule la bibliothèque sans ouvrir le triangle.
 do local idle,root=ACTION_IDLE,ACTION_ROOT;local builderShown=CharacterSkillsBuilder:IsShown();shift=true
 idle.suppressClick=nil;root.dragging=nil;root.scripts.OnUpdate=nil
@@ -489,6 +531,22 @@ idle.scripts.OnClick(idle,'LeftButton')
 assert(CharacterSkillsBuilder:IsShown()~=builderShown and not root.scripts.OnUpdate,'Maj+clic ouvre la bibliothèque')
 idle.scripts.OnClick(idle,'LeftButton');shift=false
 assert(CharacterSkillsBuilder:IsShown()==builderShown) end
+-- Resource cost: encode, reserve without spending, cancel, then commit once.
+assert(C:SaveSkill('base',nil,'Cost Test','134400','Cost body',true,{resource='mana',amount=7}))
+assert(not C:SaveSkill('base',nil,'Bad Cost','','',true,{resource='gold',amount=7}))
+assert(not C:SaveSkill('base',nil,'Bad Cost','','',true,{resource='mana',amount=-1}))
+local paidSkill=C:GetSkill('base','Cost Test')
+local costDB=Codec.Decode(Codec.Encode(C:GetOwnedSkillLibrary()))
+assert(costDB.base['Cost Test'].cost.amount==7 and costDB.base['Cost Test'].cost.resource=='mana')
+local resources={mana={cur=10,temp=0}};C.GetMyChar=function() return resources end
+local spent=0;C.Delta=function(_,stat,delta) spent=spent+1;resources[stat].cur=resources[stat].cur+delta end
+C:OpenSkillUse(paidSkill);assert(C.skillCostReservation.amount==7 and resources.mana.cur==10)
+CharacterSkillUsePopup:Hide();assert(not C.skillCostReservation and spent==0)
+C:OpenSkillUse(paidSkill);CharacterSkillUsePopup.edit.scripts.OnEnterPressed()
+assert(spent==1 and resources.mana.cur==3 and not C.skillCostReservation)
+resources.mana.cur=10;C:OpenSkillUse(paidSkill);resources.mana.cur=3;CharacterSkillUsePopup.edit.scripts.OnEnterPressed()
+assert(spent==1 and CharacterSkillUsePopup:IsShown(),'insufficient resources must not send or spend')
+CharacterSkillUsePopup:Hide()
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

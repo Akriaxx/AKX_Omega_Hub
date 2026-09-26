@@ -142,7 +142,9 @@ function UI.CreateChoiceStrip(parent,width,label,items,getValue,setValue)
     for i,item in ipairs(items) do
         local button=UI.CreatePanelButton(holder,(width-8)/#items,22,item.label)
         button:SetPoint("TOPLEFT",(i-1)*((width-8)/#items+4),label and -16 or 0)
-        local selected=button:CreateTexture(nil,"ARTWORK");selected:SetAllPoints();selected:SetColorTexture(.58,.44,.19,.25)
+        -- Même retrait que le fond du bouton : rien ne dépasse de ses coins arrondis.
+        local selected=button:CreateTexture(nil,"ARTWORK");selected:SetPoint("TOPLEFT",5,-4);selected:SetPoint("BOTTOMRIGHT",-5,4)
+        selected:SetColorTexture(.58,.44,.19,.25)
         button.selected=selected;buttons[i]=button
         button:SetScript("OnClick",function() setValue(item.value);holder:Refresh() end)
     end

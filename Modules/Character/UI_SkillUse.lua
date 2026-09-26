@@ -103,7 +103,7 @@ function C:CanPaySkillCost(cost)
     local stat=self:GetMyChar()[cost.resource]
     return stat and (stat.cur or 0)+(stat.temp or 0)>=cost.amount
 end
--- « La Vie n'est pas suffisante… » : la ressource dans sa couleur de jauge.
+-- « L’Endurance n’est pas suffisante… » : la ressource dans sa couleur de jauge.
 local SHORTFALL={
     hp={"La ","Vie","statHP","e"},mana={"Le ","Mana","statMana",""},endurance={"L’","Endurance","statEnd","e"},
 }
@@ -111,10 +111,18 @@ function C:SkillCostShortfallText(cost)
     local entry=SHORTFALL[cost and cost.resource] or SHORTFALL.mana
     local color=(UI.colors[entry[3]] or {}).fg or {1,1,1}
     local hex=string.format("%02x%02x%02x",math.floor(color[1]*255+.5),math.floor(color[2]*255+.5),math.floor(color[3]*255+.5))
-    return entry[1].."|cff"..hex..entry[2].."|r n’est pas suffisant"..entry[4].." pour lancer cette compétence."
+    return entry[1].."|cff"..hex..entry[2].."|r n’est pas suffisant"..entry[4].." pour utiliser ceci."
+end
+-- Raison du grisage (survol), ou nil si la compétence est payable.
+function C:SkillCostBlockedText(skill)
+    local cost=skill and skill.cost
+    if skill and skill.usable==true and cost and not self:CanPaySkillCost(cost) then
+        return self:SkillCostShortfallText(cost)
+    end
 end
 function C:OpenSkillUse(skill)
     if not self.enabled or not skill or skill.usable~=true then return end
+    if self:SkillCostBlockedText(skill) then return end
     self:HideSkillTooltip()
     if popup then popup:Hide() end
     if not popup then
@@ -157,6 +165,7 @@ function C:OpenSkillUse(skill)
         edit:SetScript("OnEnterPressed",function()
             local message,err=C:PrepareSkillRaidMessage(edit:GetText(),popup.skill)
             if not message then errorText:SetText(err);return end
+            -- Garde-fou : la ressource a pu baisser pendant la saisie.
             local cost=popup.skill.cost
             if not C:CanPaySkillCost(cost) then errorText:SetText(C:SkillCostShortfallText(cost));return end
             -- Commit once, only after message validation; cancel never edits stats.

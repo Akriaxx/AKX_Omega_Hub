@@ -1,7 +1,7 @@
 -- ============================================================
 --  Character - Base de données de compétences
---  4 catégories (Actions de base / Offensive / Défensive /
---  Distance) + Index (hors du bouton Action), éditables via un builder (Paramètres -> Base de
+--  Catégories (Actions de base / Offensive / Défensive /
+--  Distance / Grimoire) + Index et États (hors du bouton Action), éditables via un builder (Paramètres -> Base de
 --  données). Chaque compétence : nom, icône, description. Nom et
 --  description acceptent la couleur [[#rrggbb]]...[[/]] ; la
 --  description, des références croisées {{Catégorie : Nom}} qui
@@ -20,6 +20,9 @@ C.SKILL_CATEGORIES = {
     -- Index : fiches consultables par référence {{Index : Nom}} et dans le
     -- builder, mais sans bouton dans le triangle du bouton Action.
     { key = "index",     label = "Index",                 tag = "Index",     aliases = { "index" }, hidden = true },
+    -- États : fiches indicatives, comme l'Index (hors du bouton Action).
+    -- ("É" n'est pas abaissé par lower() : les deux casses sont listées.)
+    { key = "etats",     label = "États",                 tag = "États",     aliases = { "états", "état", "etats", "etat", "États", "État" }, hidden = true },
 }
 local CATEGORIES = C.SKILL_CATEGORIES
 
@@ -310,7 +313,14 @@ function C:SaveSkill(catKey, oldName, name, icon, description, usable, cost)
     if not self:ValidateSkillCost(cost) then return false,"Coût : choisissez une ressource et un entier de 1 à 1 000 000." end
     local db = GetSkillDB()
     if db[catKey][name] and oldName ~= name then return false, "Ce nom existe déjà dans cette catégorie" end
-    if oldName and oldName ~= name then db[catKey][oldName] = nil end
+    if oldName and oldName ~= name then
+        db[catKey][oldName] = nil
+        -- Une entrée renommée reste cochée pour le partage partiel.
+        local picked = not selectedOwner and CharacterDB.skillShare and CharacterDB.skillShare.picked
+        if picked and picked[catKey] and picked[catKey][oldName] then
+            picked[catKey][oldName] = nil; picked[catKey][name] = true
+        end
+    end
     db[catKey][name] = {
         name = name,
         icon = (icon and icon ~= "") and icon or "Interface\\Icons\\INV_Misc_QuestionMark",
@@ -586,6 +596,20 @@ local function BuildCardFrame(card)
     card.gem:SetTexture(CARD_GEM)
 end
 
+-- Bouton « Utiliser » grisé tant que la ressource ne couvre pas le coût.
+local function UpdateUseButton(card)
+    local use=card.useButton
+    local blocked=card.skill and C.SkillCostBlockedText and C:SkillCostBlockedText(card.skill) or nil
+    use.blocked=blocked
+    use.emblem:SetDesaturated(blocked~=nil)
+    use.emblem:SetAlpha(blocked and .5 or 1)
+    use.glow:SetAlpha(blocked and 0 or .12)
+    if blocked then use.label:SetTextColor(.5,.5,.5) else use.label:SetTextColor(.94,.81,.53) end
+    if use:IsMouseOver() and use:IsVisible() then
+        if blocked then C:ShowSkillNotice(use,blocked) else C:HideSkillName() end
+    end
+end
+
 local function GetCard(depth)
     if cards[depth] then return cards[depth] end
     local card = CreateFrame("Frame", "CharacterSkillCard" .. depth, UIParent)
@@ -626,14 +650,17 @@ local function GetCard(depth)
     rightGem:SetTexture(CARD_GEM);rightGem:SetSize(7,18)
     rightGem:SetPoint("CENTER",use,"RIGHT",-1,0)
     local glow=use:CreateTexture(nil,"ARTWORK")
+    use.glow=glow
     glow:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Nexus\\NexusGlow")
     glow:SetBlendMode("ADD");glow:SetPoint("CENTER");glow:SetSize(122,30);glow:SetAlpha(.12)
     local emblem=use:CreateTexture(nil,"OVERLAY")
     emblem:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Nexus\\IconActions")
     emblem:SetSize(20,20);emblem:SetPoint("LEFT",12,0)
+    use.emblem=emblem
     local label=use:CreateFontString(nil,"OVERLAY","GameFontNormal")
     label:SetPoint("CENTER",9,0);label:SetText("Utiliser")
     label:SetTextColor(.94,.81,.53);label:SetShadowColor(0,0,0,1);label:SetShadowOffset(1,-1)
+    use.label=label
     local shine,target=.12,.12
     local function FadeTo(value)
         target=value
@@ -644,15 +671,31 @@ local function GetCard(depth)
             if shine==target then self:SetScript("OnUpdate",nil) end
         end)
     end
-    use:SetScript("OnEnter",function() FadeTo(.6);label:SetTextColor(1,.93,.72) end)
-    use:SetScript("OnLeave",function() FadeTo(.12);label:SetTextColor(.94,.81,.53) end)
-    use:SetScript("OnMouseDown",function() label:SetPoint("CENTER",9,-1);glow:SetAlpha(.8) end)
-    use:SetScript("OnMouseUp",function() label:SetPoint("CENTER",9,0);glow:SetAlpha(shine) end)
-    use:SetScript("OnHide",function(self)
-        self:SetScript("OnUpdate",nil);shine=.12;target=.12;glow:SetAlpha(.12)
-        label:SetPoint("CENTER",9,0);label:SetTextColor(.94,.81,.53)
+    -- Grisé (ressource insuffisante) : pas de lueur, la raison au survol.
+    use:SetScript("OnEnter",function(self)
+        if self.blocked then C:ShowSkillNotice(self,self.blocked);return end
+        FadeTo(.6);label:SetTextColor(1,.93,.72)
     end)
-    card.useButton:SetScript("OnClick",function()
+    use:SetScript("OnLeave",function(self)
+        C:HideSkillName()
+        if self.blocked then return end
+        FadeTo(.12);label:SetTextColor(.94,.81,.53)
+    end)
+    use:SetScript("OnMouseDown",function(self)
+        if self.blocked then return end
+        label:SetPoint("CENTER",9,-1);glow:SetAlpha(.8)
+    end)
+    use:SetScript("OnMouseUp",function(self)
+        if self.blocked then return end
+        label:SetPoint("CENTER",9,0);glow:SetAlpha(shine)
+    end)
+    use:SetScript("OnHide",function(self)
+        self:SetScript("OnUpdate",nil);shine=.12;target=.12;glow:SetAlpha(self.blocked and 0 or .12)
+        label:SetPoint("CENTER",9,0)
+        if self.blocked then label:SetTextColor(.5,.5,.5) else label:SetTextColor(.94,.81,.53) end
+    end)
+    card.useButton:SetScript("OnClick",function(self)
+        if self.blocked then return end
         if card.skill and C.OpenSkillUse then C:OpenSkillUse(card.skill) end
     end)
     card.useButton:Hide()
@@ -768,6 +811,7 @@ function ShowCard(depth, anchor, skill)
     card.skill=skill
     local usable=skill.usable == true and not skill.missing
     card.useButton:SetShown(usable)
+    UpdateUseButton(card)
     if usable then height=height+46 end
     if not card.costLabel then
         card.costLabel=content:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
@@ -824,6 +868,13 @@ function C:ShowSkillTooltip(owner, skill)
 end
 
 function C:HideSkillTooltip() if cards[1] then cards[1]:Hide() end end
+-- Ressources modifiées : le bouton « Utiliser » affiché se regrise ou se ravive.
+local previousDataChanged = C.OnMyDataChanged
+C.OnMyDataChanged = function(...)
+    if previousDataChanged then previousDataChanged(...) end
+    local card = cards[1]
+    if card and card:IsShown() and card.skill then UpdateUseButton(card) end
+end
 -- Vrai seulement si la carte principale est affichée pour ce cadre.
 function C:IsSkillTooltipOpenFor(owner)
     local card = cards[1]
@@ -832,7 +883,8 @@ end
 
 -- Survol d'un bouton de compétence : juste le nom, même habillage.
 local nameTip
-function C:ShowSkillName(owner, skill)
+-- note : message en blanc (ex. raison d'un « Utiliser » grisé) au lieu d'un nom.
+local function ShowNameTip(owner, text, note)
     if not nameTip then
         nameTip = CreateFrame("Frame", "CharacterSkillNameTip", UIParent)
         nameTip:SetFrameStrata("TOOLTIP"); nameTip:SetClampedToScreen(true)
@@ -840,15 +892,25 @@ function C:ShowSkillName(owner, skill)
         nameTip.gem:Hide()
         nameTip.title = nameTip:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         nameTip.title:SetPoint("LEFT", CARD_PAD, 0); nameTip.title:SetWordWrap(false)
+        nameTip.note = nameTip:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        nameTip.note:SetPoint("LEFT", CARD_PAD, 0); nameTip.note:SetWordWrap(false)
+        nameTip.note:SetTextColor(1, 1, 1)
         UI.ApplyTitle(nameTip.title)
     end
     GameTooltip:Hide()
-    nameTip.title:SetText(C:RenderSkillName(skill.name))
-    nameTip:SetSize(math.min(CARD_MAX_W, TextWidth(nameTip.title) + CARD_PAD * 2), CARD_HEAD + 2)
+    local fs = note and nameTip.note or nameTip.title
+    nameTip.title:SetShown(not note); nameTip.note:SetShown(note or false)
+    fs:SetText(text)
+    nameTip:SetSize(math.min(CARD_MAX_W, TextWidth(fs) + CARD_PAD * 2), CARD_HEAD + 2)
     nameTip:SetFrameLevel((owner:GetFrameLevel() or 0) + 40)
     nameTip:ClearAllPoints(); nameTip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
     nameTip:Show()
 end
+function C:ShowSkillName(owner, skill)
+    ShowNameTip(owner, C:RenderSkillName(skill.name))
+end
+-- Même habillage, un message : raison du bouton « Utiliser » grisé.
+function C:ShowSkillNotice(owner, text) ShowNameTip(owner, text, true) end
 
 function C:HideSkillName() if nameTip then nameTip:Hide() end end
 
@@ -1519,17 +1581,40 @@ local function Build()
     dragHandle:SetScript("OnMouseUp", function() panel:StopMovingOrSizing() end)
 
     -- Onglets
+    -- Un filet entre deux onglets ; entre les catégories d'Action et les
+    -- indicatives (Index, États), un losange à la place du filet (même
+    -- espacement partout, seul l'ornement marque la séparation).
     tabButtons = {}
     local tabW = (PANEL_W - 20) / #CATEGORIES
+    local tabX, reach = 10, 0
     for i, cat in ipairs(CATEGORIES) do
+        if i > 1 and cat.hidden and not CATEGORIES[i - 1].hidden then
+            local cx = tabX - 1
+            for _, dy in ipairs({ -10, 10 }) do
+                local line = panel:CreateTexture(nil, "ARTWORK")
+                line:SetSize(1, 6); line:SetPoint("CENTER", panel, "TOPLEFT", cx, -41 + dy)
+                UI.ApplySeparator(line)
+            end
+            local gem = panel:CreateTexture(nil, "OVERLAY")
+            gem:SetTexture(CARD_GEM); gem:SetSize(7, 14)
+            gem:SetPoint("CENTER", panel, "TOPLEFT", cx, -41)
+            -- Le soulignage des deux onglets voisins s'arrête au bord du losange.
+            tabButtons[i - 1].line:SetPoint("BOTTOMRIGHT", -3, 0)
+            reach = -3
+        elseif i > 1 then
+            local line = panel:CreateTexture(nil, "ARTWORK")
+            line:SetSize(1, 12); line:SetPoint("CENTER", panel, "TOPLEFT", tabX - 1, -41)
+            UI.ApplySeparator(line, true)
+        end
         local btn = CreateFrame("Button", nil, panel)
         btn:SetSize(tabW - 2, 22)
-        btn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + (i - 1) * tabW, -30)
+        btn:SetPoint("TOPLEFT", panel, "TOPLEFT", tabX, -30)
+        tabX = tabX + tabW
         btn.cat = cat
         local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         label:SetAllPoints(); label:SetJustifyH("CENTER"); label:SetText(cat.tag=="Action" and "Actions de base" or cat.tag)
         local line = btn:CreateTexture(nil, "ARTWORK")
-        line:SetPoint("BOTTOMLEFT"); line:SetPoint("BOTTOMRIGHT"); line:SetHeight(2)
+        line:SetPoint("BOTTOMLEFT", -reach, 0); line:SetPoint("BOTTOMRIGHT"); line:SetHeight(2); reach = 0
         btn.label, btn.line = label, line
         btn:SetScript("OnClick", function() SelectTab(cat) end)
         tabButtons[i] = btn
@@ -1716,11 +1801,147 @@ local function Build()
         GameTooltip:Hide()
         if libraryMenu and libraryMenu:IsShown() then libraryMenu:Hide() else OpenLibraryMenu() end
     end)
-    sendBtn:SetScript("OnClick",function()
-        local ok,message=C:SendSkillLibrary()
+    -- ── Partage : tout, ou seulement certaines entrées (votre bibliothèque).
+    -- Le choix est retenu d'un envoi à l'autre (CharacterDB.skillShare).
+    local sharePanel
+    local function ShareState()
+        CharacterDB.skillShare=CharacterDB.skillShare or {}
+        local state=CharacterDB.skillShare
+        state.mode=state.mode=="some" and "some" or "all"
+        state.picked=state.picked or {}
+        return state
+    end
+    local function Send(picked)
+        local ok,message=C:SendSkillLibrary(picked)
         ShowStatus(message,not ok)
-        if ok then FlyEnvelope() end
+        if ok then FlyEnvelope();if sharePanel then sharePanel:Hide() end end
+    end
+    local SHARE_W,SHARE_LIST_TOP,SHARE_LIST_H,SHARE_ROW=280,76,240,20
+    local shareRows={}
+    local function RefreshShare()
+        local state=ShareState()
+        local some=state.mode=="some"
+        sharePanel.choice:Refresh()
+        sharePanel.viewport:SetShown(some);sharePanel.allBtn:SetShown(some);sharePanel.noneBtn:SetShown(some)
+        local db,lines,picked=C:GetOwnedSkillLibrary(),{},0
+        for _,cat in ipairs(CATEGORIES) do
+            local skills={}
+            for name,skill in pairs(db[cat.key] or {}) do skills[#skills+1]=skill end
+            if #skills>0 then
+                table.sort(skills,function(x,y) return C:SkillSortKey(x.name)<C:SkillSortKey(y.name) end)
+                lines[#lines+1]={header=cat.label}
+                for _,skill in ipairs(skills) do
+                    local checked=state.picked[cat.key] and state.picked[cat.key][skill.name] or false
+                    if checked then picked=picked+1 end
+                    lines[#lines+1]={cat=cat.key,skill=skill,checked=checked}
+                end
+            end
+        end
+        for i,line in ipairs(lines) do
+            local row=shareRows[i]
+            if not row then
+                row=CreateFrame("Button",nil,sharePanel.content);row:SetSize(SHARE_W-36,SHARE_ROW)
+                row:SetPoint("TOPLEFT",8,-4-(i-1)*SHARE_ROW)
+                row.header=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.header:SetPoint("LEFT",2,0);UI.ApplyTitle(row.header)
+                row.check=UI.CreateStyledCheckbox(row,"");row.check:SetPoint("LEFT",10,0)
+                row.check.label:SetPoint("RIGHT",row,"RIGHT",-4,0);row.check.label:SetJustifyH("LEFT");row.check.label:SetWordWrap(false)
+                local function Toggle()
+                    local entry=row.line;if not entry or entry.header then return end
+                    local byCat=ShareState().picked
+                    byCat[entry.cat]=byCat[entry.cat] or {}
+                    byCat[entry.cat][entry.skill.name]=(not entry.checked) or nil
+                    RefreshShare()
+                end
+                row.check:SetScript("OnClick",Toggle);row:SetScript("OnClick",Toggle)
+                shareRows[i]=row
+            end
+            row.line=line
+            row.header:SetShown(line.header~=nil);row.check:SetShown(line.header==nil);row.check.label:SetShown(line.header==nil)
+            if line.header then row.header:SetText(line.header)
+            else row.check.label:SetText(C:RenderSkillName(line.skill.name));row.check:SetChecked(line.checked) end
+            row:Show()
+        end
+        for i=#lines+1,#shareRows do shareRows[i]:Hide() end
+        sharePanel.content:SetHeight(#lines*SHARE_ROW+8)
+        sharePanel.empty:SetShown(some and #lines==0)
+        local total=0;for _,line in ipairs(lines) do if not line.header then total=total+1 end end
+        sharePanel.hint:SetText(some and ("Le raid ne verra que les entrées cochées ("..picked.." / "..total..").")
+            or "Toute votre bibliothèque est envoyée au raid.")
+        -- Pile verticale : choix, (liste, cocher/décocher), aide, Envoyer.
+        local hintTop=some and SHARE_LIST_TOP+SHARE_LIST_H+36 or SHARE_LIST_TOP
+        sharePanel.hint:ClearAllPoints()
+        sharePanel.hint:SetPoint("TOPLEFT",10,-hintTop);sharePanel.hint:SetPoint("RIGHT",-10,0)
+        sharePanel.send:SetEnabled(not some or picked>0)
+        sharePanel:SetHeight(hintTop+math.ceil(sharePanel.hint:GetStringHeight() or 12)+10+26+8)
+    end
+    local function BuildShare()
+        sharePanel=CreateFrame("Frame","CharacterSkillShare",panel)
+        sharePanel:SetFrameStrata("FULLSCREEN_DIALOG");sharePanel:SetFrameLevel(panel:GetFrameLevel()+60)
+        sharePanel:SetWidth(SHARE_W);sharePanel:EnableMouse(true)
+        sharePanel:SetPoint("TOPRIGHT",sendBtn,"BOTTOMRIGHT",0,-4)
+        local bg=sharePanel:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints();UI.ApplyWindowBackground(bg,.98);UI.ApplyBorder(sharePanel)
+        local title=sharePanel:CreateFontString(nil,"OVERLAY","GameFontNormal")
+        title:SetPoint("TOPLEFT",10,-8);title:SetText("Partager au raid");UI.ApplyTitle(title)
+        sharePanel.choice=UI.CreateChoiceStrip(sharePanel,SHARE_W-16,"Entrées partagées",{
+            {label="Tout",value="all"},{label="Certaines entrées",value="some"},
+        },function() return ShareState().mode end,function(value) ShareState().mode=value;RefreshShare() end)
+        sharePanel.choice:SetPoint("TOPLEFT",8,-30)
+        local viewport=CreateFrame("ScrollFrame",nil,sharePanel)
+        viewport:SetPoint("TOPLEFT",10,-SHARE_LIST_TOP);viewport:SetSize(SHARE_W-20,SHARE_LIST_H)
+        UI.ApplyInputBorder(viewport)
+        viewport:EnableMouseWheel(true)
+        viewport:SetScript("OnMouseWheel",function(self,delta)
+            self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*SHARE_ROW*2)))
+        end)
+        local content=CreateFrame("Frame",nil,viewport);content:SetSize(SHARE_W-20,1)
+        viewport:SetScrollChild(content)
+        sharePanel.viewport,sharePanel.content=viewport,content
+        sharePanel.empty=sharePanel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        sharePanel.empty:SetPoint("CENTER",viewport,"CENTER");sharePanel.empty:SetText("Votre bibliothèque est vide.")
+        UI.ApplyMutedText(sharePanel.empty)
+        local function SetAll(on)
+            local state=ShareState();state.picked={}
+            if on then
+                local db=C:GetOwnedSkillLibrary()
+                for _,cat in ipairs(CATEGORIES) do
+                    for name in pairs(db[cat.key] or {}) do state.picked[cat.key]=state.picked[cat.key] or {};state.picked[cat.key][name]=true end
+                end
+            end
+            RefreshShare()
+        end
+        sharePanel.allBtn=UI.CreatePanelButton(sharePanel,(SHARE_W-24)/2,22,"Tout cocher")
+        sharePanel.allBtn:SetPoint("TOPLEFT",viewport,"BOTTOMLEFT",0,-6)
+        sharePanel.allBtn:SetScript("OnClick",function() SetAll(true) end)
+        sharePanel.noneBtn=UI.CreatePanelButton(sharePanel,(SHARE_W-24)/2,22,"Tout décocher")
+        sharePanel.noneBtn:SetPoint("TOPRIGHT",viewport,"BOTTOMRIGHT",0,-6)
+        sharePanel.noneBtn:SetScript("OnClick",function() SetAll(false) end)
+        sharePanel.hint=sharePanel:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        sharePanel.hint:SetJustifyH("LEFT");UI.ApplyMutedText(sharePanel.hint)
+        sharePanel.send=UI.CreatePanelButton(sharePanel,SHARE_W-16,26,"Envoyer au raid")
+        sharePanel.send:SetPoint("BOTTOMLEFT",8,8)
+        sharePanel.send:SetScript("OnClick",function()
+            local state=ShareState()
+            Send(state.mode=="some" and state.picked or nil)
+        end)
+        sharePanel:Hide()
+    end
+    sendBtn:SetScript("OnClick",function()
+        -- Bibliothèque d'un créateur (éditeur) : toujours renvoyée entière.
+        if selectedOwner then Send();return end
+        if not sharePanel then BuildShare() end
+        if sharePanel:IsShown() then sharePanel:Hide();return end
+        if rightsPanel then rightsPanel:Hide() end
+        RefreshShare();sharePanel:Show()
     end)
+    panel:HookScript("OnHide",function() if sharePanel then sharePanel:Hide() end end)
+    -- Changer de bibliothèque (menu du bouton) ferme le partage.
+    ownerBtn:HookScript("OnClick",function() if sharePanel then sharePanel:Hide() end end)
+    local previousSkillsChanged=C.OnSkillsChanged
+    C.OnSkillsChanged=function(...)
+        if previousSkillsChanged then previousSkillsChanged(...) end
+        if sharePanel and sharePanel:IsShown() then RefreshShare() end
+    end
     -- ── Droits d'édition : les éditeurs peuvent modifier votre bibliothèque
     -- reçue et la renvoyer au raid sous votre nom.
     local editorRows={}
@@ -1773,10 +1994,16 @@ local function Build()
         rightsPanel:Hide()
     end
     rightsBtn:SetScript("OnClick",function()
+        GameTooltip:Hide()
         if not rightsPanel then BuildRights() end
-        if rightsPanel:IsShown() then rightsPanel:Hide() else RefreshRights();rightsPanel:Show() end
+        if rightsPanel:IsShown() then rightsPanel:Hide() else
+            if sharePanel then sharePanel:Hide() end
+            RefreshRights();rightsPanel:Show()
+        end
     end)
     rightsBtn:HookScript("OnEnter",function(self)
+        -- Panneau ouvert : l'explication est déjà dedans.
+        if rightsPanel and rightsPanel:IsShown() then return end
         GameTooltip:SetOwner(self,"ANCHOR_BOTTOM")
         GameTooltip:AddLine("Droits d'édition",unpack(UI.colors.title))
         GameTooltip:AddLine("Ciblez un joueur et donnez-lui le droit de modifier votre bibliothèque et de la renvoyer au raid sous votre nom.",1,1,1,true)
