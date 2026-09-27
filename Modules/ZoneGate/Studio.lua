@@ -5,6 +5,45 @@ local function copy(value)
     local result={};for k,v in pairs(value) do result[k]=copy(v) end;return result
 end
 ZG.CopyTheme=copy
+-- Editor-only drafts are never inserted in the saved theme library or sent.
+local editor={}
+ZG.ThemeEditor=editor
+setmetatable(editor,{__index=function(_,key)
+    local value=ZG[key]
+    if type(value)=="function" and (key:match("^SetTheme") or key=="RenameTheme" or key=="SetStudioOption" or key=="RestoreStudioTheme") then
+        return function(_,id,...)
+            return value(editor.draft and editor.draft.id==id and editor or ZG,id,...)
+        end
+    end
+    return value
+end})
+function editor:GetTheme(id)
+    if self.draft and self.draft.id==id then return self.draft end
+    return ZG:GetTheme(id)
+end
+function editor:ScheduleBroadcast() end
+local draftSerial=0
+function editor:BeginDraft(preset,source)
+    draftSerial=draftSerial+1
+    local draft=source and copy(source) or preset and ZG:StudioPresetTheme(preset) or copy(ZG.DefaultTheme)
+    draft.id="editor_draft_"..draftSerial;draft.creator=UnitName("player")
+    draft.name=source and ((source.name or "Thème").." — copie") or preset and preset.name or "Nouveau thème"
+    self.draft=draft
+    return draft
+end
+function editor:CancelDraft() self.draft=nil end
+function editor:CommitDraft()
+    local draft=self.draft
+    if not draft then return end
+    local name=(draft.name or ""):match("^%s*(.-)%s*$")
+    if not name or name=="" then return nil,"Donnez un nom au thème avant de le créer." end
+    local saved=ZG:CreateTheme(name)
+    if not saved then return end
+    local snapshot=copy(draft);snapshot.name=name
+    ZG:RestoreStudioTheme(saved.id,snapshot)
+    self.draft=nil
+    return saved
+end
 ZG.StudioDesigns={classic="Classique",souls="Cendres — dark fantasy",western="Frontière — western",sumi="Encre — samouraï",scifi="Signal — science-fiction",deco="Éclipse — art déco",minimal="Horizon — cinéma"}
 ZG.StudioMotions={fade="Fondu lent",rise="Élévation",stamp="Impact",split="Déploiement"}
 ZG.StudioPlacements={top="Haut de l'écran",center="Centre",bottom="Bas de l'écran"}

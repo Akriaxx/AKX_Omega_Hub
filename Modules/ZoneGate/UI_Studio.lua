@@ -1,10 +1,10 @@
 -- Visual workstation built around the existing theme setters and renderer.
-local ZG,UI=ZoneGate,OS2.UI
+local ZG,UI=ZoneGate.ThemeEditor,ZoneGate.EditorUI or OS2.UI
 local panel=ZoneGateThemePanel
 local c=panel.studioControls
 local W,H=1280,760
 panel:SetSize(W,H);panel:SetClampedToScreen(true)
-c.title:SetText("ZONE GATE  /  Atelier des entrées")
+c.title:SetText("CROSSINGS  /  Atelier des bannières")
 local function place(region,parent,x,y)
     region:ClearAllPoints();region:SetPoint("TOPLEFT",parent,"TOPLEFT",x,-y)
 end
@@ -29,13 +29,13 @@ fit()
 place(c.listScroll,panel,12,110);c.listScroll:SetHeight(628)
 place(c.listSep,panel,196,48);c.listSep:SetHeight(696)
 place(c.form,panel,816,80);c.form:SetSize(448,650)
-c.placeholder:SetWidth(420);c.placeholder:SetText("Créez un style depuis la galerie, ou sélectionnez un thème dans votre bibliothèque.\n\nLes thèmes restent réutilisables dans vos zones et sous-zones.")
+c.placeholder:SetWidth(420);c.placeholder:SetText("Choisissez un modèle pour ouvrir le builder.\n\nPersonnalisez votre brouillon, puis cliquez sur Créer le thème. Rien n'est ajouté à la bibliothèque avant cette validation.")
 local search=UI.CreateStyledEditBox(panel,168,24,false);place(search,panel,12,76)
 search:SetScript("OnTextChanged",function(self) panel.searchText=string.lower(self:GetText() or "");panel:RefreshList() end)
 c.listHeader:SetText("Mes thèmes")
 local inspectorTitle=text(panel,"PERSONNALISER",820,55,13)
-text(panel,"Enregistrement automatique",820,710)
-text(panel,"Affectation du thème : panneau Zones > Thème",820,731)
+local saveHint=text(panel,"Modifications du thème existant : automatiques",820,710)
+text(panel,"Affectation du thème : Crossings > Déclenchement",820,731)
 local selectedTab="text"
 local tabs={}
 local optionRefresh={}
@@ -133,7 +133,7 @@ button(panel,"Rejouer",352,414,100,function() seek(0);playing=true;playBtn:SetTe
 local loopBtn
 loopBtn=button(panel,"Boucle : non",460,414,130,function() loop=not loop;loopBtn:SetText(loop and "Boucle : oui" or "Boucle : non") end)
 button(panel,"Voir en jeu",598,414,188,function()
-    ZG:ShowBanner(zoneEB:GetText(),subEB:GetText(),previewTheme)
+    ZG:ShowBannerExample(zoneEB:GetText(),subEB:GetText(),theme() or previewTheme)
 end)
 
 -- Bounded per-selection history; IDs, ownership and links never change.
@@ -165,7 +165,12 @@ local function refreshPreview()
         timeline:SetMinMaxValues(0,duration(t));seek(playing and progress or math.max(.05,t.fadeIn or .4))
         lastPreviewKey=key
     end
-    status:SetText(theme() and ("Thème : "..t.name.."   ·   Enregistré") or "Choisissez un style ci-dessus pour créer votre premier thème.")
+    local draft=ZG.draft and ZG.draft.id==panel.selectedId
+    if not draft or (t.name or ""):match("%S") then panel.draftError=nil end
+    status:SetText(panel.draftError or (draft and ("Brouillon : "..t.name.."   ·   Non enregistré") or theme() and ("Thème : "..t.name.."   ·   Enregistré") or "Choisissez un modèle pour ouvrir le builder."))
+    saveHint:SetText(draft and "Brouillon local — validez pour créer le thème" or "Modifications du thème existant : automatiques")
+    if panel.createThemeButton then panel.createThemeButton:SetShown(draft and true or false);panel.cancelDraftButton:SetShown(draft and true or false) end
+    c.delete:SetShown(theme()~=nil and not draft)
     showTab(selectedTab)
 end
 local function restore(fromKey,toKey)
@@ -183,7 +188,21 @@ button(panel,"Annuler",838,12,110,function() restore("undo","redo") end)
 button(panel,"Rétablir",954,12,110,function() restore("redo","undo") end)
 button(panel,"Dupliquer",1070,12,138,function()
     local t=theme();if not t then return end
-    local new=ZG:CreateStudioTheme(nil,t);if new then panel.selectedId=new.id;panel:RefreshAll() end
+    panel:BeginDraft(nil,t)
+end)
+function panel:BeginDraft(preset,source)
+    local draft=ZG:BeginDraft(preset,source)
+    search:SetText("");self.selectedId=draft.id;self:RefreshAll()
+end
+panel.createThemeButton=button(panel,"Créer le thème",820,670,210,function()
+    -- Commit pending numerical edits before taking the final snapshot.
+    for _,box in ipairs({c.size,c.fadeIn,c.hold,c.fadeOut,widthEB}) do box:ClearFocus() end
+    local saved,err=ZG:CommitDraft()
+    if saved then panel.selectedId=saved.id;panel:RefreshAll()
+    elseif err then panel.draftError=err;status:SetText(err) end
+end)
+panel.cancelDraftButton=button(panel,"Abandonner le brouillon",1038,670,222,function()
+    ZG:CancelDraft();panel.selectedId=nil;panel:RefreshAll()
 end)
 -- An explicit second click prevents deleting a shared style by accident.
 local deleteAction=c.delete:GetScript("OnClick")
@@ -192,7 +211,7 @@ c.delete:SetScript("OnClick",function(self)
     else panel.deleteArmed=panel.selectedId;self:SetText("Confirmer") end
 end)
 
-text(panel,"GALERIE  /  Choisir un style",220,463,13)
+text(panel,"MODÈLES  /  Ouvrir dans le builder",220,463,13)
 local galleryPage=1
 local galleryTiles={}
 local pageLabel=text(panel,"",618,463,11)
@@ -224,13 +243,15 @@ for i=1,6 do
     tile:SetScript("OnLeave",function() tile:SetBackdropBorderColor(.27,.24,.20,1) end)
     tile:SetScript("OnClick",function()
         if not entry.preset then return end
-        local new=ZG:CreateStudioTheme(entry.preset)
-        if new then search:SetText("");panel.selectedId=new.id;panel:RefreshAll();refreshPreview() end
+        panel:BeginDraft(entry.preset)
     end)
 end
 refreshGallery()
 local originalRefresh=panel.RefreshForm
-function panel:RefreshForm() originalRefresh(self);refreshPreview() end
+function panel:RefreshForm()
+    if ZG.draft and self.selectedId~=ZG.draft.id then ZG:CancelDraft() end
+    originalRefresh(self);refreshPreview()
+end
 zoneEB:SetScript("OnTextChanged",refreshPreview);subEB:SetScript("OnTextChanged",refreshPreview)
 local elapsed=0
 panel:HookScript("OnUpdate",function(_,dt)
@@ -244,6 +265,9 @@ panel:HookScript("OnUpdate",function(_,dt)
         seek(nextTime)
     end
 end)
-panel:HookScript("OnHide",function() playing=false;preview:HideBanner() end)
+panel:HookScript("OnHide",function()
+    playing=false;preview:HideBanner()
+    if ZG.draft then ZG:CancelDraft();panel.selectedId=nil end
+end)
 panel:HookScript("OnShow",function() lastPreviewKey=nil;panel:RefreshAll() end)
 panel:RefreshAll()

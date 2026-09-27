@@ -9,16 +9,16 @@
 -- ============================================================
 
 local ZG = ZoneGate
-local UI = OS2.UI
+local UI = ZG.EditorUI or OS2.UI
 
 local function MyName() return UnitName("player") or "" end
 
-local PANEL_W  = 700
-local PANEL_H  = 800   -- assez haut pour région (points) + action perso + octroi + sélecteur de thème sans se chevaucher
+local PANEL_W  = 860
+local PANEL_H  = 700
 local PAD      = 12
-local HEADER_H = 40
-local LIST_W   = 220
-local ROW_H    = 24
+local HEADER_H = 66
+local LIST_W   = 248
+local ROW_H    = 32
 
 -- ── Panel racine ─────────────────────────────────────────────────────────────
 
@@ -27,6 +27,7 @@ panel:SetSize(PANEL_W, PANEL_H)
 panel:SetPoint("CENTER")
 panel:SetFrameStrata("HIGH")
 panel:SetMovable(true)
+panel:SetClampedToScreen(true)
 panel:EnableMouse(true)
 panel:RegisterForDrag("LeftButton")
 panel:SetScript("OnDragStart", panel.StartMoving)
@@ -63,7 +64,7 @@ headerAccent:SetColorTexture(unpack(UI.colors.tabLine))
 
 local titleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 titleText:SetPoint("LEFT", header, "LEFT", PAD, 0)
-titleText:SetText("Zone Gate")
+titleText:SetText("Crossings")
 UI.ApplyTitle(titleText)
 
 local themesBtn = UI.CreatePanelButton(header, 150, 22, "Atelier des entrées")
@@ -100,22 +101,24 @@ panel.formMode          = nil   -- "zone" | "subzone"
 
 local zoneHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 zoneHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -(HEADER_H + 8))
-zoneHeader:SetText("Zones")
+zoneHeader:SetText("RÉGIONS ET CHECKPOINTS")
 UI.ApplyLabel(zoneHeader)
 
-local addZoneBtn = UI.CreateAddButton(panel, function()
-    local zone = ZG:CreateZone("Nouvelle zone")
+local addZoneBtn = UI.CreatePanelButton(panel, LIST_W, 28, "+ Créer une région")
+addZoneBtn:SetScript("OnClick", function()
+    local zone = ZG:CreateZone("Nouvelle région")
     if zone then
         panel.selectedZoneId = zone.id
         panel.formMode = "zone"
+        if panel.searchBox then panel.searchBox:SetText("") end
         panel:RefreshAll()
     end
 end)
-addZoneBtn:SetPoint("LEFT", zoneHeader, "RIGHT", 6, 0)
+addZoneBtn:SetPoint("TOPLEFT",panel,"TOPLEFT",PAD,-(HEADER_H+28))
 
 local zoneScroll = CreateFrame("ScrollFrame", nil, panel)
-zoneScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -(HEADER_H + 28))
-zoneScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD)
+zoneScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -(HEADER_H + 100))
+zoneScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, 32)
 zoneScroll:SetWidth(LIST_W)
 zoneScroll:EnableMouseWheel(true)
 
@@ -139,6 +142,9 @@ UI.ApplySeparator(listSep, true)
 -- ── Rangées de l'arbre (zone ou sous-zone, réutilisées d'un rafraîchissement à l'autre) ──
 
 local rows = {}
+local treeEmpty=zoneContent:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+treeEmpty:SetPoint("TOPLEFT",8,-8);treeEmpty:SetWidth(LIST_W-16)
+treeEmpty:SetJustifyH("LEFT");UI.ApplyMutedText(treeEmpty)
 
 local function GetRow(index)
     local row = rows[index]
@@ -159,6 +165,7 @@ local function GetRow(index)
 
     local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
     row.label = label
 
     -- "+" pour ajouter un checkpoint (= sous-zone) directement sous CETTE
@@ -181,6 +188,17 @@ function panel:RefreshZoneTree()
     local i = 0
 
     for _, zone in ipairs(list) do
+        local query=panel.searchText or ""
+        local known=zone.creator==MyName() or ZG:HasLearnedZoneName(zone.id)
+        local display=known and zone.name or "Région inconnue"
+        local matches=query=="" or display:lower():find(query,1,true)
+        if not matches then
+            for _,sub in pairs(zone.subZones) do
+                local subKnown=zone.creator==MyName() or ZG:HasLearnedSubZoneName(sub.id)
+                if subKnown and sub.name:lower():find(query,1,true) then matches=true;break end
+            end
+        end
+        if matches then
         i = i + 1
         local row = GetRow(i)
         row:ClearAllPoints()
@@ -191,7 +209,7 @@ function panel:RefreshZoneTree()
         row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
         row.label:SetPoint("RIGHT", row.addBtn, "LEFT", -4, 0)
         local zoneKnown = zone.creator == MyName() or ZG:HasLearnedZoneName(zone.id)
-        local zoneShown = zoneKnown and zone.name or "Zone inconnue"
+        local zoneShown = zoneKnown and zone.name or "Région inconnue"
         row.label:SetText(zoneShown .. ((zone.creator ~= MyName()) and "  |cff888888(" .. zone.creator .. ")|r" or ""))
         if zoneKnown then UI.ApplyStrongLabel(row.label) else UI.ApplyMutedText(row.label) end
         row.sel:SetShown(panel.formMode == "zone" and panel.selectedZoneId == zone.id)
@@ -201,7 +219,9 @@ function panel:RefreshZoneTree()
         row.addBtn:SetScript("OnClick", function()
             local sub = ZG:CreateSubZone(zone.id)
             if sub then
+                panel.selectedZoneId = zone.id
                 panel.selectedSubZoneId = sub.id
+                panel.checkpointTab = "placement"
                 panel.formMode = "subzone"
                 panel:RefreshAll()
             end
@@ -232,21 +252,26 @@ function panel:RefreshZoneTree()
 
             local known = zone.creator == MyName() or ZG:HasLearnedSubZoneName(sub.id)
             local shown = known and sub.name or ZG:MaskText(sub.name)
-            if not sub.enabled then shown = shown .. "  |cff88555555(inactif)|r" end
+            if not sub.enabled then shown = shown .. "  |cffaa7777(inactif)|r" end
             subRow.label:SetText(shown)
             if known then UI.ApplyBodyText(subRow.label) else UI.ApplyMutedText(subRow.label) end
 
             subRow.sel:SetShown(panel.formMode == "subzone" and panel.selectedSubZoneId == sid)
             subRow:SetScript("OnClick", function()
+                panel.selectedZoneId = zone.id
                 panel.selectedSubZoneId = sid
                 panel.formMode = "subzone"
                 panel:RefreshAll()
             end)
         end
+        end
     end
 
     HideExtraRows(i + 1)
     zoneContent:SetHeight(math.max(1, i * ROW_H))
+    treeEmpty:SetText(#list==0 and "Aucune région.\nCréez votre première région ci-dessus." or "Aucun résultat.")
+    treeEmpty:SetShown(i==0)
+    zoneScroll:SetVerticalScroll(math.min(zoneScroll:GetVerticalScroll(),math.max(0,i*ROW_H-zoneScroll:GetHeight())))
 end
 
 -- ── Cadre de déblocage (inline, pas une fenêtre à part) ───────────────────
@@ -258,22 +283,21 @@ end
 -- clic sur sa frame) suffit, pas besoin de cliquer sur un bouton "utiliser
 -- ma cible". Reste éditable à la main.
 
-local grantFrames = {}
 local MAX_GRANT_ROWS = 5
 
 -- showList=true : affiche aussi qui a déjà appris, avec un bouton pour
 -- révoquer. titleText (optionnel) : précise ce qui se débloque ("le nom de
--- la zone" / "le nom de la sous-zone").
+-- la zone" / "le nom du checkpoint").
 local function BuildGrantFrame(parent, width, showList, titleText)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    frame:SetSize(width, showList and 192 or 60)
+    frame:SetSize(width, showList and 232 or 98)
     frame:SetBackdrop({
         bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 10,
         insets   = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+    frame:SetBackdropColor(0.025, 0.038, 0.052, 0.95)
     frame:SetBackdropBorderColor(unpack(UI.colors.separatorSoft))
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -281,18 +305,13 @@ local function BuildGrantFrame(parent, width, showList, titleText)
     title:SetText(titleText or "Débloquer pour :")
     UI.ApplyLabel(title)
 
-    local nameEB = UI.CreateStyledEditBox(frame, 150, 20, false)
-    nameEB:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    nameEB:SetMaxLetters(24)
-    frame.nameEB = nameEB
-
-    local confirmBtn = UI.CreatePanelButton(frame, 80, 20, "Débloquer")
-    confirmBtn:SetPoint("LEFT", nameEB, "RIGHT", 8, 0)
+    local confirmBtn = UI.CreatePanelButton(frame, 220, 26, "Débloquer pour…")
+    confirmBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -32)
     frame.confirmBtn = confirmBtn
 
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
-    hint:SetText("(le nom se remplit tout seul selon votre cible)")
+    hint:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -68)
+    hint:SetText("Sélectionnez les joueurs du raid, puis validez.")
     UI.ApplyMutedText(hint)
 
     if showList then
@@ -312,10 +331,6 @@ local function BuildGrantFrame(parent, width, showList, titleText)
             UI.ApplyBodyText(fs)
             row.fs = fs
 
-            local revokeBtn = UI.CreatePanelButton(row, 22, 16, "×")
-            revokeBtn:SetPoint("LEFT", fs, "RIGHT", 6, 0)
-            row.revokeBtn = revokeBtn
-
             row:Hide()
             listRows[i] = row
             anchor = row
@@ -323,7 +338,6 @@ local function BuildGrantFrame(parent, width, showList, titleText)
         frame.listRows = listRows
     end
 
-    table.insert(grantFrames, frame)
     return frame
 end
 
@@ -331,8 +345,8 @@ end
 -- showList=true). `getListFn(id)` renvoie des entrées {name=..., count=...}
 -- (count optionnel), `revokeFn(id, name)` révoque une entrée. Générique pour
 -- réutiliser le même cadre côté Sous-zone (ZG:GetGrantedList/RevokeGrant,
--- nom de la sous-zone) et côté Zone (ZG:GetZoneGrantedList/RevokeZoneGrant,
--- nom de la zone) — deux connaissances indépendantes, voir ResolveBannerText.
+-- nom du checkpoint) et côté Zone (ZG:GetZoneGrantedList/RevokeZoneGrant,
+-- nom de la région) — deux connaissances indépendantes, voir ResolveBannerText.
 local function RefreshGrantList(frame, id, getListFn, revokeFn)
     if not frame.listRows then return end
     local list = id and getListFn(id) or {}
@@ -341,11 +355,7 @@ local function RefreshGrantList(frame, id, getListFn, revokeFn)
         local row = frame.listRows[i]
         local entry = list[i]
         if entry then
-            row.fs:SetText(entry.name .. (entry.count and ("  |cff888888(" .. entry.count .. " sous-zone(s))|r") or ""))
-            row.revokeBtn:SetScript("OnClick", function()
-                revokeFn(id, entry.name)
-                RefreshGrantList(frame, id, getListFn, revokeFn)
-            end)
+            row.fs:SetText(entry.name .. (entry.count and ("  |cff888888(" .. entry.count .. " checkpoint(s))|r") or ""))
             row:Show()
         else
             row:Hide()
@@ -354,7 +364,7 @@ local function RefreshGrantList(frame, id, getListFn, revokeFn)
 
     frame.listLabel:SetText(#list == 0
         and "Ont appris : personne pour l'instant"
-        or "Ont appris :")
+        or string.format("Ont appris : %d joueur(s)%s",#list,#list>MAX_GRANT_ROWS and " — cinq premiers noms affichés" or ""))
 end
 
 local function GetSubGrantList(id) return ZG:GetGrantedList(id) end
@@ -362,21 +372,11 @@ local function RevokeSubGrant(id, name) return ZG:RevokeGrant(id, name) end
 local function GetZoneGrantList(id) return ZG:GetZoneGrantedList(id) end
 local function RevokeZoneGrantFn(id, name) return ZG:RevokeZoneGrant(id, name) end
 
-local targetWatcher = CreateFrame("Frame")
-targetWatcher:RegisterEvent("PLAYER_TARGET_CHANGED")
-targetWatcher:SetScript("OnEvent", function()
-    if not (UnitExists("target") and UnitIsPlayer("target")) then return end
-    local name = UnitName("target")
-    for _, frame in ipairs(grantFrames) do
-        frame.nameEB:SetText(name)
-    end
-end)
-
 -- ── Colonne droite : formulaires ───────────────────────────────────────────
 
 local form = CreateFrame("Frame", nil, panel)
 form:SetPoint("TOPLEFT",     panel, "TOPLEFT",     PAD + LIST_W + 16, -(HEADER_H + 10))
-form:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -PAD, PAD)
+form:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -PAD, 32)
 
 local placeholder = form:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 placeholder:SetPoint("TOPLEFT", form, "TOPLEFT", 4, -6)
@@ -459,22 +459,13 @@ zfHintFS:SetText("Utilisez le \"+\" sur cette zone dans la liste de\ngauche pour
 zfHintFS:SetJustifyH("LEFT")
 UI.ApplyMutedText(zfHintFS)
 
-local zfGrantFrame = BuildGrantFrame(zoneForm, 400, true, "Débloquer le NOM DE LA ZONE pour :")
+local zfGrantFrame = BuildGrantFrame(zoneForm, 400, true, "Révéler le nom de la région")
 zfGrantFrame:SetPoint("TOPLEFT", zfHintFS, "BOTTOMLEFT", -2, -14)
 zfGrantFrame.confirmBtn:SetScript("OnClick", function()
-    local zone = panel.selectedZoneId and ZG:GetZone(panel.selectedZoneId)
-    if not zone then return end
-    local target = (zfGrantFrame.nameEB:GetText() or ""):match("^%s*(.-)%s*$") or ""
-    if target == "" then
-        OmegaHub.Print("Zone Gate : ciblez un joueur ou tapez un nom.")
-        return
-    end
-    if ZG:SendZoneGrant(zone.id, target) then
-        OmegaHub.Print("Zone Gate : nom de la zone débloqué pour " .. target .. ".")
-        RefreshGrantList(zfGrantFrame, zone.id, GetZoneGrantList, RevokeZoneGrantFn)
-    else
-        OmegaHub.Print("Zone Gate : impossible d'envoyer le déblocage (pas en groupe/raid ni en guilde avec lui ?).")
-    end
+    local id=panel.selectedZoneId
+    ZG:OpenDiscoveryPicker("zone",id,function()
+        RefreshGrantList(zfGrantFrame,id,GetZoneGrantList,RevokeZoneGrantFn)
+    end)
 end)
 
 local zfDeleteBtn = UI.CreatePanelButton(zoneForm, 140, 22, "Supprimer la zone")
@@ -547,11 +538,11 @@ UIDropDownMenu_Initialize(sfThemeDropdown, function(self, level)
     if not sub then return end
 
     local info = UIDropDownMenu_CreateInfo()
-    info.text = "(Hérite de la Zone)"
+    info.text = "(Bannière de la région)"
     info.notCheckable = true
     info.func = function()
         ZG:SetSubZoneTheme(sub.id, "")
-        UIDropDownMenu_SetText(sfThemeDropdown, "(Hérite de la Zone)")
+        UIDropDownMenu_SetText(sfThemeDropdown, "(Bannière de la région)")
     end
     UIDropDownMenu_AddButton(info, level)
 
@@ -632,7 +623,7 @@ local radarRow = CreateFrame("Frame", nil, subForm)
 radarRow:SetPoint("TOPLEFT", recaptureBtn, "BOTTOMLEFT", 0, -16)
 radarRow:SetSize(1, 192)   -- radar (160) + distance + statut sous le radar
 
-local radar = ZG.CreateRadar(radarRow, function()
+local radar = ZG.CreatePassageGuide(radarRow, function()
     return panel.selectedSubZoneId and ZG:FindSubZone(panel.selectedSubZoneId) or nil
 end)
 radar:SetPoint("TOPLEFT", radarRow, "TOPLEFT", 0, 0)
@@ -745,7 +736,7 @@ finishRegionBtn:SetScript("OnClick", function()
         ZG:ReopenRegion(id)
     else
         if not ZG:FinishRegion(id) then
-            OmegaHub.Print("Zone Gate : il faut au moins 3 points pour fermer une région.")
+            OmegaHub.Print("Crossings : il faut au moins 3 points pour fermer une région.")
         end
     end
     panel:RefreshSubZoneForm()
@@ -835,22 +826,13 @@ end)
 
 -- Octroi (uniquement si je suis l'auteur de la zone) — en dessous du radar,
 -- pleine largeur (pas coincé dans la colonne étroite à droite du radar).
-local sfGrantFrame = BuildGrantFrame(subForm, 400, true, "Débloquer le NOM DE LA SOUS-ZONE pour :")
+local sfGrantFrame = BuildGrantFrame(subForm, 400, true, "Révéler le nom du checkpoint")
 sfGrantFrame:SetPoint("TOPLEFT", actionFwdCB, "BOTTOMLEFT", -2, -14)
 sfGrantFrame.confirmBtn:SetScript("OnClick", function()
-    local sub = panel.selectedSubZoneId and ZG:FindSubZone(panel.selectedSubZoneId)
-    if not sub then return end
-    local target = (sfGrantFrame.nameEB:GetText() or ""):match("^%s*(.-)%s*$") or ""
-    if target == "" then
-        OmegaHub.Print("Zone Gate : ciblez un joueur ou tapez un nom.")
-        return
-    end
-    if ZG:SendSubZoneGrant(sub.id, target) then
-        OmegaHub.Print("Zone Gate : nom de la sous-zone débloqué pour " .. target .. ".")
-        RefreshGrantList(sfGrantFrame, sub.id, GetSubGrantList, RevokeSubGrant)
-    else
-        OmegaHub.Print("Zone Gate : impossible d'envoyer le déblocage (pas en groupe/raid ni en guilde avec lui ?).")
-    end
+    local id=panel.selectedSubZoneId
+    ZG:OpenDiscoveryPicker("subzone",id,function()
+        RefreshGrantList(sfGrantFrame,id,GetSubGrantList,RevokeSubGrant)
+    end)
 end)
 
 function panel:RefreshSubZoneForm()
@@ -860,7 +842,7 @@ function panel:RefreshSubZoneForm()
     local mine = zone.creator == MyName()
 
     local subKnownForDisplay = mine or ZG:HasLearnedSubZoneName(sub.id)
-    sfZoneFS:SetText("Zone : " .. (mine and zone.name or ZG:ResolveBannerText(sub, zone)))
+    sfZoneFS:SetText("Région : " .. (mine and zone.name or ZG:ResolveBannerText(sub, zone)))
     panel.suppressEvents = true
     sfNameEB:SetText(subKnownForDisplay and (sub.name or "") or ZG:MaskText(sub.name))
     panel.suppressEvents = false
@@ -872,7 +854,7 @@ function panel:RefreshSubZoneForm()
     sfEditThemeBtn:SetShown(mine)
     if mine then
         local subTheme = sub.themeId and ZG:GetTheme(sub.themeId)
-        UIDropDownMenu_SetText(sfThemeDropdown, subTheme and subTheme.name or "(Hérite de la Zone)")
+        UIDropDownMenu_SetText(sfThemeDropdown, subTheme and subTheme.name or "(Bannière de la région)")
     end
 
     if mine then
@@ -883,11 +865,11 @@ function panel:RefreshSubZoneForm()
         local subKnown  = ZG:HasLearnedSubZoneName(sub.id)
         local state
         if zoneKnown and subKnown then
-            state = "|cff66e673Vous connaissez le nom de la zone ET de la sous-zone.|r"
+            state = "|cff66e673Vous connaissez le nom de la région ET de la sous-zone.|r"
         elseif zoneKnown then
-            state = "|cffe6c94dVous connaissez le nom de la zone seulement.|r"
+            state = "|cffe6c94dVous connaissez le nom de la région seulement.|r"
         elseif subKnown then
-            state = "|cffe6c94dVous connaissez le nom de la sous-zone seulement.|r"
+            state = "|cffe6c94dVous connaissez le nom du checkpoint seulement.|r"
         else
             state = "|cff888888Rien appris encore.|r"
         end
@@ -978,7 +960,7 @@ function panel:RefreshForm()
         local mine = zone.creator == MyName()
         local zoneKnown = mine or ZG:HasLearnedZoneName(zone.id)
         panel.suppressEvents = true
-        zfNameEB:SetText(zoneKnown and (zone.name or "") or "Zone inconnue")
+        zfNameEB:SetText(zoneKnown and (zone.name or "") or "Région inconnue")
         panel.suppressEvents = false
         zfAuthorFS:SetText(mine and "Auteur : vous" or ("Auteur : " .. zone.creator))
         zfThemeLabel:SetShown(mine)
@@ -1009,4 +991,167 @@ function panel:RefreshAll()
     panel:RefreshForm()
 end
 
+-- Compact editor: one checkpoint, three tasks; all setters above stay shared.
+local FORM_W=PANEL_W-LIST_W-PAD*2-16
+local function Place(control,parent,x,y,w,h)
+    control:SetParent(parent);control:ClearAllPoints()
+    control:SetPoint("TOPLEFT",parent,"TOPLEFT",x,-y)
+    if w then control:SetWidth(w) end
+    if h then control:SetHeight(h) end
+end
+local function Caption(parent,text,x,y,w)
+    local fs=parent:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    Place(fs,parent,x,y,w);fs:SetText(text);fs:SetJustifyH("LEFT")
+    UI.ApplyMutedText(fs);return fs
+end
+local function Fit()
+    panel:SetScale(math.min(1,(UIParent:GetWidth()-32)/PANEL_W,(UIParent:GetHeight()-32)/PANEL_H))
+end
+panel:HookScript("OnShow",Fit)
+panel:RegisterEvent("DISPLAY_SIZE_CHANGED");panel:SetScript("OnEvent",Fit)
+Fit()
+titleText:ClearAllPoints();titleText:SetPoint("TOPLEFT",header,"TOPLEFT",16,-10)
+Caption(header,"Checkpoints d'entrée et de sortie de région",16,34,400)
+themesBtn:SetText("Atelier des bannières");themesBtn:SetWidth(174)
+Caption(panel,"Modifications enregistrées automatiquement",PAD,PANEL_H-23,380)
+
+local search=UI.CreateStyledEditBox(panel,LIST_W,26,false)
+Place(search,panel,PAD,HEADER_H+64)
+local searchHint=Caption(search,"Rechercher une région ou un checkpoint",8,7,LIST_W-16)
+search:SetScript("OnTextChanged",function(self)
+    panel.searchText=(self:GetText() or ""):lower()
+    searchHint:SetShown(panel.searchText=="")
+    panel:RefreshZoneTree()
+end)
+panel.searchBox=search
+
+placeholder:SetWidth(FORM_W-32)
+placeholder:SetText("VOS PASSAGES ENTRE RÉGIONS\n\n1. Créez une région dans la colonne de gauche.\n\n2. Placez-vous en jeu à l'endroit du passage, puis ajoutez un checkpoint.\n\n3. Réglez sa forme, ses effets d'entrée et de sortie et les noms connus des joueurs.")
+Place(placeholder,form,16,24,FORM_W-32)
+
+-- Region overview: identity, inherited banner, primary creation action, discovery.
+Caption(zoneForm,"RÉGION",12,6,FORM_W-24)
+Place(zfNameEB,zoneForm,12,26,FORM_W-24,28)
+Place(zfAuthorFS,zoneForm,14,63,FORM_W-28)
+Place(zfThemeLabel,zoneForm,12,91,FORM_W-24)
+zfThemeLabel:SetText("Bannière par défaut des checkpoints")
+Place(zfThemeDropdown,zoneForm,-4,111)
+UIDropDownMenu_SetWidth(zfThemeDropdown,FORM_W-140)
+Place(zfEditThemeBtn,zoneForm,FORM_W-96,113,84,24)
+Place(zfHintFS,zoneForm,12,151,FORM_W-24,28)
+zfHintFS:SetText("Placez-vous au passage souhaité, puis capturez votre position.")
+local addCheckpoint=UI.CreatePanelButton(zoneForm,FORM_W-24,30,"+ Placer un checkpoint ici")
+Place(addCheckpoint,zoneForm,12,188)
+addCheckpoint:SetScript("OnClick",function()
+    local sub=panel.selectedZoneId and ZG:CreateSubZone(panel.selectedZoneId)
+    if sub then
+        panel.selectedSubZoneId=sub.id;panel.formMode="subzone"
+        panel.checkpointTab="placement";panel:RefreshAll()
+    end
+end)
+Place(zfGrantFrame,zoneForm,12,232,FORM_W-24)
+Place(zfDeleteBtn,zoneForm,12,476,170,26)
+zfDeleteBtn:SetText("Supprimer la région")
+
+-- Consistent discovery cards with labels above inputs, bounded to the card.
+for _,grant in ipairs({zfGrantFrame,sfGrantFrame}) do
+    grant:SetWidth(FORM_W-24)
+    for _,row in ipairs(grant.listRows or {}) do row:SetWidth(FORM_W-40) end
+end
+
+Place(sfZoneFS,subForm,12,6,FORM_W-24)
+Place(sfNameEB,subForm,12,28,FORM_W-126,28)
+Place(sfActiveCB,subForm,FORM_W-99,32)
+Place(sfStatusFS,subForm,12,66,FORM_W-24,30)
+sfStatusFS:SetJustifyH("LEFT")
+local pages,tabs={},{ }
+for i,entry in ipairs({{"placement","Placement"},{"effects","Déclenchement"},{"discovery","Découverte"}}) do
+    local key,label=entry[1],entry[2]
+    local page=CreateFrame("Frame",nil,subForm)
+    Place(page,subForm,0,144,FORM_W,430)
+    pages[key]=page
+    local tab=UI.CreatePanelButton(subForm,(FORM_W-32)/3,28,label)
+    Place(tab,subForm,12+(i-1)*(FORM_W-20)/3,108)
+    tabs[key]=tab
+    tab:SetScript("OnClick",function() panel.checkpointTab=key;panel:RefreshForm() end)
+end
+panel.checkpointPages=pages
+panel.checkpointTabs=tabs
+Place(shapeLineBtn,pages.placement,12,8,100,26);shapeLineBtn:SetText("Passage droit")
+Place(shapeCircleBtn,pages.placement,120,8,100,26)
+Place(shapeRegionBtn,pages.placement,228,8,112,26);shapeRegionBtn:SetText("Périmètre libre")
+Caption(pages.placement,"Ligne : sens de votre regard. Cercle / périmètre : intérieur et extérieur.",12,44,FORM_W-24)
+Place(radarRow,pages.placement,12,80,FORM_W-24,284)
+Place(recaptureBtn,pages.placement,12,374,190,28);recaptureBtn:SetText("Déplacer à ma position")
+Place(cloneBtn,pages.placement,210,374,110,28);cloneBtn:SetText("Dupliquer ici")
+Place(sfDeleteBtn,pages.placement,FORM_W-126,374,114,28)
+Place(regionLabel,radarRow,320,0,FORM_W-356,28)
+Place(widthLabel,radarRow,320,0,FORM_W-356)
+Place(widthEB,radarRow,320,25,76,26)
+Place(sliderTrack,radarRow,322,64,FORM_W-368,4)
+Place(addPointBtn,radarRow,320,36,200,24)
+Place(undoPointBtn,radarRow,320,68,96,24)
+Place(clearPointsBtn,radarRow,424,68,96,24)
+Place(finishRegionBtn,radarRow,320,100,200,26)
+
+Place(sfThemeLabel,pages.effects,12,8,FORM_W-24);sfThemeLabel:SetText("Bannière de ce checkpoint")
+Place(sfThemeDropdown,pages.effects,-4,28)
+UIDropDownMenu_SetWidth(sfThemeDropdown,FORM_W-140)
+Place(sfEditThemeBtn,pages.effects,FORM_W-96,30,84,24)
+for _,control in ipairs({fwdEnabledCB,fwdEnabledLabel,backEnabledCB,backEnabledLabel}) do control:SetParent(pages.effects) end
+Place(fwdEnabledCB,pages.effects,12,70)
+Place(backEnabledCB,pages.effects,FORM_W/2,70)
+fwdEnabledLabel:SetText("Bannière à l'entrée");backEnabledLabel:SetText("Bannière à la sortie")
+Place(actionTitle,pages.effects,12,112,FORM_W-24)
+Place(actionMsgLabel,pages.effects,12,140,FORM_W-24)
+Place(actionMsgEB,pages.effects,12,158,FORM_W-24,26)
+Place(actionCmdLabel,pages.effects,12,196,FORM_W-24)
+Place(actionCmdEB,pages.effects,12,214,FORM_W-24,26)
+Place(actionCmdHint,pages.effects,12,250,FORM_W-24,38)
+actionCmdHint:SetText("Un nombre applique / retire une aura. Une commande est envoyée dans le canal de groupe disponible.")
+for _,control in ipairs({actionFwdCB,actionFwdLabel,actionBackCB,actionBackLabel}) do control:SetParent(pages.effects) end
+Place(actionFwdCB,pages.effects,12,300);Place(actionBackCB,pages.effects,FORM_W/2,300)
+actionFwdLabel:SetText("Action à l'entrée");actionBackLabel:SetText("Action à la sortie")
+Place(sfGrantFrame,pages.discovery,12,8,FORM_W-24)
+Caption(pages.discovery,"Le nom de la région et celui du checkpoint se révèlent séparément. Les autres joueurs voient des noms masqués tant qu'ils ne les ont pas appris.",12,262,FORM_W-24)
+
+local refreshForm=panel.RefreshForm
+function panel:RefreshForm()
+    refreshForm(self)
+    local zone=self.selectedZoneId and ZG:GetZone(self.selectedZoneId)
+    local mine=zone and zone.creator==MyName()
+    addCheckpoint:SetShown(self.formMode=="zone" and mine)
+    zfNameEB:SetEnabled(mine and true or false)
+    if self.formMode=="subzone" then
+        local sub,parent=ZG:FindSubZone(self.selectedSubZoneId)
+        local own=parent and parent.creator==MyName()
+        sfNameEB:SetEnabled(own and true or false);sfActiveCB:SetEnabled(own and true or false)
+        widthEB:SetEnabled(own and true or false);sliderHandle:EnableMouse(own and true or false)
+        fwdEnabledCB:SetEnabled(own and true or false);backEnabledCB:SetEnabled(own and true or false)
+        local key=self.checkpointTab or "placement"
+        for id,page in pairs(pages) do page:SetShown(id==key);tabs[id].accent:SetShown(id==key) end
+    end
+end
+-- Destructive actions require a second, explicit click in a small confirmation card.
+local confirm=CreateFrame("Frame","ZoneGateDeleteConfirm",panel)
+confirm:SetSize(360,132);confirm:SetPoint("CENTER");confirm:SetFrameStrata("DIALOG")
+confirm:EnableMouse(true);UI.Surface(confirm);confirm:Hide()
+local confirmText=Caption(confirm,"",16,16,328)
+local cancel=UI.CreatePanelButton(confirm,146,28,"Annuler");Place(cancel,confirm,16,86)
+local accept=UI.CreatePanelButton(confirm,174,28,"Confirmer la suppression");Place(accept,confirm,170,86)
+cancel:SetScript("OnClick",function() confirm:Hide() end)
+accept:SetScript("OnClick",function() local fn=confirm.action;confirm:Hide();if fn then fn() end end)
+for _,button in ipairs({zfDeleteBtn,sfDeleteBtn}) do
+    local remove=button:GetScript("OnClick")
+    button:SetScript("OnClick",function()
+        local zid,sid=panel.selectedZoneId,panel.selectedSubZoneId
+        confirmText:SetText(button==zfDeleteBtn and "Supprimer cette région et tous ses checkpoints ?" or "Supprimer ce checkpoint ?")
+        confirm.action=function() if zid==panel.selectedZoneId and sid==panel.selectedSubZoneId then remove() end end
+        confirm:Show()
+    end)
+end
+panel:HookScript("OnHide",function() confirm:Hide();sliderHandle:SetScript("OnUpdate",nil) end)
+UISpecialFrames=UISpecialFrames or {}
+table.insert(UISpecialFrames,"ZoneGatePanel")
+table.insert(UISpecialFrames,"ZoneGateDeleteConfirm")
 panel:RefreshForm()

@@ -381,10 +381,21 @@ local function AnnounceToGroup(text)
 end
 
 local function SortParticipants(list)
+    -- Le tri déplace les participants : on ré-ancre currentIndex sur celui
+    -- dont c'est le tour, sinon un ajout en cours de tour ferait pointer
+    -- l'index sur quelqu'un d'autre (et "tour suivant" partirait du mauvais
+    -- participant, ex. le dernier de la liste au lieu de boucler sur le 1er).
+    local st = C.initiative
+    local current = (list == st.participants) and list[st.currentIndex] or nil
     table.sort(list, function(a, b)
         if a.initiative ~= b.initiative then return a.initiative > b.initiative end
         return (a.name or "") < (b.name or "")
     end)
+    if current then
+        for i, p in ipairs(list) do
+            if p == current then st.currentIndex = i; break end
+        end
+    end
 end
 
 -- Les PNJ portent un bloc HP/Mana/Endurance + icone (comme une fiche perso,
@@ -660,6 +671,34 @@ function C:AddNPC(name, initiative, hp, mana, endurance, icon)
     SortParticipants(C.initiative.participants)
     BroadcastInitiative()
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
+    return true
+end
+
+-- Edit in place: keep identity, attached effects and the current participant.
+function C:UpdateNPC(id,name,initiative,hp,mana,endurance,icon)
+    if not self.initiative.isHost or not self.initiative.active then return false end
+    local p=FindNPC(id);if not p then return false end
+    name=tostring(name or ""):match("^%s*(.-)%s*$")
+    local init=tonumber(initiative)
+    local values={hp=tonumber(hp),mana=tonumber(mana),endurance=tonumber(endurance)}
+    if name=="" or not init or not values.hp or not values.mana or not values.endurance then return false end
+    for _,value in pairs(values) do if value<0 then return false end end
+    local current=self.initiative.participants[self.initiative.currentIndex]
+    p.name=name;p.initiative=math.floor(init);p.icon=icon or p.icon
+    for stat,value in pairs(values) do
+        local resource=p[stat] or {cur=0,temp=0}
+        resource.max=math.floor(value)
+        resource.cur=math.min(resource.cur or 0,resource.max)
+        p[stat]=resource
+    end
+    SortParticipants(self.initiative.participants)
+    if current then
+        for i,item in ipairs(self.initiative.participants) do
+            if item.id==current.id then self.initiative.currentIndex=i;break end
+        end
+    end
+    BroadcastInitiative()
+    if self.OnInitiativeChanged then self.OnInitiativeChanged() end
     return true
 end
 
@@ -1184,6 +1223,18 @@ function C:NextTurn()
         end
     end
     if not nextIdx then return false end
+
+    -- Nouveau tour de table : on repart TOUJOURS du premier participant
+    -- vivant du bandeau, quels que soient les ajouts/retraits survenus
+    -- pendant la pause de fin de tour.
+    if C.initiative.phase == "resolve_start" then
+        nextIdx = nil
+        for i = 1, n do
+            local p = C.initiative.participants[i]
+            if p and IsParticipantAlive(p) then nextIdx = i; break end
+        end
+        if not nextIdx then return false end
+    end
 
     if C.initiative.phase ~= "resolve_start" then
         if not roundAdvanced then

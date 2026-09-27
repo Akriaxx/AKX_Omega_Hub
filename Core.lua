@@ -70,8 +70,8 @@ Hub:RegisterModule({
 
 Hub:RegisterModule({
     name    = "ZoneGate",
-    title   = "Zone Gate",
-    desc    = "Bannières d'entrée/sortie de zone (checkpoints RP)",
+    title   = "Crossings",
+    desc    = "Checkpoints d’entrée et de sortie de région",
 })
 
 Hub:RegisterModule({

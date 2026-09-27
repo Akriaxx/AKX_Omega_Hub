@@ -374,3 +374,19 @@ end
 local liveBanner=ZG.CreateBannerRenderer(UIParent,"ZoneGateBanner")
 function ZG:ShowBanner(zoneName,subName,theme) liveBanner:ShowBanner(zoneName,subName,theme) end
 function ZG:HideBanner() liveBanner:HideBanner() end
+
+-- Studio demonstration has its own topmost renderer: never changes live crossings.
+local demonstration
+function ZG:ShowBannerExample(zoneName,subName,theme)
+    if not demonstration then
+        demonstration=ZG.CreateBannerRenderer(UIParent,"ZoneGateBannerExample")
+        demonstration:SetFrameStrata("TOOLTIP")
+        demonstration:SetFrameLevel(10000)
+    end
+    local sample=ZG.CopyTheme(theme or ZG.DefaultTheme)
+    sample.hold=math.max(3,sample.hold or 0)
+    demonstration:ShowBanner(zoneName~="" and zoneName or "Aperçu de région",subName,sample)
+    demonstration:ClearAllPoints();demonstration:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    local peak=sample.motion=="stamp" and 1.15 or 1
+    demonstration:SetScale(math.min(1.8,(UIParent:GetWidth()-64)/(demonstration.baseWidth*peak),(UIParent:GetHeight()-64)/demonstration.baseHeight))
+end

@@ -7,8 +7,8 @@
 --  Colonne gauche : liste de mes thèmes. Colonne droite : formulaire.
 -- ============================================================
 
-local ZG = ZoneGate
-local UI = OS2.UI
+local ZG = ZoneGate.ThemeEditor or ZoneGate
+local UI = ZG.EditorUI or OS2.UI
 
 local function MyName() return UnitName("player") or "" end
 
@@ -97,11 +97,7 @@ listHeader:SetText("Mes thèmes")
 UI.ApplyLabel(listHeader)
 
 local addBtn = UI.CreateAddButton(panel, function()
-    local theme = ZG:CreateTheme("Nouveau thème")
-    if theme then
-        panel.selectedId = theme.id
-        panel:RefreshAll()
-    end
+    if panel.BeginDraft then panel:BeginDraft() end
 end)
 addBtn:SetPoint("LEFT", listHeader, "RIGHT", 6, 0)
 

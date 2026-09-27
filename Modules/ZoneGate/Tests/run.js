@@ -5,6 +5,7 @@ const network=core.slice(core.indexOf('local function PackPoints('),core.indexOf
 const harness=fs.readFileSync(path.join(__dirname,'Studio_test.lua'),'utf8');
 const music=core.slice(core.indexOf('ZG.MusicDir ='),core.indexOf('-- Thème appliqué'));
 const setter=core.slice(core.indexOf('function ZG:SetThemeSound('),core.indexOf('-- Zone/Sous-zone → thème'));
+const themeSetters=core.slice(core.indexOf('function ZG:RenameTheme('),core.indexOf('-- Zone/Sous-zone → thème'));
 const soundSetup=`function InstallSoundLibrary() local ZG=ZoneGate;local function MyName() return "Tester" end\n${music}\n${setter}\nend\n`;
 const test=`
 local net=assert(load([==[
@@ -36,5 +37,6 @@ assert(received.creator=="Remote")
 print("OK: real network round-trip and legacy theme compatibility")
 `;
 const cli=process.argv[2];if(!cli)throw Error('Pass the Fengari CLI path');
-const result=cp.spawnSync(process.execPath,[cli,'-'],{input:'local ok,err=pcall(function()\n'+soundSetup+harness+'\n'+test+'\nend)\nif not ok then print(err);os.exit(1) end',encoding:'utf8'});
+const draftSetup='function InstallThemeSetters() local ZG=ZoneGate; local function MyName() return "Tester" end\n'+themeSetters+'\nend\n';
+const result=cp.spawnSync(process.execPath,[cli,'-'],{input:'local ok,err=pcall(function()\n'+soundSetup+draftSetup+harness+'\n'+test+'\nend)\nif not ok then print(err);os.exit(1) end',encoding:'utf8'});
 process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exit(result.status||0);

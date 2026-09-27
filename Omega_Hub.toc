@@ -2,7 +2,7 @@
 ## Title: Omega Hub
 ## Notes: Gestionnaire central et conteneur monolithique des addons Omega
 ## Author: Lorkk
-## Version: 1.2.9
+## Version: 1.2.10
 ## OptionalDeps: SpellCreator
 ## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB
 ## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
@@ -127,11 +127,13 @@ Modules\Tech\Launcher.lua
 Modules\ZoneGate\Version.lua
 Modules\ZoneGate\Music\Manifest.lua
 Modules\ZoneGate\Core.lua
+Modules\ZoneGate\UI_Style.lua
 Modules\ZoneGate\UI_Radar.lua
 Modules\ZoneGate\UI_Banner.lua
-Modules\ZoneGate\UI_Theme.lua
 Modules\ZoneGate\Studio.lua
+Modules\ZoneGate\UI_Theme.lua
 Modules\ZoneGate\UI_Studio.lua
+Modules\ZoneGate\UI_Discovery.lua
 Modules\ZoneGate\UI_Panel.lua
 
 ## -- Journal de quête --

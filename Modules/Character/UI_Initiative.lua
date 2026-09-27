@@ -33,6 +33,7 @@ local OpenEventPopup
 -- Idem pour le popup "États actifs" (retirer un état) : référencé depuis le
 -- OnClick du badge "E" d'une carte (MakeCard), avant sa définition plus bas.
 local OpenStatusManagePopup
+local HideStatusPreview
 
 -- Idem pour le panneau "Cibles" et le compteur de sélection du popup "État" :
 -- référencés depuis MakeStatusTargetRow (une ligne cliquée doit ouvrir/fermer
@@ -374,19 +375,9 @@ local function MakeCard(parent)
     stateIcon:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\StateSigil.tga")
     statusBadge:SetScript("OnEnter", function(self)
         if not card.participantId then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("États actifs", unpack(UI.colors.title))
-        for _, s in ipairs(C.initiative.statuses or {}) do
-            if s.targetId == card.participantId then
-                local sourceLabel = (C.GetDisplayName and C:GetDisplayName(s.source, C.groupData[s.source])) or s.source
-                GameTooltip:AddLine(s.text .. "  " .. StatusCountdownText(s), unpack(UI.colors.textMuted))
-                GameTooltip:AddLine("— par " .. sourceLabel, unpack(UI.colors.textMuted))
-            end
-        end
-        GameTooltip:AddLine("Clic pour retirer un état", unpack(UI.colors.textMuted))
-        GameTooltip:Show()
+        if OpenStatusManagePopup then OpenStatusManagePopup(card.participantId, self, true) end
     end)
-    statusBadge:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    statusBadge:SetScript("OnLeave", function() if HideStatusPreview then HideStatusPreview() end end)
     -- Simple Frame (pas un Button) : OnMouseUp plutôt que OnClick, qui n'a
     -- d'effet que sur les widgets de type Button.
     statusBadge:SetScript("OnMouseUp", function(self)
@@ -849,7 +840,7 @@ local function MakeStatusTargetRow(parent)
 end
 
 local statusPopup = CreateFrame("Frame", nil, banner)
-statusPopup:SetSize(220, 232)
+statusPopup:SetSize(440, 310)
 statusPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 statusPopup:SetFrameStrata("DIALOG")
 statusPopup:SetMovable(true)
@@ -864,7 +855,7 @@ UI.ApplyBorder(statusPopup)
 
 local statusPopupBar = CreateFrame("Frame", nil, statusPopup)
 statusPopupBar:SetPoint("TOPLEFT"); statusPopupBar:SetPoint("TOPRIGHT")
-statusPopupBar:SetHeight(20)
+statusPopupBar:SetHeight(34)
 statusPopupBar:EnableMouse(true)
 statusPopupBar:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then statusPopup:StartMoving() end end)
 statusPopupBar:SetScript("OnMouseUp", function() statusPopup:StopMovingOrSizing() end)
@@ -874,27 +865,28 @@ statusPopupBarBg:SetAllPoints()
 statusPopupBarBg:SetColorTexture(0,0,0,0)
 
 local statusPopupTitle = statusPopupBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-statusPopupTitle:SetPoint("LEFT", statusPopupBar, "LEFT", 8, 0)
-statusPopupTitle:SetText("Ajouter un état")
+statusPopupTitle:SetPoint("LEFT", statusPopupBar, "LEFT", 16, 0)
+statusPopupTitle:SetText("Ajouter des états")
 UI.ApplyTitle(statusPopupTitle)
 
 local statusTargetsLbl = statusPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-statusTargetsLbl:SetPoint("TOPLEFT", statusPopupBar, "BOTTOMLEFT", 10, -6)
-statusTargetsLbl:SetText("Cible(s)")
+statusTargetsLbl:SetPoint("TOPLEFT", statusPopupBar, "BOTTOMLEFT", 16, -6)
+statusTargetsLbl:SetText("DESTINATAIRES")
 UI.ApplyLabel(statusTargetsLbl)
 
 -- Ouvre/ferme le panneau "Cibles" à droite (voir plus bas) : la sélection
 -- elle-même se fait là-bas (nom + icone seulement, joueurs et PNJ), ce popup-
 -- ci ne montre que le résultat (voir statusCountFS).
-local chooseTargetsBtn = UI.CreatePanelButton(statusPopup, 200, 20, "Choisir vos cibles...")
-chooseTargetsBtn:SetPoint("TOPLEFT", statusTargetsLbl, "BOTTOMLEFT", 0, -3)
+local chooseTargetsBtn = UI.CreatePanelButton(statusPopup, 408, 28, "Choisir vos cibles...")
+chooseTargetsBtn:SetPoint("TOPLEFT", statusTargetsLbl, "BOTTOMLEFT", 0, -8)
 chooseTargetsBtn:SetScript("OnClick", function()
     if ToggleTargetsPanel then ToggleTargetsPanel() end
 end)
 
 local statusCountFS = statusPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-statusCountFS:SetPoint("TOPLEFT", chooseTargetsBtn, "BOTTOMLEFT", 2, -4)
-statusCountFS:SetJustifyH("LEFT")
+statusCountFS:SetPoint("TOPRIGHT", statusPopup, "TOPRIGHT", -16, -40)
+statusCountFS:SetWidth(260)
+statusCountFS:SetJustifyH("RIGHT")
 UI.ApplyMutedText(statusCountFS)
 
 RefreshSelectedCount = function()
@@ -904,51 +896,92 @@ RefreshSelectedCount = function()
 end
 RefreshSelectedCount()
 
-local statusDescLbl = statusPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-statusDescLbl:SetPoint("TOPLEFT", statusCountFS, "BOTTOMLEFT", -2, -6)
-statusDescLbl:SetText("État")
-UI.ApplyLabel(statusDescLbl)
-
-local statusDescArea=CreateFrame("ScrollFrame",nil,statusPopup)
-statusDescArea:SetSize(200,48)
-statusDescArea:SetPoint("TOPLEFT",statusPopup,"TOPLEFT",10,-98)
-statusDescArea:EnableMouseWheel(true)
-local statusDescBackground=statusDescArea:CreateTexture(nil,"BACKGROUND")
-statusDescBackground:SetAllPoints();statusDescBackground:SetColorTexture(.015,.02,.023,.95)
-UI.ApplyInputBorder(statusDescArea)
-local statusDescEB=CreateFrame("EditBox",nil,statusDescArea)
-statusDescEB:SetWidth(200);statusDescEB:SetHeight(48)
-statusDescEB:SetMultiLine(true);statusDescEB:SetAutoFocus(false)
-statusDescEB:SetFontObject("GameFontHighlightSmall")
-statusDescEB:SetTextInsets(6,6,5,5)
-statusDescEB:SetMaxLetters(200)
-statusDescArea:SetScrollChild(statusDescEB)
-statusDescEB:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
--- Tout le cadre donne le focus (sinon seule la ligne de texte réagit).
-statusDescArea:EnableMouse(true)
-statusDescArea:SetScript("OnMouseDown",function() statusDescEB:SetFocus() end)
-statusDescEB:SetScript("OnCursorChanged",function(_,_,y,_,height)
-    local top=math.abs(y)
-    local scroll=statusDescArea:GetVerticalScroll()
-    if top<scroll then statusDescArea:SetVerticalScroll(top)
-    elseif top+height>scroll+48 then statusDescArea:SetVerticalScroll(math.max(0,top+height-48)) end
+local statusEditor = {rows={}}
+statusEditor.scroll=CreateFrame("ScrollFrame",nil,statusPopup)
+statusEditor.scroll:SetPoint("TOPLEFT",16,-122)
+statusEditor.scroll:SetSize(408,94)
+statusEditor.scroll:EnableMouseWheel(true)
+statusEditor.content=CreateFrame("Frame",nil,statusEditor.scroll)
+statusEditor.content:SetSize(408,1)
+statusEditor.scroll:SetScrollChild(statusEditor.content)
+statusEditor.hint=statusPopup:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+statusEditor.hint:SetPoint("TOPLEFT",16,-99)
+statusEditor.hint:SetWidth(408)
+statusEditor.hint:SetJustifyH("LEFT")
+statusEditor.hint:SetText("EFFETS  ·  Une durée par état")
+UI.ApplyMutedText(statusEditor.hint)
+function statusEditor:Layout()
+    for i,row in ipairs(self.rows) do
+        row:ClearAllPoints();row:SetPoint("TOPLEFT",0,-(i-1)*102)
+        row.label:SetText("État "..i)
+    end
+    local height=math.max(94,#self.rows*102-8)
+    self.content:SetHeight(height)
+    self.scroll:SetHeight(math.min(height,298))
+    statusPopup:SetHeight(122+math.min(height,298)+90)
+    self.scroll:SetVerticalScroll(math.min(self.scroll:GetVerticalScroll(),math.max(0,height-298)))
+    if self.rail then self.rail:SetShown(height>298) end
+end
+function statusEditor:Remove(row)
+    for i,v in ipairs(self.rows) do
+        if v==row then row:Hide();table.remove(self.rows,i);break end
+    end
+    self:Layout()
+end
+function statusEditor:Add()
+    local row=CreateFrame("Frame",nil,self.content)
+    row:SetSize(408,94)
+    UI.ApplyRowCard(row)
+    row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    row.label:SetPoint("TOPLEFT",12,-12);UI.ApplyLabel(row.label)
+    local turnsLabel=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    turnsLabel:SetPoint("TOPLEFT",284,-12);turnsLabel:SetText("Durée · tours");UI.ApplyLabel(turnsLabel)
+    row.text=UI.CreateStyledEditBox(row,260,34)
+    row.text:SetPoint("TOPLEFT",12,-38)
+    row.text:SetMaxLetters(200);row.text:SetAutoFocus(false)
+    row.turns=UI.CreateStyledEditBox(row,48,34)
+    row.turns:SetPoint("TOPLEFT",309,-38)
+    row.turns:SetJustifyH("CENTER")
+    row.turns:SetNumeric(true);row.turns:SetMaxLetters(3);row.turns:SetAutoFocus(false)
+    row.turns:SetText("1")
+    local minus=UI.CreatePanelButton(row,24,24,"−")
+    minus:SetPoint("RIGHT",row.turns,"LEFT",-3,0)
+    minus:SetScript("OnClick",function() row.turns:SetText(tostring(math.max(1,(tonumber(row.turns:GetText()) or 1)-1))) end)
+    local plus=UI.CreatePanelButton(row,24,24,"+")
+    plus:SetPoint("LEFT",row.turns,"RIGHT",3,0)
+    plus:SetScript("OnClick",function() row.turns:SetText(tostring(math.min(999,(tonumber(row.turns:GetText()) or 1)+1))) end)
+    row.remove=UI.CreateCloseButton(row,function()
+        if #self.rows>1 then self:Remove(row) else row.text:SetText("");row.turns:SetText("1") end
+    end)
+    row.remove:ClearAllPoints();row.remove:SetPoint("TOPRIGHT",-8,-8);row.remove:SetSize(18,18)
+    row.text:SetScript("OnTabPressed",function() row.turns:SetFocus() end)
+    row.text:SetScript("OnEnterPressed",function() row.turns:SetFocus() end)
+    row.turns:SetScript("OnEnterPressed",function() row.turns:ClearFocus() end)
+    self.rows[#self.rows+1]=row;self:Layout()
+    return row
+end
+function statusEditor:Reset()
+    for _,row in ipairs(self.rows) do row:Hide();row.text:ClearFocus();row.turns:ClearFocus() end
+    self.rows={}
+    self:Add();self.scroll:SetVerticalScroll(0)
+    self.hint:SetText("EFFETS  ·  Une durée par état")
+end
+statusEditor.rail=statusPopup:CreateTexture(nil,"ARTWORK")
+statusEditor.rail:SetPoint("TOPRIGHT",statusEditor.scroll,"TOPRIGHT",6,0)
+statusEditor.rail:SetSize(2,298);statusEditor.rail:SetColorTexture(.65,.51,.29,.6)
+statusEditor.scroll:SetScript("OnMouseWheel",function(self,delta)
+    self:SetVerticalScroll(math.max(0,math.min(statusEditor.content:GetHeight()-self:GetHeight(),self:GetVerticalScroll()-delta*51)))
 end)
-statusDescArea:SetScript("OnMouseWheel",function(self,delta)
-    self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*14)))
+statusEditor.add=UI.CreatePanelButton(statusPopup,408,24,"+ Ajouter une ligne")
+statusEditor.add:SetPoint("BOTTOMLEFT",16,52)
+statusEditor.add:SetScript("OnClick",function()
+    local row=statusEditor:Add()
+    statusEditor.scroll:SetVerticalScroll(math.max(0,statusEditor.content:GetHeight()-statusEditor.scroll:GetHeight()))
+    row.text:SetFocus()
 end)
-
-local statusTurnsLbl = statusPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-statusTurnsLbl:SetPoint("TOPLEFT", statusDescArea, "BOTTOMLEFT", 0, -6)
-statusTurnsLbl:SetText("Pendant combien de tours")
-UI.ApplyLabel(statusTurnsLbl)
-
-local statusTurnsEB = UI.CreateStyledEditBox(statusPopup, 50, 22)
-statusTurnsEB:SetNumeric(true)
-statusTurnsEB:SetMaxLetters(3)
-statusTurnsEB:SetPoint("TOPLEFT", statusTurnsLbl, "BOTTOMLEFT", 0, -3)
-
-local statusConfirmBtn = UI.CreatePanelButton(statusPopup, 200, 20, "Valider")
-statusConfirmBtn:SetPoint("BOTTOMLEFT", statusPopup, "BOTTOMLEFT", 10, 10)
+statusEditor:Reset()
+local statusConfirmBtn = UI.CreatePanelButton(statusPopup, 408, 30, "Appliquer les états")
+statusConfirmBtn:SetPoint("BOTTOMLEFT", statusPopup, "BOTTOMLEFT", 16, 14)
 
 -- ── Panneau "Cibles" (à droite du popup ci-dessus) ───────────────────────────
 -- Ouvert/fermé via "Choisir vos cibles..." : liste TOUTES les cibles
@@ -1068,9 +1101,7 @@ end
 local function CloseStatusPopup()
     statusPopup:Hide()
     statusTargetsPanel:Hide()
-    statusDescEB:SetText("")
-    statusDescArea:SetVerticalScroll(0)
-    statusTurnsEB:SetText("")
+    statusEditor:Reset()
     statusSelected = {}
     for _, row in ipairs(statusPlayerRows) do row:SetSelected(false) end
     for _, row in ipairs(statusNpcRows) do row:SetSelected(false) end
@@ -1086,13 +1117,24 @@ statusPopupCloseBtn:SetFrameLevel(statusPopup:GetFrameLevel() + 50)
 statusConfirmBtn:SetScript("OnClick", function()
     local targets = {}
     for id in pairs(statusSelected) do table.insert(targets, id) end
-    local text  = statusDescEB:GetText()
-    local turns = statusTurnsEB:GetText()
-    if #targets > 0 and text and text:match("%S") and turns and turns ~= "" then
-        if C:RequestAddStatus(targets, text, turns) then
-            CloseStatusPopup()
+    if #targets==0 then statusEditor.hint:SetText("Choisissez au moins une cible.");return end
+    -- Validate the whole draft before applying any effect.
+    for i,row in ipairs(statusEditor.rows) do
+        local turns=tonumber(row.turns:GetText())
+        if not row.text:GetText():match("%S") or not turns or turns<1 or turns~=math.floor(turns) then
+            statusEditor.hint:SetText("Ligne "..i.." : renseignez l'état et au moins 1 tour.")
+            statusEditor.scroll:SetVerticalScroll(math.max(0,math.min((i-1)*102,statusEditor.content:GetHeight()-statusEditor.scroll:GetHeight())))
+            row.text:SetFocus();return
         end
     end
+    while #statusEditor.rows>0 do
+        local row=statusEditor.rows[1]
+        if not C:RequestAddStatus(targets,row.text:GetText(),row.turns:GetText()) then
+            statusEditor.hint:SetText("Envoi interrompu. Réessayez les lignes restantes.");return
+        end
+        statusEditor:Remove(row)
+    end
+    CloseStatusPopup()
 end)
 
 -- Point d'entrée public (bouton "+ État" dans la Vue joueur — UI_Group.lua —
@@ -1102,13 +1144,11 @@ end)
 function C:OpenStatusPopup()
     if not C.initiative.active then return false end
     statusSelected = {}
-    statusDescEB:SetText("")
-    statusDescArea:SetVerticalScroll(0)
-    statusTurnsEB:SetText("")
+    statusEditor:Reset()
     RefreshSelectedCount()
     statusTargetsPanel:Hide()
     statusPopup:Show()
-    statusDescEB:SetFocus()
+    statusEditor.rows[1].text:SetFocus()
     return true
 end
 
@@ -1120,127 +1160,138 @@ end
 -- peut retirer n'importe quel état à n'importe qui. Un simple spectateur voit
 -- la liste (comme l'infobulle du badge) mais aucun bouton ×.
 
-local statusManagePopup = CreateFrame("Frame", nil, banner)
-statusManagePopup:SetSize(190, 50)
-statusManagePopup:SetFrameStrata("DIALOG")
-statusManagePopup:SetMovable(true)
+local statusManagePopup = CreateFrame("Frame", "CharacterActiveStatuses", banner)
+statusManagePopup:SetSize(350, 120)
+statusManagePopup:SetFrameStrata("TOOLTIP")
 statusManagePopup:SetClampedToScreen(true)
 statusManagePopup:EnableMouse(true)
 statusManagePopup:Hide()
-
+-- Always opaque here: the initiative icons must never bleed through the text.
 local statusManageBg = statusManagePopup:CreateTexture(nil, "BACKGROUND")
-statusManageBg:SetAllPoints()
-UI.ApplyWindowBackground(statusManageBg, 0.95)
+statusManageBg:SetPoint("TOPLEFT", 5, -5)
+statusManageBg:SetPoint("BOTTOMRIGHT", -5, 5)
+statusManageBg:SetColorTexture(.025,.035,.05,1)
 UI.ApplyBorder(statusManagePopup)
+if UISpecialFrames then table.insert(UISpecialFrames, "CharacterActiveStatuses") end
 
-local statusManageBar = CreateFrame("Frame", nil, statusManagePopup)
-statusManageBar:SetPoint("TOPLEFT"); statusManageBar:SetPoint("TOPRIGHT")
-statusManageBar:SetHeight(20)
-statusManageBar:EnableMouse(true)
-statusManageBar:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then statusManagePopup:StartMoving() end end)
-statusManageBar:SetScript("OnMouseUp", function() statusManagePopup:StopMovingOrSizing() end)
-
-local statusManageBarBg = statusManageBar:CreateTexture(nil, "BACKGROUND")
-statusManageBarBg:SetAllPoints()
-statusManageBarBg:SetColorTexture(0,0,0,0)
-
-local statusManageTitle = statusManageBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-statusManageTitle:SetPoint("LEFT", statusManageBar, "LEFT", 8, 0)
-statusManageTitle:SetText("États actifs")
+local statusManageTitle = statusManagePopup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+statusManageTitle:SetPoint("TOPLEFT", 16, -14)
+statusManageTitle:SetWidth(284)
+statusManageTitle:SetJustifyH("LEFT")
 UI.ApplyTitle(statusManageTitle)
+local statusManageSubtitle = statusManagePopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+statusManageSubtitle:SetPoint("TOPLEFT", 16, -35)
+statusManageSubtitle:SetWidth(310)
+statusManageSubtitle:SetJustifyH("LEFT")
+UI.ApplyMutedText(statusManageSubtitle)
+local statusManageFooter = statusManagePopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+statusManageFooter:SetPoint("BOTTOMLEFT", 16, 12)
+statusManageFooter:SetWidth(318)
+statusManageFooter:SetJustifyH("LEFT")
+UI.ApplyMutedText(statusManageFooter)
 
 local statusManageCloseBtn = UI.CreateCloseButton(statusManagePopup, function() statusManagePopup:Hide() end)
 statusManageCloseBtn:ClearAllPoints()
-statusManageCloseBtn:SetPoint("TOPRIGHT", statusManagePopup, "TOPRIGHT", -3, -3)
-statusManageCloseBtn:SetSize(18, 16)
-statusManageCloseBtn:SetFrameLevel(statusManagePopup:GetFrameLevel() + 50)
+statusManageCloseBtn:SetPoint("TOPRIGHT", statusManagePopup, "TOPRIGHT", -5, -5)
+statusManageCloseBtn:SetSize(20,20)
 
-local STATUS_MANAGE_ROW_H = 26
+local statusManageScroll = CreateFrame("ScrollFrame", nil, statusManagePopup, "UIPanelScrollFrameTemplate")
+statusManageScroll:SetPoint("TOPLEFT", 12, -56)
+statusManageScroll:SetPoint("BOTTOMRIGHT", -32, 34)
+local statusManageContent = CreateFrame("Frame", nil, statusManageScroll)
+statusManageContent:SetSize(306,1)
+statusManageScroll:SetScrollChild(statusManageContent)
 
 local function MakeStatusManageRow(parent)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetHeight(STATUS_MANAGE_ROW_H)
-
+    row:SetWidth(306)
+    UI.ApplyRowCard(row)
     local removeBtn = UI.CreateCloseButton(row, nil)
     removeBtn:ClearAllPoints()
-    removeBtn:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 0)
-    removeBtn:SetSize(14, 14)
+    removeBtn:SetPoint("BOTTOMRIGHT", -8, 8)
+    removeBtn:SetSize(18,18)
     row.removeBtn = removeBtn
-
-    local textFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    textFS:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-    textFS:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
+    local duration = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    duration:SetPoint("TOPRIGHT", -10, -11)
+    duration:SetWidth(74)
+    duration:SetJustifyH("RIGHT")
+    UI.ApplyTitle(duration)
+    local textFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    textFS:SetPoint("TOPLEFT", 12, -10)
+    textFS:SetWidth(200)
     textFS:SetJustifyH("LEFT")
-    textFS:SetWordWrap(false)
+    textFS:SetWordWrap(true)
     UI.ApplyBodyText(textFS)
-
     local sourceFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sourceFS:SetPoint("TOPLEFT", textFS, "BOTTOMLEFT", 0, -1)
-    sourceFS:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    sourceFS:SetPoint("TOPLEFT", textFS, "BOTTOMLEFT", 0, -7)
+    sourceFS:SetWidth(254)
     sourceFS:SetJustifyH("LEFT")
+    sourceFS:SetWordWrap(true)
     UI.ApplyMutedText(sourceFS)
-
     function row:Refresh(st, canRemove)
-        textFS:SetText(st.text .. "  " .. StatusCountdownText(st))
-        local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source
-        sourceFS:SetText("— par " .. sourceLabel)
+        textFS:SetText(st.text or "")
+        duration:SetText(StatusCountdownText(st):gsub("[()]",""))
+        local sourceLabel = (C.GetDisplayName and C:GetDisplayName(st.source, C.groupData[st.source])) or st.source or "Inconnu"
+        sourceFS:SetText("Par "..sourceLabel)
+        row:SetHeight(math.max(64, textFS:GetStringHeight()+sourceFS:GetStringHeight()+30))
         removeBtn:SetShown(canRemove)
         removeBtn:SetScript("OnClick", function() C:RequestRemoveStatus(st.id) end)
+        removeBtn:SetScript("OnEnter",function(self)
+            GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+            GameTooltip:SetText("Retirer cet état")
+            GameTooltip:Show()
+        end)
+        removeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
     end
-
     return row
 end
 
-local statusManageRows   = {}
-local statusManageTarget = nil  -- id du participant actuellement affiché
-
-local function GetStatusManageRow(i)
-    if not statusManageRows[i] then statusManageRows[i] = MakeStatusManageRow(statusManagePopup) end
-    return statusManageRows[i]
-end
-
+local statusManageRows = {}
+local statusManageTarget
 local function RefreshStatusManagePopup()
     if not statusManageTarget or not statusManagePopup:IsShown() then return end
-
     local list = {}
     for _, st in ipairs(C.initiative.statuses or {}) do
-        if st.targetId == statusManageTarget then table.insert(list, st) end
+        if st.targetId == statusManageTarget then list[#list+1]=st end
     end
-
-    -- Plus aucun état sur cette cible (tous retirés/expirés pendant que le
-    -- popup était ouvert) : on ferme, sinon une fenêtre vide resterait là.
-    if #list == 0 then
-        statusManagePopup:Hide()
-        return
+    if #list==0 then statusManagePopup:Hide();return end
+    local canRemove = not statusManagePopup.preview and (C.initiative.isHost or statusManageTarget==UnitName("player"))
+    statusManageTitle:SetText("États actifs  ·  "..#list)
+    statusManageSubtitle:SetText(ParticipantLabel(FindParticipantById(statusManageTarget)))
+    statusManageFooter:SetText(statusManagePopup.preview and "Cliquez sur le badge pour ouvrir la liste"
+        or (canRemove and "Retirez un état avec sa croix" or "Consultation des états"))
+    statusManageCloseBtn:SetShown(not statusManagePopup.preview)
+    local y=0
+    for i,st in ipairs(list) do
+        if not statusManageRows[i] then statusManageRows[i]=MakeStatusManageRow(statusManageContent) end
+        local row=statusManageRows[i]
+        row:ClearAllPoints();row:SetPoint("TOPLEFT",0,-y)
+        row:Refresh(st,canRemove);row:Show()
+        y=y+row:GetHeight()+6
     end
-
-    local canRemove = C.initiative.isHost or statusManageTarget == UnitName("player")
-    local y = -24
-    for i, st in ipairs(list) do
-        local row = GetStatusManageRow(i)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", statusManagePopup, "TOPLEFT", 8, y)
-        row:SetPoint("RIGHT", statusManagePopup, "RIGHT", -8, 0)
-        row:Refresh(st, canRemove)
-        row:Show()
-        y = y - (STATUS_MANAGE_ROW_H + 2)
-    end
-    for i = #list + 1, #statusManageRows do statusManageRows[i]:Hide() end
-
-    statusManagePopup:SetHeight(math.max(50, -y + 8))
+    for i=#list+1,#statusManageRows do statusManageRows[i]:Hide() end
+    statusManageContent:SetHeight(math.max(1,y-6))
+    statusManagePopup:SetHeight(90+math.min(y-6,math.max(80,math.min(360,UIParent:GetHeight()-130))))
 end
 
--- Appelé depuis le OnClick du badge "E" (voir MakeCard) : `anchorFrame` est
--- le badge lui-même, pour ouvrir le popup juste en dessous.
-OpenStatusManagePopup = function(participantId, anchorFrame)
+HideStatusPreview = function()
+    if statusManagePopup.preview then statusManagePopup:Hide() end
+end
+OpenStatusManagePopup = function(participantId, anchorFrame, preview)
     if not participantId then return end
-    statusManageTarget = participantId
+    -- A pinned list is not replaced by a hover from another badge.
+    if preview and statusManagePopup:IsShown() and not statusManagePopup.preview then return end
+    GameTooltip:Hide()
+    statusManageTarget=participantId
+    statusManagePopup.preview=preview and true or false
+    statusManagePopup:EnableMouse(not preview)
     statusManagePopup:ClearAllPoints()
     if anchorFrame then
-        statusManagePopup:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, -4)
+        statusManagePopup:SetPoint("TOPLEFT",anchorFrame,"BOTTOMRIGHT",10,-10)
     else
-        statusManagePopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        statusManagePopup:SetPoint("CENTER",UIParent,"CENTER",0,0)
     end
+    statusManageScroll:SetVerticalScroll(0)
     statusManagePopup:Show()
     RefreshStatusManagePopup()
 end

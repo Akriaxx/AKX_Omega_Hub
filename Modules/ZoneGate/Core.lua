@@ -313,7 +313,7 @@ function ZG:CreateSubZone(zoneId, name)
 
     local px, py, facing, instanceID = ZG:GetPlayerPose()
     if not px then
-        OmegaHub.Print("Zone Gate : position introuvable.")
+        OmegaHub.Print("Crossings : position introuvable.")
         return nil
     end
 
@@ -321,7 +321,7 @@ function ZG:CreateSubZone(zoneId, name)
     if name == "" then
         local n = 0
         for _ in pairs(zone.subZones) do n = n + 1 end
-        name = "Sous-zone " .. (n + 1)
+        name = "Checkpoint " .. (n + 1)
     end
 
     local id = "sz_" .. time() .. "_" .. math.random(1000, 9999)
@@ -355,7 +355,7 @@ function ZG:CloneSubZone(id)
 
     local px, py, facing, instanceID = ZG:GetPlayerPose()
     if not px then
-        OmegaHub.Print("Zone Gate : position introuvable.")
+        OmegaHub.Print("Crossings : position introuvable.")
         return nil
     end
 
@@ -402,7 +402,7 @@ function ZG:RecaptureSubZone(id)
 
     local px, py, facing, instanceID = ZG:GetPlayerPose()
     if not px then
-        OmegaHub.Print("Zone Gate : position introuvable.")
+        OmegaHub.Print("Crossings : position introuvable.")
         return false
     end
 
@@ -459,7 +459,7 @@ function ZG:AddRegionPoint(subZoneId)
 
     local px, py, _, instanceID = ZG:GetPlayerPose()
     if not px then
-        OmegaHub.Print("Zone Gate : position introuvable.")
+        OmegaHub.Print("Crossings : position introuvable.")
         return false
     end
 
@@ -467,10 +467,10 @@ function ZG:AddRegionPoint(subZoneId)
     if #sub.points == 0 then
         sub.mapID = instanceID
     elseif sub.mapID ~= instanceID then
-        OmegaHub.Print("Zone Gate : restez dans la même zone/instance pour cette région.")
+        OmegaHub.Print("Crossings : restez dans la même zone/instance pour cette région.")
         return false
     elseif #sub.points >= MAX_REGION_POINTS then
-        OmegaHub.Print("Zone Gate : maximum " .. MAX_REGION_POINTS .. " points par région.")
+        OmegaHub.Print("Crossings : maximum " .. MAX_REGION_POINTS .. " points par région.")
         return false
     end
 
@@ -628,17 +628,17 @@ function ZG:GetThemeList()
 end
 
 function ZG:RenameTheme(id, name)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.name = (name or ""):match("^%s*(.-)%s*$") or theme.name
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeFont(id, font)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.font = (ZG.FontPaths[font] or font == "custom") and font or "frizqt"
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 -- Chemin utilisé quand font == "custom" — n'importe quel fichier de police
@@ -647,17 +647,17 @@ end
 -- réellement : un chemin invalide retombe silencieusement sur la police par
 -- défaut au rendu (voir ResolveFontPath dans UI_Banner.lua).
 function ZG:SetThemeCustomFont(id, path)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.customFont = (path or ""):match("^%s*(.-)%s*$") or ""
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeTitleSize(id, size)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.titleSize = math.max(10, math.min(60, math.floor((tonumber(size) or theme.titleSize) + 0.5)))
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 -- which = "title" | "sub" | "sep" | "bg" | "frame" — un seul setter couleur
@@ -668,75 +668,75 @@ local THEME_COLOR_FIELDS = {
     title = "titleColor", sub = "subColor", sep = "sepColor", bg = "bgColor", frame = "frameColor",
 }
 function ZG:SetThemeColor(id, which, r, g, b, a)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     local field = THEME_COLOR_FIELDS[which]
     if not theme or not field or theme.creator ~= MyName() then return end
     local c = theme[field] or {}
     c[1], c[2], c[3] = r or c[1] or 1, g or c[2] or 1, b or c[3] or 1
     if a ~= nil then c[4] = a end
     theme[field] = c
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeOutline(id, enabled)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.outline = enabled and true or false
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeUppercase(id, enabled)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.uppercase = enabled and true or false
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeLetterSpacing(id, enabled)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.letterSpacing = enabled and true or false
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeSeparatorStyle(id, style)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.sepStyle = ZG.SepLabels[style] and style or "single"
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeFrameStyle(id, style)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.frameStyle = ZG.FrameLabels[style] and style or "none"
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 -- Ligne entre le titre et le sous-titre (indépendante des lignes haut/bas,
 -- qui restent gérées par sepStyle) — même couleur (sepColor), toujours en
 -- trait simple quel que soit sepStyle.
 function ZG:SetThemeMidSeparator(id, enabled)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.midSepEnabled = enabled and true or false
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeBackgroundEnabled(id, enabled)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     theme.bgEnabled = enabled and true or false
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 function ZG:SetThemeTiming(id, fadeIn, hold, fadeOut)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     if fadeIn  then theme.fadeIn  = math.max(0, math.min(5,  tonumber(fadeIn)  or theme.fadeIn)) end
     if hold    then theme.hold    = math.max(0, math.min(30, tonumber(hold)    or theme.hold)) end
     if fadeOut then theme.fadeOut = math.max(0, math.min(5,  tonumber(fadeOut) or theme.fadeOut)) end
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 -- value : soit un ID numérique (SoundKit Blizzard, via PlaySound), soit un
@@ -744,11 +744,11 @@ end
 -- le dossier de l'addon, via PlaySoundFile) — voir ResolveSoundValue.
 -- direction : "enter" (franchissement "avant") ou "exit" ("arrière").
 function ZG:SetThemeSound(id, direction, value)
-    local theme = ZG:GetTheme(id)
+    local theme = self:GetTheme(id)
     if not theme or theme.creator ~= MyName() then return end
     local field = (direction == "exit") and "soundExit" or "soundEnter"
     theme[field] = (value or ""):match("^%s*(.-)%s*$") or ""
-    ZG:ScheduleBroadcast()
+    self:ScheduleBroadcast()
 end
 
 -- Zone/Sous-zone → thème choisi ("" ou nil = aucun/hérite, voir ResolveTheme).
@@ -951,7 +951,7 @@ end
 
 -- Ligne : distance signée le long de "facing" (along) + latérale (across).
 local function Project(sub, px, py)
-    local fx, fy = math.cos(sub.facing), math.sin(sub.facing)
+    local fx, fy = math.sin(sub.facing), math.cos(sub.facing)
     local rx, ry = -fy, fx
     local dx, dy = px - sub.x, py - sub.y
     local along  = dx * fx + dy * fy
@@ -1058,11 +1058,14 @@ function ZG:Tick()
                     end
                     ZG.state[id] = side
                 else
-                    -- Hors bande (ligne) / dans la marge de tolérance (cercle,
-                    -- ou près du contour d'une région) / région pas encore
-                    -- validée : on réarme proprement (évite les faux déclenchements).
-                    ZG.state[id] = nil
+                    -- Keep the last stable side through the boundary deadband.
+                    -- Otherwise slow crossings lose their origin before reaching
+                    -- the opposite side and never trigger their effects.
+                    local closed=sub.shape=="circle" or (sub.shape=="polygon" and sub.regionReady and sub.points and #sub.points>=3)
+                    if not closed then ZG.state[id] = nil end
                 end
+            else
+                ZG.state[id] = nil
             end
         end
     end
@@ -1078,7 +1081,7 @@ end
 -- sans que celui-ci ait à autoriser quoi que ce soit ; au créateur de la
 -- zone de ne pas se planter dans sa config.
 function ZG:RunCrossingAction(sub, zone, direction)
-    local enabled = (direction == "forward") and sub.actionForwardEnabled or sub.actionBackwardEnabled
+    local enabled = (direction == "forward" and sub.actionForwardEnabled) or (direction == "backward" and sub.actionBackwardEnabled)
     if not enabled then return end
 
     if sub.actionMessage and sub.actionMessage ~= "" then
@@ -1618,6 +1621,7 @@ end
 function ZG:Enable()
     SLASH_OZONEGATE1 = "/oche"
     SLASH_OZONEGATE2 = "/ocheck"
+    SLASH_OZONEGATE3 = "/crossings"
     SlashCmdList["OZONEGATE"] = function()
         if ZoneGatePanel then ZoneGatePanel:Toggle() end
     end
@@ -1640,7 +1644,7 @@ function ZG:Enable()
 
     OmegaHub:SetModuleLoaded("ZoneGate", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("Zone Gate activé.  |cffAAAAAA/oche|r")
+        OmegaHub.Print("Crossings activé.  |cffAAAAAA/oche|r")
     end
 end
 
@@ -1657,7 +1661,7 @@ function ZG:Disable()
     if ZG.HideBanner then ZG:HideBanner() end
 
     OmegaHub:SetModuleLoaded("ZoneGate", false)
-    OmegaHub.Print("Zone Gate désactivé.")
+    OmegaHub.Print("Crossings désactivé.")
 end
 
 -- ── Réinitialisation d'état au changement de zone/instance ────────────────
@@ -1675,8 +1679,8 @@ f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function()
     OmegaHub:RegisterModule({
         name    = "ZoneGate",
-        title   = "Zone Gate",
-        desc    = "Bannières d'entrée/sortie de zone (checkpoints RP)",
+        title   = "Crossings",
+        desc    = "Checkpoints d’entrée et de sortie de région",
         version = ZONEGATE_VERSION,
         module  = ZG,
     })

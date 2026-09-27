@@ -1,371 +1,219 @@
--- ============================================================
---  Zone Gate — Radar d'édition
---  Vue égocentrique (rotative) : l'avant du joueur pointe
---  toujours vers le haut, comme une minimap en mode "rotation
---  joueur" — avec un repère "N" qui tourne pour indiquer le nord
---  du monde, comme le fait la minimap Blizzard dans ce mode.
---  Zoom fixe par paliers, piloté par le zoom caméra du joueur
---  (pas d'adaptatif en continu).
--- ============================================================
-
-local ZG = ZoneGate
-local UI = OS2.UI
-
-local SIZE      = 160
-local ARROW_OFF = 12    -- décalage des flèches de sens depuis le centre de la porte (px)
-local REFRESH   = 0.1   -- throttle de l'OnUpdate
-
--- Convention de coordonnées monde WoW (connue des addons de waypoints type
--- TomTom) : +X pointe vers le sud, +Y vers l'ouest. Le nord est donc -X.
-local NORTH_WX, NORTH_WY = -1, 0
-
--- Paliers fixes de zoom (px/yard), pilotés par la molette (zoom caméra du
--- joueur, GetCameraZoom() — 0 = vue épaule, ~2.6 = distance max par
--- défaut). Seuils absolus (pas normalisés sur un cvar perso) : ça répond
--- directement à chaque cran de molette dans la plage de jeu habituelle,
--- sans être noyé par un cvar de distance max personnalisé très large.
--- Pas d'interpolation continue : on saute d'un palier à l'autre.
-local ZOOM_TIERS = { 10, 7, 5, 3 }
-local ZOOM_BREAKS = { 0.65, 1.3, 2.0 }   -- 3 seuils → 4 paliers
-
-local function CameraZoomTier()
-    local zoom = GetCameraZoom() or ZOOM_BREAKS[2]
-    for i, threshold in ipairs(ZOOM_BREAKS) do
-        if zoom < threshold then return ZOOM_TIERS[i] end
-    end
-    return ZOOM_TIERS[#ZOOM_TIERS]
+-- Player-centred crossing assistant, with the player always facing up.
+local ZG=ZoneGate
+local UI=ZG.EditorUI or OS2.UI
+local function clamp(v,a,b) return math.max(a,math.min(b,v)) end
+local function segment(px,py,a,b)
+    local dx,dy=b.x-a.x,b.y-a.y
+    local len=dx*dx+dy*dy
+    local t=len>0 and clamp(((px-a.x)*dx+(py-a.y)*dy)/len,0,1) or 0
+    return math.sqrt((px-a.x-t*dx)^2+(py-a.y-t*dy)^2)
 end
-
--- Rotation pure d'un vecteur (pas de translation) : sert à la fois pour les
--- décalages et pour les directions, en mode égocentrique. Le résultat est
--- mirroré sur X (constaté en jeu : gauche/droite étaient inversés — la
--- convention de sens de GetPlayerFacing() est donc opposée à celle
--- supposée initialement). Comme absolument tout ce qui bouge sur le radar
--- passe par cette fonction, corriger ici suffit à tout remettre d'aplomb
--- (position du checkpoint, flèches de sens, repère N).
-local function Rotate(dx, dy, delta)
-    local c, s = math.cos(delta), math.sin(delta)
-    local rx = dx * c - dy * s
-    local ry = dx * s + dy * c
-    return -rx, ry
+-- Stored coordinates: x is west, y is north (GetPlayerPose swaps UnitPosition).
+-- Guide towards the closest reachable point on the actual boundary.
+function ZG:PlacementTarget(cp,px,py,facing)
+    local tx,ty=cp.x,cp.y
+    local best=math.huge
+    local function edge(a,b)
+        local dx,dy=b.x-a.x,b.y-a.y
+        local len=dx*dx+dy*dy
+        local t=len>0 and clamp(((px-a.x)*dx+(py-a.y)*dy)/len,0,1) or 0
+        local x,y=a.x+t*dx,a.y+t*dy
+        local d=(px-x)^2+(py-y)^2
+        if d<best then best=d;tx,ty=x,y end
+    end
+    if cp.shape=="polygon" then
+        local pts=cp.points or {}
+        if #pts>0 then tx,ty=pts[1].x,pts[1].y end
+        for i=2,#pts do edge(pts[i-1],pts[i]) end
+        if cp.regionReady and #pts>=3 then edge(pts[#pts],pts[1]) end
+    elseif cp.shape=="circle" then
+        local dx,dy=px-cp.x,py-cp.y
+        local d=math.sqrt(dx*dx+dy*dy)
+        if d<.001 then dx,dy,d=math.sin(facing or 0),math.cos(facing or 0),1 end
+        tx,ty=cp.x+dx/d*(cp.width or 6),cp.y+dy/d*(cp.width or 6)
+    else
+        local a,r=cp.facing or 0,(cp.width or 6)/2
+        edge({x=cp.x-math.cos(a)*r,y=cp.y+math.sin(a)*r},
+             {x=cp.x+math.cos(a)*r,y=cp.y-math.sin(a)*r})
+    end
+    local dx,dy=tx-px,ty-py
+    local distance=math.sqrt(dx*dx+dy*dy)
+    local angle=math.atan2(dx,dy)-(facing or 0)
+    angle=(angle+math.pi)%(2*math.pi)-math.pi
+    local instruction
+    if distance<1 then instruction="Passage atteint"
+    elseif math.abs(angle)<.22 then instruction="Tout droit"
+    elseif math.abs(angle)>2.6 then instruction="Faites demi-tour"
+    elseif angle>0 then instruction="Tournez à gauche"
+    else instruction="Tournez à droite" end
+    return {x=tx,y=ty,distance=distance,angle=angle,instruction=instruction}
 end
-
--- Crée un radar autonome. `checkpointGetter` doit renvoyer le checkpoint
--- actuellement édité (table brute de ZoneGateDB.checkpoints), ou nil.
-function ZG.CreateRadar(parent, checkpointGetter)
-    local radar = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    radar:SetSize(SIZE, SIZE)
-
-    local bg = radar:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    UI.ApplyWindowBackground(bg, 0.85)
-    UI.ApplyBorder(radar)
-
-    -- Réticule central, purement décoratif
-    local crosshairV = radar:CreateTexture(nil, "ARTWORK")
-    crosshairV:SetPoint("TOP", radar, "TOP", 0, 0)
-    crosshairV:SetPoint("BOTTOM", radar, "BOTTOM", 0, 0)
-    crosshairV:SetWidth(1)
-    UI.ApplySeparator(crosshairV, true)
-
-    local crosshairH = radar:CreateTexture(nil, "ARTWORK")
-    crosshairH:SetPoint("LEFT", radar, "LEFT", 0, 0)
-    crosshairH:SetPoint("RIGHT", radar, "RIGHT", 0, 0)
-    crosshairH:SetHeight(1)
-    UI.ApplySeparator(crosshairH, true)
-
-    -- Joueur : point fixe au centre. En mode égocentrique son "avant" pointe
-    -- toujours vers le haut, donc pas besoin de flèche de facing pour lui.
-    local playerDot = radar:CreateTexture(nil, "OVERLAY")
-    playerDot:SetSize(7, 7)
-    playerDot:SetPoint("CENTER")
-    playerDot:SetColorTexture(0.95, 0.90, 0.60, 1)
-
-    local playerArrow = radar:CreateTexture(nil, "OVERLAY")
-    playerArrow:SetSize(14, 14)
-    playerArrow:SetPoint("CENTER", playerDot, "CENTER", 0, 10)
-    playerArrow:SetTexture("Interface\\Minimap\\MinimapArrow")
-    playerArrow:SetVertexColor(1, 1, 1, 0.95)
-
-    -- Repère "N" : tourne autour du bord du radar pour indiquer le nord du
-    -- monde, comme la minimap Blizzard en mode "rotation joueur".
-    local northLabel = radar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    northLabel:SetText("N")
-    northLabel:SetTextColor(0.90, 0.78, 0.30, 1)
-
-    -- Ligne de porte (segment perpendiculaire au sens "entrée", longueur = largeur)
-    local gateLine = radar:CreateTexture(nil, "ARTWORK")
-    gateLine:SetHeight(3)
-    gateLine:SetColorTexture(0.85, 0.75, 0.40, 0.95)
-    gateLine:Hide()
-
-    -- Checkpoint "cercle" : pas de vraie échelle possible (le rayon peut
-    -- dépasser largement la fenêtre du radar) — juste un pictogramme rond au
-    -- centre du checkpoint pour le différencier visuellement d'une ligne.
-    local circleIcon = radar:CreateTexture(nil, "ARTWORK")
-    circleIcon:SetSize(22, 22)
-    circleIcon:SetColorTexture(0.85, 0.75, 0.40, 0.45)
-    -- AddMaskTexture exige un vrai objet MaskTexture (CreateMaskTexture sur
-    -- le FRAME, pas sur la texture) — d'où le plantage "Wrong object type".
-    local circleMask = radar:CreateMaskTexture(nil, "ARTWORK")
-    circleMask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
-    circleMask:SetAllPoints(circleIcon)   -- ancrage relatif : suit circleIcon en continu
-    circleIcon:AddMaskTexture(circleMask)
-    circleIcon:Hide()
-
-    -- Checkpoint "région" (polygon) : contour approximatif — un point par
-    -- sommet (clampé au bord du radar comme le reste), relié par des
-    -- segments. Pool fixe réutilisé d'un rafraîchissement à l'autre (pas de
-    -- CreateTexture en boucle). La boucle de fermeture (dernier → premier)
-    -- n'apparaît que si la région est validée (regionReady) — sinon le
-    -- contour reste ouvert, pour montrer visuellement qu'elle ne l'est pas
-    -- encore.
-    local MAX_REGION_POINTS = 20
-    local regionDots, regionSegments = {}, {}
-    for i = 1, MAX_REGION_POINTS do
-        local dot = radar:CreateTexture(nil, "OVERLAY")
-        dot:SetSize(6, 6)
-        dot:SetColorTexture(0.85, 0.75, 0.40, 0.95)
-        dot:Hide()
-        regionDots[i] = dot
-
-        local seg = radar:CreateTexture(nil, "ARTWORK")
-        seg:SetHeight(2)
-        seg:SetColorTexture(0.85, 0.75, 0.40, 0.75)
-        seg:Hide()
-        regionSegments[i] = seg
-    end
-
-    local function HideRegion()
-        for i = 1, MAX_REGION_POINTS do
-            regionDots[i]:Hide()
-            regionSegments[i]:Hide()
+function ZG:PlacementReadout(cp,px,py,facing,mapID)
+    if not cp then return {unavailable="Sélectionnez un checkpoint."} end
+    if not px or not py then return {unavailable="Position indisponible."} end
+    if cp.mapID~=mapID then return {unavailable="Checkpoint dans une autre instance."} end
+    local signed,distance,lateral,heading
+    if cp.shape=="polygon" then
+        local points=cp.points or {}
+        if #points<3 or not cp.regionReady then
+            return {unavailable=string.format("Contour en cours : %d point(s).",#points),hint="Ajoutez au moins trois points, puis validez le périmètre."}
         end
-    end
-
-    -- Positionne un segment (texture fine) entre deux points déjà en
-    -- coordonnées radar (offsets depuis le centre). Cache le segment si les
-    -- deux points sont confondus (rotation indéfinie).
-    local function PositionSegment(seg, x1, y1, x2, y2)
-        local dx, dy = x2 - x1, y2 - y1
-        local len = math.sqrt(dx * dx + dy * dy)
-        if len < 0.5 then seg:Hide(); return end
-        seg:ClearAllPoints()
-        seg:SetPoint("CENTER", radar, "CENTER", (x1 + x2) / 2, (y1 + y2) / 2)
-        seg:SetWidth(len)
-        seg:SetRotation(math.atan2(dy, dx))
-        seg:Show()
-    end
-
-    -- Flèches + libellés de sens
-    local fwdArrow = radar:CreateTexture(nil, "OVERLAY")
-    fwdArrow:SetSize(12, 12)
-    fwdArrow:SetTexture("Interface\\Minimap\\MinimapArrow")
-    fwdArrow:SetVertexColor(0.40, 0.90, 0.45, 1)
-    fwdArrow:Hide()
-
-    local backArrow = radar:CreateTexture(nil, "OVERLAY")
-    backArrow:SetSize(12, 12)
-    backArrow:SetTexture("Interface\\Minimap\\MinimapArrow")
-    backArrow:SetVertexColor(0.90, 0.40, 0.40, 1)
-    backArrow:Hide()
-
-    local fwdLabel = radar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fwdLabel:SetText("ENTRÉE")
-    fwdLabel:SetTextColor(0.40, 0.90, 0.45, 1)
-    fwdLabel:Hide()
-
-    local backLabel = radar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    backLabel:SetText("RETOUR")
-    backLabel:SetTextColor(0.90, 0.40, 0.40, 1)
-    backLabel:Hide()
-
-    -- Distance + statut ("dans la bande"), sous le radar
-    local distText = radar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    distText:SetPoint("TOP", radar, "BOTTOM", 0, -4)
-    UI.ApplyMutedText(distText)
-    radar.distText = distText
-
-    local statusText = radar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    statusText:SetPoint("TOP", distText, "BOTTOM", 0, -2)
-    radar.statusText = statusText
-
-    local HALF = SIZE / 2 - 8   -- marge intérieure du radar (rayon utile, en px)
-
-    local function ClampToRadar(dx, dy)
-        local dist = math.sqrt(dx * dx + dy * dy)
-        if dist <= HALF or dist == 0 then return dx, dy, false end
-        local scale = HALF / dist
-        return dx * scale, dy * scale, true
-    end
-
-    local function HideGate()
-        gateLine:Hide()
-        circleIcon:Hide()
-        fwdArrow:Hide(); backArrow:Hide()
-        fwdLabel:Hide(); backLabel:Hide()
-        HideRegion()
-        distText:SetText("")
-        statusText:SetText("")
-    end
-
-    radar.elapsed = 0
-    radar:SetScript("OnUpdate", function(self, delta)
-        self.elapsed = self.elapsed + delta
-        if self.elapsed < REFRESH then return end
-        self.elapsed = 0
-
-        local px, py, facing = ZG:GetPlayerPose()
-        if not px then
-            HideGate()
-            northLabel:Hide()
-            return
+        local inside=false;distance=math.huge
+        local j=#points
+        for i,p in ipairs(points) do
+            local q=points[j]
+            if (p.y>py)~=(q.y>py) and px<(q.x-p.x)*(py-p.y)/(q.y-p.y)+p.x then inside=not inside end
+            distance=math.min(distance,segment(px,py,q,p));j=i
         end
-
-        -- Angle qui remet "l'avant du joueur" vers le haut de l'écran.
-        local ego = math.pi / 2 - facing
-
-        local nx, ny = Rotate(NORTH_WX, NORTH_WY, ego)
-        local nAngle = math.atan2(ny, nx)
-        local ringR = HALF + 6
-        northLabel:ClearAllPoints()
-        northLabel:SetPoint("CENTER", radar, "CENTER", math.cos(nAngle) * ringR, math.sin(nAngle) * ringR)
-        northLabel:Show()
-
-        local cp = checkpointGetter and checkpointGetter() or nil
-        if not cp then
-            HideGate()
-            return
+        signed=inside and distance or -distance
+    elseif cp.shape=="circle" then
+        signed=(cp.width or 6)-math.sqrt((px-cp.x)^2+(py-cp.y)^2)
+        distance=math.abs(signed)
+    else
+        local angle=cp.facing or 0
+        local fx,fy=math.sin(angle),math.cos(angle)
+        local dx,dy=px-cp.x,py-cp.y
+        signed=dx*fx+dy*fy
+        lateral=math.max(0,math.abs(-dx*fy+dy*fx)-(cp.width or 6)/2)
+        distance=math.sqrt(signed*signed+lateral*lateral)
+        heading=math.cos((facing or angle)-angle)
+    end
+    local line=cp.shape~="circle" and cp.shape~="polygon"
+    local status,hint
+    if line and lateral>1 then
+        status="Décalé du passage"
+        hint=string.format("Rejoignez le passage : %.1f yd de décalage latéral.",lateral)
+    elseif math.abs(signed)<1 then
+        status="Sur la limite";hint="Éloignez-vous d'un côté, puis traversez pour tester."
+    elseif signed<0 then
+        status=line and "Côté départ" or "À l'extérieur"
+        hint=line and (heading>.25 and "Avancez à travers le passage pour entrer." or "Orientez-vous vers le passage pour entrer.") or "Franchissez le contour vers l'intérieur pour entrer."
+    else
+        status=line and "Côté arrivée" or "À l'intérieur"
+        hint=line and (heading<-.25 and "Avancez à travers le passage pour sortir." or "Faites demi-tour et retraversez pour sortir.") or "Franchissez le contour vers l'extérieur pour sortir."
+    end
+    if cp.enabled==false then status="Checkpoint désactivé";hint="Activez-le pour déclencher ses effets au passage." end
+    return {signed=signed,distance=distance,lateral=lateral,status=status,hint=hint,line=line}
+end
+-- Project world offsets onto the player's right/forward axes.
+function ZG:PlacementOffset(dx,dy,facing)
+    local c,s=math.cos(facing or 0),math.sin(facing or 0)
+    return -dx*c+dy*s,dx*s+dy*c
+end
+-- Fit a circle around the player so turning never changes the zoom or clips the contour.
+function ZG:PlacementGeometry(cp,px,py)
+    local points={}
+    if cp.shape=="polygon" then
+        for _,p in ipairs(cp.points or {}) do points[#points+1]={x=p.x,y=p.y} end
+    elseif cp.shape=="circle" then
+        for i=0,47 do local a=i*math.pi/24;points[#points+1]={x=cp.x+math.cos(a)*(cp.width or 6),y=cp.y+math.sin(a)*(cp.width or 6)} end
+    else
+        local a=cp.facing or 0;local r=(cp.width or 6)/2
+        points={{x=cp.x-math.cos(a)*r,y=cp.y+math.sin(a)*r},{x=cp.x+math.cos(a)*r,y=cp.y-math.sin(a)*r}}
+    end
+    local cx,cy=px,py
+    local reach=6
+    for _,p in ipairs(points) do
+        reach=math.max(reach,math.sqrt((p.x-px)^2+(p.y-py)^2))
+    end
+    local fit=84/reach
+    local scale=8
+    while scale>fit do scale=scale/2 end
+    return points,cx,cy,scale
+end
+function ZG.CreatePassageGuide(parent,getter)
+    local guide=CreateFrame("Frame",nil,parent)
+    guide:SetSize(300,284);UI.Surface(guide,true)
+    local function label(text,x,y,w)
+        local fs=guide:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+        fs:SetPoint("TOPLEFT",x,-y);fs:SetWidth(w);fs:SetJustifyH("LEFT")
+        fs:SetText(text);UI.ApplyMutedText(fs);return fs
+    end
+    label("TRACÉ EN DIRECT",12,10,150)
+    local compass=label("Face en haut",180,10,108);compass:SetJustifyH("RIGHT")
+    local canvas=CreateFrame("Frame",nil,guide)
+    canvas:SetPoint("TOPLEFT",12,-32);canvas:SetSize(276,196)
+    UI.Surface(canvas,true)
+    local segments,dots,numbers={},{},{}
+    for i=1,64 do
+        local t=canvas:CreateTexture(nil,"ARTWORK");t:SetHeight(2);t:SetColorTexture(.76,.65,.39,1);t:Hide();segments[i]=t
+    end
+    for i=1,20 do
+        local dot=canvas:CreateTexture(nil,"OVERLAY");dot:SetSize(5,5);dot:SetColorTexture(.9,.76,.45,1);dot:Hide();dots[i]=dot
+        local n=canvas:CreateFontString(nil,"OVERLAY","GameFontNormalSmall");n:SetText(tostring(i));n:Hide();numbers[i]=n
+    end
+    local player=canvas:CreateTexture(nil,"OVERLAY")
+    guide.playerMarker=player
+    player:SetSize(13,13);player:SetTexture("Interface\\Minimap\\MinimapArrow");player:SetVertexColor(.45,.85,1,1)
+    local target=canvas:CreateTexture(nil,"OVERLAY")
+    target:SetSize(8,8);target:SetColorTexture(1,.8,.25,1)
+    guide.targetMarker=target
+    local state=label("",12,236,276);UI.ApplyTitle(state)
+    local detail=label("",12,257,276);detail:SetHeight(24)
+    guide.distText=detail;guide.statusText=state
+    local elapsed=0
+    local function Refresh()
+        for _,t in ipairs(segments) do t:Hide() end
+        for i,t in ipairs(dots) do t:Hide();numbers[i]:Hide() end
+        player:Hide();target:Hide()
+        local cp=getter and getter()
+        local px,py,facing,mapID=ZG:GetPlayerPose()
+        local r=ZG:PlacementReadout(cp,px,py,facing,mapID);guide.readout=r
+        state:SetText(r.unavailable or r.status)
+        detail:SetText(r.hint or "Flèche bleue : vous. Contour bronze : checkpoint.")
+        if not cp or not px or not py or cp.mapID~=mapID then return end
+        local points,cx,cy,scale=ZG:PlacementGeometry(cp,px,py)
+        local function map(x,y)
+            local right,forward=ZG:PlacementOffset(x-cx,y-cy,facing)
+            return 138+right*scale,98-forward*scale
         end
-
-        local scale = CameraZoomTier()
-
-        -- cp.x/cp.y = position du checkpoint (ligne/cercle) ou centroïde des
-        -- points (région) — recalculé par Core.lua à chaque ajout/retrait
-        -- de point, donc toujours à jour ici.
-        local distYards = math.sqrt((cp.x - px) ^ 2 + (cp.y - py) ^ 2)
-        local wdx, wdy = cp.x - px, cp.y - py
-        local rdx, rdy = Rotate(wdx * scale, wdy * scale, ego)
-        local cdx, cdy, clamped = ClampToRadar(rdx, rdy)
-
-        local isPolygon = cp.shape == "polygon"
-        local pointCount = isPolygon and cp.points and #cp.points or 0
-
-        if cp.shape == "circle" then
-            distText:SetText(string.format("%.0f yd du centre (rayon %.0f yd)%s", distYards, cp.width or 6, clamped and " (hors radar)" or ""))
-        elseif isPolygon then
-            distText:SetText(string.format("%.0f yd du centre (région, %d points%s)%s",
-                distYards, pointCount, cp.regionReady and "" or ", non validée", clamped and " (hors radar)" or ""))
+        local used=0
+        local function line(x1,y1,x2,y2,ghost)
+            local dx,dy=x2-x1,y2-y1;local length=math.sqrt(dx*dx+dy*dy)
+            if length<.1 then return end
+            used=used+1;local t=segments[used];if not t then return end
+            t:ClearAllPoints();t:SetPoint("CENTER",canvas,"TOPLEFT",(x1+x2)/2,-(y1+y2)/2)
+            t:SetWidth(length);t:SetRotation(math.atan2(-dy,dx));t:SetAlpha(ghost and .45 or 1);t:Show()
+        end
+        for i,p in ipairs(points) do
+            local x,y=map(p.x,p.y)
+            if cp.shape=="polygon" and dots[i] then
+                dots[i]:ClearAllPoints();dots[i]:SetPoint("CENTER",canvas,"TOPLEFT",x,-y);dots[i]:Show()
+                numbers[i]:ClearAllPoints();numbers[i]:SetPoint("CENTER",canvas,"TOPLEFT",clamp(x+7,8,268),-clamp(y-7,8,188));numbers[i]:Show()
+            end
+            if i>1 then local a,b=map(points[i-1].x,points[i-1].y);line(a,b,x,y) end
+        end
+        if #points>=3 and (cp.shape=="circle" or cp.regionReady) then
+            local a,b=map(points[#points].x,points[#points].y);local c,d=map(points[1].x,points[1].y);line(a,b,c,d)
+        end
+        local x,y=map(px,py)
+        local outside=x<8 or x>268 or y<8 or y>188
+        if cp.shape=="polygon" and not cp.regionReady and #points>0 then
+            local a,b=map(points[#points].x,points[#points].y)
+            for i=0,7 do local t=i/8;local v=t+.065;line(a+(x-a)*t,b+(y-b)*t,a+(x-a)*v,b+(y-b)*v,true) end
+        end
+        player:ClearAllPoints();player:SetPoint("CENTER",canvas,"TOPLEFT",clamp(x,8,268),-clamp(y,8,188))
+        -- The contour rotates; the player marker always points up.
+        player:SetRotation(0);player:Show()
+        local destination=ZG:PlacementTarget(cp,px,py,facing)
+        guide.destination=destination
+        local tx,ty=map(destination.x,destination.y)
+        target:ClearAllPoints();target:SetPoint("CENTER",canvas,"TOPLEFT",tx,-ty);target:Show()
+        if destination.distance>=1 then
+            for i=1,6 do
+                local t=i/8;local v=t+.06
+                line(x+(tx-x)*t,y+(ty-y)*t,x+(tx-x)*v,y+(ty-y)*v,true)
+            end
+        end
+        compass:SetText("Face en haut")
+        state:SetText(string.format("%s · %.1f yd",destination.instruction,destination.distance))
+        if cp.shape=="polygon" and not cp.regionReady then
+            detail:SetText("Contour en cours · Points numérotés")
         else
-            distText:SetText(string.format("%.0f yd du centre%s", distYards, clamped and " (hors radar)" or ""))
+            detail:SetText((r.status or "").." · Cible dorée : passage")
         end
-
-        local inBand, direction = ZG:GetCheckpointStatus(cp)
-        local placeWord = isPolygon and "la région" or (cp.shape == "circle" and "le cercle" or "la bande")
-        if inBand == nil then
-            statusText:SetText("|cff888888autre zone / instance|r")
-        elseif inBand then
-            if direction == "forward" then
-                statusText:SetText("|cff66e673dans " .. placeWord .. " — sens ENTRÉE|r")
-            else
-                statusText:SetText("|cffe66666dans " .. placeWord .. " — sens RETOUR|r")
-            end
-        else
-            statusText:SetText("|cff888888hors de " .. placeWord .. "|r")
-        end
-
-        if isPolygon then
-            gateLine:Hide(); circleIcon:Hide()
-            fwdArrow:Hide(); backArrow:Hide()
-            fwdLabel:Hide(); backLabel:Hide()
-
-            local points = cp.points or {}
-            local n = math.min(#points, MAX_REGION_POINTS)
-            local rx, ry = {}, {}   -- positions radar (clampées) de chaque sommet
-
-            for i = 1, n do
-                local p = points[i]
-                local pwdx, pwdy = p.x - px, p.y - py
-                local prdx, prdy = Rotate(pwdx * scale, pwdy * scale, ego)
-                local pcdx, pcdy = ClampToRadar(prdx, prdy)
-                rx[i], ry[i] = pcdx, pcdy
-
-                regionDots[i]:ClearAllPoints()
-                regionDots[i]:SetPoint("CENTER", radar, "CENTER", pcdx, pcdy)
-                regionDots[i]:Show()
-            end
-            for i = n + 1, MAX_REGION_POINTS do
-                regionDots[i]:Hide()
-            end
-
-            local segCount = 0
-            for i = 1, n - 1 do
-                segCount = segCount + 1
-                PositionSegment(regionSegments[segCount], rx[i], ry[i], rx[i + 1], ry[i + 1])
-            end
-            -- Boucle de fermeture (dernier → premier) : seulement si la
-            -- région est validée, sinon le contour reste visiblement ouvert.
-            if cp.regionReady and n >= 3 then
-                segCount = segCount + 1
-                PositionSegment(regionSegments[segCount], rx[n], ry[n], rx[1], ry[1])
-            end
-            for i = segCount + 1, MAX_REGION_POINTS do
-                regionSegments[i]:Hide()
-            end
-        elseif cp.shape == "circle" then
-            -- Pas de sens unique à représenter (dedans = entrée, dehors =
-            -- retour, peu importe l'angle) : juste le pictogramme rond.
-            gateLine:Hide()
-            fwdArrow:Hide(); backArrow:Hide()
-            fwdLabel:Hide(); backLabel:Hide()
-            HideRegion()
-
-            circleIcon:ClearAllPoints()
-            circleIcon:SetPoint("CENTER", radar, "CENTER", cdx, cdy)
-            circleIcon:Show()
-        else
-            circleIcon:Hide()
-            HideRegion()
-
-            -- Direction "entrée" du checkpoint, tournée en repère égocentrique.
-            local fx, fy = math.cos(cp.facing), math.sin(cp.facing)
-            local rfx, rfy = Rotate(fx, fy, ego)
-            local lineAngle  = math.atan2(rfy, rfx) + math.pi / 2  -- perpendiculaire au sens "entrée"
-            local arrowAngle = math.atan2(rfy, rfx) - math.pi / 2  -- artwork pointe "vers le haut" par défaut
-
-            local halfWidthPx = math.max(3, (cp.width or 6) / 2 * scale)
-
-            -- La ligne ne doit jamais dépasser le cadre du radar, quels que
-            -- soient la largeur configurée ou le palier de zoom : on la
-            -- raccourcit au besoin (borne conservatrice, inégalité triangulaire).
-            local centerDist = math.sqrt(cdx * cdx + cdy * cdy)
-            halfWidthPx = math.min(halfWidthPx, math.max(3, HALF - centerDist))
-
-            gateLine:ClearAllPoints()
-            gateLine:SetPoint("CENTER", radar, "CENTER", cdx, cdy)
-            gateLine:SetWidth(halfWidthPx * 2)
-            gateLine:SetRotation(lineAngle)
-            gateLine:Show()
-
-            fwdArrow:ClearAllPoints()
-            fwdArrow:SetPoint("CENTER", radar, "CENTER", cdx + rfx * ARROW_OFF, cdy + rfy * ARROW_OFF)
-            fwdArrow:SetRotation(arrowAngle)
-            fwdArrow:Show()
-
-            backArrow:ClearAllPoints()
-            backArrow:SetPoint("CENTER", radar, "CENTER", cdx - rfx * ARROW_OFF, cdy - rfy * ARROW_OFF)
-            backArrow:SetRotation(arrowAngle + math.pi)
-            backArrow:Show()
-
-            fwdLabel:ClearAllPoints()
-            fwdLabel:SetPoint("CENTER", fwdArrow, "CENTER", rfx * 16, rfy * 16)
-            fwdLabel:Show()
-
-            backLabel:ClearAllPoints()
-            backLabel:SetPoint("CENTER", backArrow, "CENTER", -rfx * 16, -rfy * 16)
-            backLabel:Show()
-        end
-    end)
-
-    return radar
+    end
+    guide:SetScript("OnUpdate",function(_,dt) elapsed=elapsed+dt;if elapsed>=.1 then elapsed=0;Refresh() end end)
+    guide:SetScript("OnShow",Refresh);guide.Refresh=Refresh;Refresh()
+    return guide
 end

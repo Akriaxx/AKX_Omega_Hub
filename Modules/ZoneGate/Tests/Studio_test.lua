@@ -63,7 +63,8 @@ function ZG:GetThemeList() local t={};for _,v in pairs(themes) do t[#t+1]=v end;
 function ZG:ScheduleBroadcast() broadcasts=broadcasts+1 end
 function ZG:StyleThemeText(s) return s end
 function ZG:RemoveTheme(id) themes[id]=nil end
-function ZG:RenameTheme(id,name) themes[id].name=name end
+function ZG:RenameTheme(id,name) self:GetTheme(id).name=name end
+if InstallThemeSetters then InstallThemeSetters() end
 dofile(root.."Studio.lua")
 local a=ZG:CreateStudioTheme(ZG.StudioPresets[2]);assert(a.design=="western")
 local b=ZG:CreateStudioTheme(nil,a);assert(b.id~=a.id and b.titleColor~=a.titleColor)
@@ -83,6 +84,7 @@ for _,p in ipairs(ZG.StudioPresets) do
     renderer:Configure(p.name,"",ZG:StudioPresetTheme(p));renderer:Seek(.3)
     assert(renderer.material and renderer.baseWidth>=600)
 end
+dofile(root.."UI_Style.lua")
 dofile(root.."UI_Theme.lua")
 local sizing=ZG:StudioPresetTheme(ZG.StudioPresets[2])
 for _,preset in ipairs(ZG.StudioPresets) do
@@ -106,6 +108,9 @@ assert(renderer.baseWidth>shortWidth,"Long subtitle must expand the decoration")
 renderer:Configure("Lieu","",sizing)
 assert(renderer.baseWidth==shortWidth,"A later short title must restore the minimum width")
 dofile(root.."UI_Studio.lua")
+function M:SetFrameStrata(v) self.strata=v end
+function M:SetFrameLevel(v) self.frameLevel=v end
+function M:SetScale(v) self.scale=v end
 ZoneGateThemePanel:EditTheme(a.id)
 ZoneGateThemePanel.scripts.OnUpdate(ZoneGateThemePanel,.2)
 assert(ZoneGateThemePanel.w==1280)
@@ -117,7 +122,47 @@ ZG:SetStudioOption(a.id,"bannerWidth",500)
 ZoneGateThemePanel.scripts.OnUpdate(ZoneGateThemePanel,.2)
 click("Annuler");assert(a.bannerWidth==900)
 click("Rétablir");assert(a.bannerWidth==500)
+local liveWasShown=ZoneGateBanner:IsShown()
+click("Voir en jeu")
+local example=ZoneGateBannerExample
+assert(example and example.strata=='TOOLTIP' and example.frameLevel==10000 and example.scale>1,'large preview above editor')
+example.scripts.OnUpdate(example,1)
+assert(example.alpha>0 and example:IsShown() and ZoneGateBanner:IsShown()==liveWasShown,'visible and isolated from live crossings')
+example.scripts.OnUpdate(example,100);assert(not example:IsShown(),'example ends cleanly')
+local beforeCount=#ZG:GetThemeList()
+local beforeBroadcast=broadcasts
 click("Dupliquer");assert(ZoneGateThemePanel.selectedId~=a.id)
+local editor=ZG.ThemeEditor
+local draft=editor.draft
+assert(draft and not ZG:GetTheme(draft.id),'draft is outside the saved library')
+assert(#ZG:GetThemeList()==beforeCount and broadcasts==beforeBroadcast,'duplicate starts only a draft')
+editor:SetStudioOption(draft.id,'bannerWidth',650)
+editor:RenameTheme(draft.id,'Mon brouillon')
+if InstallThemeSetters then
+ editor:SetThemeTitleSize(draft.id,38)
+ editor:SetThemeColor(draft.id,'title',.2,.4,.6,1)
+ editor:SetThemeOutline(draft.id,true)
+ editor:SetThemeTiming(draft.id,.5,3,1)
+ assert(draft.titleSize==38 and draft.titleColor[1]==.2 and draft.outline)
+end
+assert(a.bannerWidth==500 and broadcasts==beforeBroadcast,'draft edits cannot mutate or broadcast the source')
+click('Créer le thème')
+assert(not editor.draft and #ZG:GetThemeList()==beforeCount+1)
+assert(ZG:GetTheme(ZoneGateThemePanel.selectedId).name=='Mon brouillon')
+click('Créer le thème');assert(#ZG:GetThemeList()==beforeCount+1,'double validation does not duplicate')
+-- Browsing multiple gallery templates and changing preview controls stays ephemeral.
+local tile;for _,o in ipairs(objects) do if o.kind=='Button' and o.w==278 and o.h==72 then tile=o;break end end
+beforeCount=#ZG:GetThemeList();beforeBroadcast=broadcasts
+tile.scripts.OnClick(tile);local first=editor.draft.id
+tile.scripts.OnClick(tile);assert(editor.draft.id~=first)
+click('Pierre');click('Rejouer')
+assert(#ZG:GetThemeList()==beforeCount and broadcasts==beforeBroadcast)
+click('Abandonner le brouillon');assert(not editor.draft and #ZG:GetThemeList()==beforeCount)
+ZoneGateThemePanel:BeginDraft()
+editor:RenameTheme(editor.draft.id,'   ')
+click('Créer le thème');assert(editor.draft and #ZG:GetThemeList()==beforeCount,'empty draft name is rejected')
+ZoneGateThemePanel:Hide();assert(not editor.draft and #ZG:GetThemeList()==beforeCount,'closing discards the draft')
+ZoneGateThemePanel:EditTheme(a.id)
 assert( #ZG.StudioPresets==42,"All 42 presets must be available")
 for i=1,7 do click(">") end
 click("<")

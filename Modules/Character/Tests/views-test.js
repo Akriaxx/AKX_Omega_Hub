@@ -6,6 +6,9 @@ mock=mock.slice(mock.indexOf('unpack='),mock.indexOf('ZoneGate={'));
 const code=mock+`
 function M:GetParent() return self.parent end
 function M:SetWordWrap() end
+function M:SetShadowColor() end
+function M:SetShadowOffset() end
+function M:SetFocus() self.focused=true end
 function M:GetLeft() return self.left or 100 end
 function M:GetValue() return self.value or 0 end
 function M:GetTop() return self.top or 500 end
@@ -44,6 +47,8 @@ function M:SetMultiLine() end
 function M:SetTextInsets() end
 function M:SetMinResize() end
 function M:SetResizable() end
+function M:StartSizing() self.sizing=true end
+function M:StopMovingOrSizing() self.sizing=false end
 function M:SetClipsChildren() end
 function M:GetChecked() return self.checked end
 function M:SetCheckedTexture(texture) self.checkedTexture=texture end
@@ -138,6 +143,48 @@ C:ToggleGroupView();assert(not CharacterGroupViewPanel:IsShown())
 do local col=Character.RPGUI.colors;if not (col.statMana and col.statMana.fg) then col.statMana={fg={.2,.45,1,1},bg={.03,.07,.2,1}} end end
 dofile('Modules/Character/UI_MJ.lua')
 dofile('Modules/Character/UI_Initiative.lua')
+-- Several effects become separate requests; invalid drafts send nothing.
+C.initiative.active=true
+C.initiative.participants={{id='Tester',kind='player',name='Tester'}}
+local sent={}
+function C:RequestAddStatus(targets,text,turns) sent[#sent+1]={targets=targets,text=text,turns=turns};return true end
+assert(C:OpenStatusPopup())
+local function findButton(text)
+ for i=#objects,1,-1 do local o=objects[i];if o.kind=='Button' and o.text==text then return o end end
+ error('Missing button '..text)
+end
+local choose=findButton('Choisir vos cibles...');choose.scripts.OnClick(choose)
+local targetPanel
+for _,o in ipairs(objects) do if o.kind=='FontString' and o.text=='Groupe de joueurs' then targetPanel=o.parent end end
+for _,o in ipairs(objects) do if o.parent==targetPanel and o.participantId=='Tester' then o.scripts.OnClick(o) end end
+local add=findButton('+ Ajouter une ligne');add.scripts.OnClick(add)
+local editRows={}
+for _,o in ipairs(objects) do if o.text and o.turns and o.label and o.kind=='Frame' and o.shown~=false then editRows[#editRows+1]=o end end
+assert(#editRows==2,'two independent editor rows')
+editRows[1].text:SetText('-7 Vie');editRows[1].turns:SetText('2')
+local apply=findButton('Appliquer les états');apply.scripts.OnClick(apply)
+assert(#sent==0,'empty second line prevents partial submission')
+editRows[2].text:SetText('+8 Mana');editRows[2].turns:SetText('3')
+apply.scripts.OnClick(apply)
+assert(#sent==2 and sent[1].text=='-7 Vie' and sent[2].text=='+8 Mana')
+assert(sent[1].turns=='2' and sent[2].turns=='3' and sent[1].targets[1]=='Tester')
+
+C.initiative.statuses={{id='one',targetId='Tester',text='-7 Vie',turnsLeft=2,source='Tester'},
+ {id='two',targetId='Tester',text='+8 Mana',turnsLeft=3,source='Tester'}}
+C.initiative.isHost=true
+C.OnInitiativeChanged()
+local badge
+for _,o in ipairs(objects) do if o.participantId=='Tester' and o.statusBadge then badge=o.statusBadge end end
+assert(badge,'status badge exists')
+badge.scripts.OnEnter(badge)
+assert(CharacterActiveStatuses:IsShown() and CharacterActiveStatuses.preview)
+badge.scripts.OnMouseUp(badge)
+badge.scripts.OnLeave(badge)
+assert(CharacterActiveStatuses:IsShown() and not CharacterActiveStatuses.preview,'click pins list beyond hover')
+CharacterActiveStatuses:Hide()
+badge.scripts.OnEnter(badge);badge.scripts.OnLeave(badge)
+assert(not CharacterActiveStatuses:IsShown(),'unfixed preview closes on leave')
+C.initiative.active=false;C.OnInitiativeChanged()
 assert(CharacterMJPanel:GetWidth()==276)
 assert(CharacterMJImpactPanel:GetHeight()==406)
 -- Vue MJ : la croix du groupe ne ferme que lui ; celle des Actions ferme tout.
@@ -146,6 +193,24 @@ CharacterMJPanel:Hide();assert(CharacterMJImpactPanel:IsShown(),'fermer le group
 local groupBtn;for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='Voir le groupe' then groupBtn=o end end
 assert(groupBtn,'bouton Voir le groupe');groupBtn.scripts.OnClick(groupBtn);assert(CharacterMJPanel:IsShown() and groupBtn.text=='Masquer le groupe')
 CharacterMJPanel:Toggle();assert(not CharacterMJPanel:IsShown() and not CharacterMJImpactPanel:IsShown(),'fermer les Actions ferme tout')
+-- User sizing persists and list refreshes do not collapse the chosen height.
+local groupView=CharacterMJPanel
+local handle=groupView.resizeGrip
+assert(handle,'group resize handle')
+handle.scripts.OnMouseDown(handle,'LeftButton')
+groupView:SetSize(520,480)
+groupView.scripts.OnSizeChanged(groupView,520,480)
+handle.scripts.OnMouseUp(handle)
+assert(CharacterDB.settings.viewSizes.mjGroup.width==520)
+groupView._rebuild()
+assert(groupView:GetHeight()==480 and groupView:GetWidth()==520,'refresh preserves user dimensions')
+local npcView
+for _,o in ipairs(objects) do if o.resizeGrip and o~=groupView then npcView=o end end
+assert(npcView and npcView.resizeGrip,'NPC resize handle')
+npcView.resizeGrip.scripts.OnMouseDown(npcView.resizeGrip,'LeftButton')
+npcView:SetSize(600,550);npcView.scripts.OnSizeChanged(npcView,600,550)
+npcView.resizeGrip.scripts.OnMouseUp(npcView.resizeGrip)
+assert(CharacterDB.settings.viewSizes.mjNpc.width==600 and CharacterDB.settings.viewSizes.mjGroup.width==520,'independent saved sizes')
 -- Annonce commune (Début du tour, conditions) : les messages attendent leur tour.
 function M:SetFont(path,size) self.fontPath=path;self.fontSize=size;return true end
 C:ShowNotice('Premier','a');C:ShowNotice('Second','b')

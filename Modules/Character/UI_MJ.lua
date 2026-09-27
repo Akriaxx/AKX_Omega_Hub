@@ -42,6 +42,7 @@ local function MakeTitleBar(parent, text)
     UI.ApplyTitle(lbl)
     lbl:SetText(text)
     lbl:SetPoint("LEFT", bar, "LEFT", 12, -2)
+    bar.title=lbl
     return bar
 end
 
@@ -150,6 +151,8 @@ local function PlayerRow(parent, playerName)
     UI.ApplyBodyText(nameTxt)
     nameTxt:SetText(playerName)
     nameTxt:SetPoint("TOPLEFT", PAD + 2, -6)
+    nameTxt:SetPoint("RIGHT",row,"RIGHT",-PAD,0)
+    nameTxt:SetWordWrap(false)
 
     -- Labels des stats
     local function StatLabel(txt, col, yOff)
@@ -571,7 +574,9 @@ local npcInitEB, npcHpEB, npcMpEB, npcEndEB = npcStatFields[1], npcStatFields[2]
 local npcAddConfirmBtn = UI.CreatePanelButton(npcPopup, 200, 22, "Ajouter le PNJ")
 npcAddConfirmBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -124)
 
+local editingNpcId
 local function CloseNpcPopup()
+    editingNpcId=nil
     npcPopup:Hide()
     for _, eb in ipairs(npcStatFields) do eb:SetText("") end
     npcNameEB:SetText("")
@@ -589,10 +594,16 @@ npcAddConfirmBtn:SetScript("OnClick", function()
     local name = npcNameEB:GetText()
     local init = npcInitEB:GetText()
     if name and name:match("%S") and init and init ~= "" then
-        local added = C:AddNPC(name, init, npcHpEB:GetText(), npcMpEB:GetText(), npcEndEB:GetText(), selectedNpcIcon)
+        local editing=editingNpcId~=nil
+        local added
+        if editing then
+            added=C:UpdateNPC(editingNpcId,name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon)
+        else
+            added=C:AddNPC(name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon)
+        end
         if added then
             CloseNpcPopup()
-            if ShowImpactStatus then ShowImpactStatus("PNJ ajouté") end
+            if ShowImpactStatus then ShowImpactStatus(editing and "PNJ modifié" or "PNJ ajouté") end
         elseif ShowImpactStatus then
             -- N'arrive que si un AUTRE client est l'hôte du combat en cours :
             -- seul l'hôte peut faire apparaître le PNJ dans la Vue MJ — PNJ
@@ -617,11 +628,14 @@ local function FillNpcPopup(prefill)
     npcIconTex:SetTexture(prefill.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
 end
 
-local function OpenNpcPopup(prefill)
+local function OpenNpcPopup(prefill,editId)
     if not C.initiative.active then
         if ShowImpactStatus then ShowImpactStatus("Combat non démarré") end
         return
     end
+    editingNpcId=editId
+    npcPopupTitleBar.title:SetText(editId and "Modifier le PNJ" or "Créer un PNJ")
+    npcAddConfirmBtn:SetText(editId and "Enregistrer" or "Ajouter le PNJ")
     FillNpcPopup(prefill)
     npcPopup:Show()
 end
@@ -915,7 +929,7 @@ local function Rebuild()
     end
 
     content:SetHeight(math.max(1, totalH))
-    mjPanel:SetHeight(math.max(106, math.min(MJ_H, totalH + 30)))
+    if not mjPanel.userSized then mjPanel:SetHeight(math.max(106, math.min(MJ_H, totalH + 30))) end
     UpdateScrollRange()
     if RefreshTurnHighlights then RefreshTurnHighlights() end
 end
@@ -1076,6 +1090,29 @@ local function NpcRow(parent, npcId)
         })
     end)
 
+    -- The edit action occupies the upper-right corner above the resource values.
+    deleteBtn:ClearAllPoints();deleteBtn:SetPoint("TOPRIGHT",row,"TOPRIGHT",-25,-3)
+    duplicateBtn:ClearAllPoints();duplicateBtn:SetPoint("TOPRIGHT",row,"TOPRIGHT",-45,-3)
+    nameTxt:ClearAllPoints()
+    nameTxt:SetPoint("TOPLEFT",iconTex,"TOPRIGHT",4,2)
+    nameTxt:SetPoint("RIGHT",row,"RIGHT",-113,0)
+    local editBtn=UI.CreatePanelButton(row,18,18,"")
+    editBtn:SetPoint("TOPRIGHT",row,"TOPRIGHT",-5,-3)
+    local pencil=editBtn:CreateTexture(nil,"OVERLAY")
+    pencil:SetSize(12,12);pencil:SetPoint("CENTER")
+    pencil:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+    editBtn:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_RIGHT");GameTooltip:SetText("Modifier ce PNJ");GameTooltip:Show()
+    end)
+    editBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    editBtn:SetScript("OnClick",function()
+        local p=FindNpcParticipant(row.npcId)
+        if not p or not C.initiative.isHost then return end
+        GameTooltip:Hide()
+        OpenNpcPopup({name=p.name,initiative=p.initiative,icon=p.icon,
+            hp=p.hp and p.hp.max,mana=p.mana and p.mana.max,endurance=p.endurance and p.endurance.max},p.id)
+    end)
+    row.editBtn=editBtn
     function row:Refresh(p)
         row.npcId = p.id
         nameTxt:SetText(p.name or "?")
@@ -1088,6 +1125,10 @@ local function NpcRow(parent, npcId)
         barEN:Set(en.cur or 0, en.max or 0, en.temp or 0)
         deleteBtn:SetShown(C.initiative.isHost)
         duplicateBtn:SetShown(C.initiative.isHost)
+        editBtn:SetShown(C.initiative.isHost)
+        nameTxt:ClearAllPoints()
+        nameTxt:SetPoint("TOPLEFT",iconTex,"TOPRIGHT",4,2)
+        nameTxt:SetPoint("RIGHT",row,"RIGHT",C.initiative.isHost and -113 or -8,0)
         row:SetSelected(selectedPlayers[p.id])
     end
 
@@ -1262,3 +1303,63 @@ end
 -- Ajoutés en plus des OnShow/OnHide déjà posés sur mjPanel plus haut.
 mjPanel:HookScript("OnShow", function() RebuildPnj() end)
 impactPanel:HookScript("OnHide", function() pnjPanel:Hide() end)
+
+
+-- Independent, persistent viewport sizes. Resizing never scales text.
+local function EnableViewResize(frame,key,refresh)
+    frame:SetResizable(true)
+    if frame.SetResizeBounds then frame:SetResizeBounds(MJ_W,140,900,900)
+    else frame:SetMinResize(MJ_W,140) end
+    local grip=CreateFrame("Button",nil,frame)
+    frame.resizeGrip=grip
+    grip:SetSize(16,16)
+    grip:SetPoint("BOTTOMRIGHT",-2,2)
+    grip:SetFrameLevel(frame:GetFrameLevel()+30)
+    for i=1,3 do
+        local mark=grip:CreateTexture(nil,"OVERLAY")
+        mark:SetColorTexture(.83,.67,.38,.9)
+        mark:SetSize(i*4,1)
+        mark:SetPoint("BOTTOMRIGHT",-2-i,2+i)
+        mark:SetRotation(math.pi/4)
+    end
+    local function Finish()
+        if not frame.resizing then return end
+        frame:StopMovingOrSizing();frame.resizing=false
+        CharacterDB=CharacterDB or {};CharacterDB.settings=CharacterDB.settings or {}
+        local settings=CharacterDB.settings
+        settings.viewSizes=settings.viewSizes or {}
+        settings.viewSizes[key]={width=frame:GetWidth(),height=frame:GetHeight()}
+    end
+    grip:SetScript("OnMouseDown",function(_,button)
+        if button~="LeftButton" then return end
+        GameTooltip:Hide()
+        frame.userSized=true;frame.resizing=true;frame:StartSizing("BOTTOMRIGHT")
+    end)
+    grip:SetScript("OnMouseUp",Finish)
+    frame:HookScript("OnHide",Finish)
+    grip:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_LEFT")
+        GameTooltip:SetText("Étirez pour ajuster la largeur et la hauteur")
+        GameTooltip:Show()
+    end)
+    grip:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    local updating=false
+    frame:HookScript("OnSizeChanged",function()
+        if updating or not frame.userSized then return end
+        updating=true;refresh();updating=false
+    end)
+    -- Saved variables are ready when the view is first shown.
+    frame:HookScript("OnShow",function()
+        if frame.sizeRestored then return end
+        frame.sizeRestored=true
+        local sizes=CharacterDB and CharacterDB.settings and CharacterDB.settings.viewSizes
+        local saved=sizes and sizes[key]
+        if saved and tonumber(saved.width) and tonumber(saved.height) then
+            frame.userSized=true
+            frame:SetSize(math.max(MJ_W,math.min(900,saved.width)),math.max(140,math.min(900,saved.height)))
+            refresh()
+        end
+    end)
+end
+EnableViewResize(mjPanel,"mjGroup",Rebuild)
+EnableViewResize(pnjPanel,"mjNpc",RebuildPnj)
