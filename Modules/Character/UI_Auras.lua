@@ -34,6 +34,23 @@ else
     end
 end
 
+-- Epsilon_AuraManager ne change pas UnitAura : il réécrit l'icône dans les
+-- cadres de Blizzard (que l'on masque), d'où l'engrenage par défaut d'un sort
+-- créé. Il remplace en revanche GetSpellTexture(id) (sans contexte : icône
+-- personnalisée, perso ou de phase ; contexte true : icône d'origine).
+do
+    local rawGetAura = GetAura
+    GetAura = function(unit, index, filter)
+        local name, icon, count, dispelType, duration, expirationTime, spellId = rawGetAura(unit, index, filter)
+        if name and spellId and Epsilon_AuraManager and GetSpellTexture then
+            local ok, custom = pcall(GetSpellTexture, spellId)
+            local okOrig, original = pcall(GetSpellTexture, spellId, nil, true)
+            if ok and custom and (not okOrig or custom ~= original) then icon = custom end
+        end
+        return name, icon, count, dispelType, duration, expirationTime, spellId
+    end
+end
+
 local function DebuffColor(dispelType)
     local c = DebuffTypeColor and DebuffTypeColor[dispelType or ""]
     if c then return c.r, c.g, c.b end

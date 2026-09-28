@@ -203,7 +203,7 @@ function hud:Refresh()
         local filled=width*math.min(1,stat.cur/maximum)
         row.fill:SetWidth(math.max(.01,filled));row.fill:SetShown(stat.cur>0)
         local reservation=C.skillCostReservation
-        local cost=reservation and reservation.resource==key and reservation.amount or 0
+        local cost=reservation and reservation[key] or 0
         local mainCost=math.min(stat.cur,math.max(0,cost-bonus))
         local reservedWidth=math.min(filled,width*mainCost/maximum)
         local offset=filled-reservedWidth

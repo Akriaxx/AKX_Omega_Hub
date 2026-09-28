@@ -14,6 +14,11 @@ function M:GetEffectiveScale() return (self.scale or 1)*(self.parent and self.pa
 function M:GetCenter() return 100,100 end
 function hooksecurefunc(t,k,f) local old=t[k];t[k]=function(...) local r=old(...);f(...);return r end end
 function M:SetHyperlinksEnabled(v) self.hyperlinks=v end
+function M:SetSwipeTexture() end
+function M:SetSwipeColor() end
+function M:SetReverse() end
+function M:SetDrawEdge() end
+function M:SetCooldown(start,duration) self.cooldown={start,duration} end
 function M:SetFrameStrata(v) self.strata=v end
 function M:SetFrameLevel(v) self.level=v end
 function M:GetFrameLevel() return self.level or 1 end
@@ -143,6 +148,14 @@ typeText('{{Action : char')
 completion.valueInput:SetText('(8)')
 desc.scripts.OnTabPressed(desc)
 assert(desc.text=='{{Action : (8) Charge}}',desc.text)
+for _,v in ipairs({'(-5)','-5','+3','(+3)'}) do
+  typeText('');typeText('{{Action : char');completion.valueInput:SetText(v);desc.scripts.OnTabPressed(desc)
+  assert(desc.text=='{{Action : '..v..' Charge}}',desc.text)
+  local sk,pre,tg=C:ResolveNumberedSkillRef('base',v..' Charge');assert(sk and pre==v..' ' and tg=='Charge',v)
+end
+typeText('');typeText('{{Action : (-5) char');desc.scripts.OnTabPressed(desc)
+assert(desc.text=='{{Action : (-5) Charge}}',desc.text)
+typeText('');typeText('{{Action : char');completion.valueInput:SetText('(8)');desc.scripts.OnTabPressed(desc)
 local qtySkill,qtyPrefix,qtyTarget=C:ResolveNumberedSkillRef('base','(8) Charge')
 assert(qtySkill and qtyPrefix=='(8) ' and qtyTarget=='Charge')
 assert(C:RenderSkillText(desc.text):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):find('[(8) Charge]',1,true))
@@ -195,6 +208,19 @@ assert(CharacterSkillCard3:IsShown() and CharacterSkillCard3.point[2]==UIParent)
 CharacterSkillCard3:Hide()
 card2.content.cardDepth=2
 
+-- Maintien 2 s : cercle dans l'angle, puis carte figée avec la croix.
+local ring=card2.holdRing
+assert(ring and ring.shown and not card2.closeButton.shown and ring.fill.cooldown[2]==2,'cercle de maintien')
+ring.scripts.OnUpdate(ring,.1);assert(not card2.pinned,'pas encore')
+now=now+2.1;ring.scripts.OnUpdate(ring,.1)
+assert(card2.pinned and card2.closeButton.shown and not ring.shown,'épinglée : croix à la place du cercle')
+links1.scripts.OnHyperlinkLeave(links1);for _,fn in ipairs(timers) do fn() end
+assert(card2:IsShown(),'épinglée : reste ouverte sans survol')
+card2.closeButton.scripts.OnClick(card2.closeButton)
+assert(not card2:IsShown() and not card2.pinned,'croix : fermée')
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge')
+assert(not card2.pinned and ring.shown and not card2.closeButton.shown,'réouverte : nouveau maintien')
+
 -- Carte liée : s'ouvre en largeur (de gauche à droite quand la place est à droite).
 assert(card2.w==1 and card2.h==card2.content.h,'carte liée fermée au départ');card2.scripts.OnUpdate(card2,.3);assert(card2.w==card2.content.w)
 links1.scripts.OnHyperlinkLeave(links1);for _,fn in ipairs(timers) do fn() end
@@ -206,7 +232,17 @@ card1:Hide();assert(not card2:IsShown(),'fermée avec la carte qui l a ouverte')
 C:ShowSkillTooltip(UIParent,{name='Source',description='Voir {{Action : Charge}}'});links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge')
 assert(card2:IsShown());links1.shown=false;for _,f in ipairs(objects) do if f.scripts and f.scripts.OnUpdate and f.parent==nil then pcall(f.scripts.OnUpdate,f,.3) end end
 assert(not card2:IsShown(),'source disparue : carte liée fermée');links1.shown=true
+-- Plusieurs cartes verrouillées depuis la même carte : un autre lien en ouvre une nouvelle.
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge');now=now+2.1;card2.holdRing.scripts.OnUpdate(card2.holdRing,.1)
+assert(card2.pinned)
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Inconnue');local cardC=CharacterSkillCard2_1
+assert(cardC and cardC:IsShown() and cardC.title.text=='Inconnue' and card2:IsShown() and card2.title.text~='Inconnue','verrouillée : reste, un autre lien ouvre une autre carte')
+links1.scripts.OnHyperlinkLeave(links1);for _,fn in ipairs(timers) do fn() end
+assert(card2:IsShown() and not cardC:IsShown(),'la verrouillée reste, la survolée se ferme')
+links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Inconnue');now=now+2.1;cardC.holdRing.scripts.OnUpdate(cardC.holdRing,.1)
+assert(cardC.pinned and card2.pinned and card2:IsShown() and cardC:IsShown(),'deux cartes verrouillées')
 C:HideSkillTooltip();assert(not card1:IsShown() and not card2:IsShown())
+assert(not cardC:IsShown() and not card2.pinned and not cardC.pinned,'verrouillées fermées avec leur source')
 assert(not card1.flux.shown and not card2.flux.shown,'flux fermés avec les cartes')
 ColorPickerFrame=obj('Frame');ColorPickerFrame:Hide();ColorPickerFrame.strata='DIALOG'
 function ColorPickerFrame:GetFrameStrata() return self.strata end
@@ -523,6 +559,7 @@ local nativeLinks=0;function ChatFrame_OnHyperlinkShow() nativeLinks=nativeLinks
 local raid=true;IsInRaid=function() return raid end
 local sentUse;function SendChatMessage(message,channel) sentUse={message,channel} end
 dofile('Modules/Character/UI_SkillUse.lua')
+assert(C:ValidateSkillCost({resource='endurance',amount=0}) and C:CanPaySkillCost({resource='endurance',amount=0}),'coût 0 = gratuit')
 local id=C:SkillChatID(mergedUse);assert(#id==16)
 local link=C:SkillChatLink(mergedUse,id)
 local message=C:PrepareSkillRaidMessage('Avant '..link..' apres',mergedUse)
@@ -565,6 +602,7 @@ assert(sent:sub(-15)==' [Coût : 3 HP]' and select(2,sent:gsub('Coût',''))==1,'
 ChatFrame_OnHyperlinkShow(UIParent,'item:123');assert(nativeLinks==1)
 ChatFrame_OnHyperlinkShow(UIParent,'omegaskill:'..id);assert(nativeLinks==1 and CharacterSkillCard1.useButton:IsShown())
 function M:SetCursorPosition(v) self.cursor=v end
+function M:GetCursorPosition() return self.cursor or 0 end
 function M:HighlightText(a,b) self.highlight={a,b} end
 C:OpenSkillUse(mergedUse)
 local composer=CharacterSkillUsePopup;assert(composer:IsShown())
@@ -609,13 +647,41 @@ local costDB=Codec.Decode(Codec.Encode(C:GetOwnedSkillLibrary()))
 assert(costDB.base['Cost Test'].cost.amount==7 and costDB.base['Cost Test'].cost.resource=='mana')
 local resources={mana={cur=10,temp=0}};C.GetMyChar=function() return resources end
 local spent=0;C.Delta=function(_,stat,delta) spent=spent+1;resources[stat].cur=resources[stat].cur+delta end
-C:OpenSkillUse(paidSkill);assert(C.skillCostReservation.amount==7 and resources.mana.cur==10)
+C:OpenSkillUse(paidSkill);assert(C.skillCostReservation.mana==7 and resources.mana.cur==10)
 CharacterSkillUsePopup:Hide();assert(not C.skillCostReservation and spent==0)
 C:OpenSkillUse(paidSkill);CharacterSkillUsePopup.edit.scripts.OnEnterPressed()
 assert(spent==1 and resources.mana.cur==3 and not C.skillCostReservation)
 resources.mana.cur=10;C:OpenSkillUse(paidSkill);resources.mana.cur=3;CharacterSkillUsePopup.edit.scripts.OnEnterPressed()
 assert(spent==1 and CharacterSkillUsePopup:IsShown(),'insufficient resources must not send or spend')
 CharacterSkillUsePopup:Hide()
+-- « Ajouter une action » : plusieurs fiches dans la même émote, coûts cumulés.
+assert(C:SaveSkill('base',nil,'Tir simple','134400','Tir',true,{resource='mana',amount=2}))
+assert(C:SaveSkill('index',nil,'Portée','134400','Distance'))
+resources.mana.cur=10;resources.endurance={cur=0,temp=0};spent=0
+C:OpenSkillUse(paidSkill)
+local composer=CharacterSkillUsePopup;local input=composer.edit
+composer.addAction.scripts.OnClick(composer.addAction)
+local picker=CharacterSkillUsePicker;assert(picker:IsShown(),'sélecteur ouvert')
+local function pick(plain) for _,row in ipairs(picker.rows) do local e=row.entry;if e and e.skill and C:StripSkillMarkup(e.skill.name)==plain then row.scripts.OnClick(row);return true end end end
+local headers={};for _,row in ipairs(picker.rows) do if row.entry and row.entry.header then headers[row.entry.header]=true end end
+assert(headers['Index'],'Index proposé')
+for _,row in ipairs(picker.rows) do assert(not(row.entry and row.entry.skill and row.entry.skill.name=='Cost Test'),'pas la fiche principale') end
+assert(pick('Tir simple') and pick('Portée'))
+assert(picker.add.text=='Ajouter (2)' or picker.add:GetText()=='Ajouter (2)')
+input.cursor=#input:GetText()
+picker.add.scripts.OnClick(picker.add)
+local text=input:GetText();local tir=C:GetSkill('base','Tir simple');local portee=C:GetSkill('index','Portée')
+assert(text:find(C:SkillChatLink(tir,C:SkillChatID(tir)),1,true) and text:find(C:SkillChatLink(portee,C:SkillChatID(portee)),1,true),'liens insérés : '..text)
+assert(text:sub(-15)==' [Coût : 9 MP]','coût total en fin : '..text)
+assert(C.skillCostReservation.mana==9,'réservation cumulée')
+local msg=C:PrepareSkillRaidMessage(text,paidSkill,composer.extras)
+assert(msg and select(2,msg:gsub('%[Omega:',''))==3,'trois références : '..tostring(msg))
+input.scripts.OnEnterPressed(input)
+assert(resources.mana.cur==1 and not composer:IsShown(),'les deux coûts payés')
+-- Lien ajouté puis effacé : ni envoyé ni payé.
+resources.mana.cur=10;C:OpenSkillUse(paidSkill);composer.extras={tir}
+assert(C:PrepareSkillRaidMessage(input:GetText(),paidSkill,composer.extras):find('[Coût : 7 MP]',1,true))
+composer:Hide();assert(not picker:IsShown())
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

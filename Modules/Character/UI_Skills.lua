@@ -300,7 +300,8 @@ function C:ValidateSkillCost(cost)
     if cost==nil then return true end
     if type(cost)~="table" or (cost.resource~="hp" and cost.resource~="mana" and cost.resource~="endurance") then return false end
     local n=tonumber(cost.amount)
-    return n and n>=1 and n<=1000000 and n%1==0 or false
+    -- 0 = gratuit : autorisé (payable même à 0 de ressource).
+    return n and n>=0 and n<=1000000 and n%1==0 or false
 end
 function C:SkillCostKey(skill)
     local cost=skill.cost
@@ -312,7 +313,7 @@ function C:SaveSkill(catKey, oldName, name, icon, description, usable, cost)
     name = tostring(name or ""):match("^%s*(.-)%s*$")
     if name == "" then return false, "Nom requis" end
     if #name>128 or #tostring(icon or "")>512 or #tostring(description or "")>8000 then return false,"Texte trop long" end
-    if not self:ValidateSkillCost(cost) then return false,"Coût : choisissez une ressource et un entier de 1 à 1 000 000." end
+    if not self:ValidateSkillCost(cost) then return false,"Coût : choisissez une ressource et un entier de 0 à 1 000 000." end
     local db = GetSkillDB()
     if db[catKey][name] and oldName ~= name then return false, "Ce nom existe déjà dans cette catégorie" end
     if oldName and oldName ~= name then
@@ -406,8 +407,8 @@ end
 function C:ResolveNumberedSkillRef(catKey,name)
     local skill=self:FindSkillRef(catKey,name)
     if skill then return skill,"",name end
-    local quantity,target=name:match("^%s*(%d+)%s+(.+)$")
-    if not quantity then quantity,target=name:match("^%s*(%(%d+%))%s+(.+)$") end
+    local quantity,target=name:match("^%s*([+-]?%d+)%s+(.+)$")
+    if not quantity then quantity,target=name:match("^%s*(%([+-]?%d+%))%s+(.+)$") end
     if quantity then return self:FindSkillRef(catKey,target),quantity.." ",target end
     return nil,"",name
 end
@@ -441,7 +442,9 @@ end
 -- lien ou sur elle, ce qui permet de suivre une référence dans une référence.
 local CARD_MIN_W, CARD_MAX_W, CARD_PAD, CARD_HEAD = 150, 300, 13, 31
 local MAX_CARDS = 5
-local cards = {}
+local cards = {}          -- carte active de chaque niveau (survol)
+local pinnedCards = {}    -- cartes verrouillées, détachées de leur niveau : autant qu'on veut
+local freeCards = {}      -- cartes verrouillées refermées, réutilisables
 local ShowCard
 
 -- Une carte liée se ferme quand la souris n'est plus ni sur son lien, ni sur
@@ -452,6 +455,7 @@ local ShowCard
 -- Un passage rapide peut aussi perdre le Leave alors que la souris reste dans
 -- le cadre : le lien ne compte que tant que le curseur reste sur sa ligne.
 local LINK_LINE_TOLERANCE = 9
+local LINK_GAP = 24   -- espace entre une carte et sa source, occupé par le flux
 local function CursorY()
     local _, y = GetCursorPosition()
     return y / UIParent:GetEffectiveScale()
@@ -465,13 +469,33 @@ local function CardLinkY(card)
     if not top then return end
     return top * source:GetEffectiveScale() / UIParent:GetEffectiveScale() + offset
 end
+-- Carte qui contient ce cadre (le cadre lui-même s'il en est une), ou nil.
+local function OwnerCard(frame)
+    while frame do
+        if frame.isSkillCard then return frame end
+        frame = frame:GetParent()
+    end
+end
+local function AllCards()
+    local list = {}
+    for _, card in pairs(cards) do list[#list + 1] = card end
+    for card in pairs(pinnedCards) do list[#list + 1] = card end
+    return list
+end
+-- Cartes affichées ouvertes depuis un lien de `card`.
+local function OpenChildren(card)
+    local list = {}
+    for _, other in ipairs(AllCards()) do
+        if other ~= card and other:IsShown() and OwnerCard(other.source) == card then list[#list + 1] = other end
+    end
+    return list
+end
 local function CheckCards()
-    for depth = #cards, 2, -1 do
-        local card = cards[depth]
-        local deeper = cards[depth + 1]
-        if card:IsShown() then
+    for _, card in ipairs(AllCards()) do
+        if card.depth and card.depth > 1 and card:IsShown() then
             local source = card.source
             local sourceGone = not source or not source:IsVisible()
+            local keep = card.pinned and not sourceGone
             if not sourceGone and card.linkSide then
                 local ratio=source:GetEffectiveScale()/UIParent:GetEffectiveScale()
                 local top=source:GetTop()
@@ -489,7 +513,7 @@ local function CheckCards()
                 onLink=not sourceGone and source:IsMouseOver()
                     and C.RichText.IsPointerOverLink(source,card.sourceLink)
             end
-            if sourceGone or (not onLink and not card:IsMouseOver() and not (deeper and deeper:IsShown())) then
+            if not keep and (sourceGone or (not onLink and not card:IsMouseOver() and #OpenChildren(card) == 0)) then
                 card:Hide()
             end
         end
@@ -505,19 +529,15 @@ cardWatcher:SetScript("OnUpdate", function(self, elapsed)
     if watchElapsed < .2 then return end
     watchElapsed = 0
     CheckCards()
-    if not (cards[2] and cards[2]:IsShown()) then self:Hide() end
+    for _, card in ipairs(AllCards()) do
+        if card.depth and card.depth > 1 and card:IsShown() then return end
+    end
+    self:Hide()
 end)
 
 local function LinkedCardDepth(source)
-    local depth=source.cardDepth or 1
-    local parent=source
-    while parent do
-        for i,card in ipairs(cards) do
-            if parent==card then depth=math.max(depth,i) end
-        end
-        parent=parent:GetParent()
-    end
-    return depth+1
+    local owner=OwnerCard(source)
+    return math.max(source.cardDepth or 1, owner and owner.depth or 0)+1
 end
 
 local function OnSkillLinkEnter(self, link)
@@ -526,9 +546,9 @@ local function OnSkillLinkEnter(self, link)
     local depth = LinkedCardDepth(self)
     if depth > MAX_CARDS then return end
     local skill = C:FindSkillRef(catKey, name)
-    ShowCard(depth, self, skill or { name = name, missing = true })
-    cards[depth].linkHovered = true
-    cards[depth].sourceLink = link
+    local card = ShowCard(depth, self, skill or { name = name, missing = true })
+    card.linkHovered = true
+    card.sourceLink = link
 end
 
 local function OnSkillLinkLeave(self)
@@ -548,7 +568,61 @@ function C:EnableSkillLinks(frame, depth)
 end
 
 local OPEN_TIME = .24
-local LINK_GAP = 24   -- espace entre une carte et sa source, occupé par le flux
+-- Carte liée survolée plus de HOLD_TIME secondes : elle se fige (épinglée)
+-- et le cercle de chargement laisse place à la croix de fermeture.
+local HOLD_TIME = 2
+local ROUND_MASK = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
+
+-- Verrouillée : elle quitte son niveau (le prochain survol ouvre une autre
+-- carte à côté) et ne se ferme plus qu'à la croix ou avec sa source.
+local function Pin(card)
+    card.pinned = true
+    if cards[card.depth] == card then cards[card.depth] = nil end
+    pinnedCards[card] = true
+    card.holdRing:Hide()
+    card.closeButton:Show()
+end
+
+-- Cercle dans l'angle haut droit (à la place de la croix) : fond sombre,
+-- anneau bronze, remplissage or qui tourne pendant HOLD_TIME.
+local function BuildHoldRing(card)
+    local ring = CreateFrame("Frame", nil, UIParent)
+    ring:SetFrameStrata("TOOLTIP")
+    ring:SetSize(16, 16)
+    ring:SetPoint("CENTER", card, "TOPRIGHT", -2, -2)
+    ring:Hide()
+    local function Disc(size, r, g, b, a, layer)
+        local tex = ring:CreateTexture(nil, layer)
+        tex:SetSize(size, size); tex:SetPoint("CENTER")
+        tex:SetColorTexture(r, g, b, a)
+        local mask = ring:CreateMaskTexture()
+        mask:SetTexture(ROUND_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetAllPoints(tex)
+        tex:AddMaskTexture(mask)
+    end
+    Disc(16, .62, .48, .25, 1, "BACKGROUND")
+    Disc(13, .05, .04, .03, .95, "BORDER")
+    local fill = CreateFrame("Cooldown", nil, ring, "CooldownFrameTemplate")
+    fill:SetSize(13, 13); fill:SetPoint("CENTER")
+    fill:SetSwipeTexture(ROUND_MASK)
+    fill:SetSwipeColor(.91, .80, .57, 1)
+    fill:SetReverse(true)
+    fill:SetDrawEdge(false)
+    if fill.SetDrawBling then fill:SetDrawBling(false) end
+    if fill.SetHideCountdownNumbers then fill:SetHideCountdownNumbers(true) end
+    ring.fill = fill
+    ring:SetScript("OnUpdate", function(self)
+        if not card:IsShown() then self:Hide(); return end
+        if GetTime() - self.start >= HOLD_TIME then Pin(card) end
+    end)
+    function ring:Start()
+        self.start = GetTime()
+        self:SetFrameLevel(card:GetFrameLevel() + 3)
+        self.fill:SetCooldown(self.start, HOLD_TIME)
+        self:Show()
+    end
+    card.holdRing = ring
+end
 
 -- Flux de pixels qui relie une carte à sa source (« je viens de là ») :
 -- des pixels bronze et or montent de l'icône vers la carte, ou filent du
@@ -652,9 +726,12 @@ local function UpdateUseButton(card)
     end
 end
 
-local function GetCard(depth)
-    if cards[depth] then return cards[depth] end
-    local card = CreateFrame("Frame", "CharacterSkillCard" .. depth, UIParent)
+local cardSeq = 0
+local function NewCard(depth)
+    local name = "CharacterSkillCard" .. depth
+    if _G[name] then cardSeq = cardSeq + 1; name = name .. "_" .. cardSeq end
+    local card = CreateFrame("Frame", name, UIParent)
+    card.isSkillCard = true
     card:SetFrameStrata("TOOLTIP")
     card:SetClampedToScreen(true)
     -- Ouverture animée : la carte grandit et ne montre que ce qu'elle couvre.
@@ -669,8 +746,10 @@ local function GetCard(depth)
     local close=C:CreateRoundCloseButton(UIParent,function() card:Hide() end)
     close:SetFrameStrata("TOOLTIP")
     card.closeButton=close
+    close:ClearAllPoints()
     close:SetPoint("CENTER",card,"TOPRIGHT",-2,-2)
     card.closeButton:Hide()
+    if depth > 1 then BuildHoldRing(card) end
     if depth==1 and UISpecialFrames then
         UISpecialFrames[#UISpecialFrames+1]="CharacterSkillCard1"
     end
@@ -750,12 +829,28 @@ local function GetCard(depth)
     C:EnableSkillLinks(content, depth)
     card:SetScript("OnHide", function()
         card.closeButton:Hide()
+        if card.holdRing then card.holdRing:Hide() end
         card.linkHovered = false
         card:SetScript("OnUpdate", nil)
         card.flux:Hide()
-        if cards[depth + 1] then cards[depth + 1]:Hide() end
+        for _, child in ipairs(OpenChildren(card)) do child:Hide() end
+        if card.pinned then
+            card.pinned = false
+            pinnedCards[card] = nil
+            freeCards[#freeCards + 1] = card
+        end
     end)
     if depth > 1 then card:SetScript("OnLeave", function() C_Timer.After(.15, CheckCards) end) end
+    return card
+end
+
+-- Carte active du niveau `depth` ; une carte verrouillée refermée est
+-- réutilisée plutôt que d'en créer une nouvelle.
+local function GetCard(depth)
+    if cards[depth] then return cards[depth] end
+    local card = depth > 1 and table.remove(freeCards) or NewCard(depth)
+    card.depth = depth
+    card.content.cardDepth = depth
     cards[depth] = card
     return card
 end
@@ -831,7 +926,7 @@ function ShowCard(depth, anchor, skill)
     local card = GetCard(depth)
     local fromChat=depth==1 and anchor.isSkillChatAnchor
     card.closeButton:SetShown(fromChat or false)
-    if cards[depth + 1] then cards[depth + 1]:Hide() end
+    for _, child in ipairs(OpenChildren(card)) do child:Hide() end
     local content = card.content
     -- Fiche de consultation : le nom seul, sans son créateur.
     card.title:SetText(C:RenderSkillName(skill.name))
@@ -871,7 +966,7 @@ function ShowCard(depth, anchor, skill)
 
     -- Toujours au-dessus de la carte / du cadre qui l'ouvre (pour une
     -- référence, la carte précédente, pas son contenu).
-    local below = depth > 1 and cards[depth - 1] or anchor
+    local below = OwnerCard(anchor) or anchor
     card.source = anchor
     if depth > 1 then
         cardWatcher:Show()
@@ -903,6 +998,13 @@ function ShowCard(depth, anchor, skill)
     card.linkSide=depth>1 and side or nil
     card:Show()
     PlayOpen(card, width, height, side)
+    -- Carte liée (ouverte au survol) : nouveau maintien, jamais épinglée
+    -- d'office, même si elle remplace une carte épinglée au même niveau.
+    if card.holdRing then
+        card.pinned = false
+        card.closeButton:Hide()
+        card.holdRing:Start()
+    end
     return card
 end
 
@@ -1253,16 +1355,16 @@ local function ReadRefContext(editBox)
     local start = before:match(".*(){{")
     if not start then return end
     local fragment = before:sub(start + 2)
-    local quantity,rest=fragment:match("^%s*(%d+)%s+(.*)$")
-    if not quantity then quantity,rest=fragment:match("^%s*(%(%d+%))%s+(.*)$") end
+    local quantity,rest=fragment:match("^%s*([+-]?%d+)%s+(.*)$")
+    if not quantity then quantity,rest=fragment:match("^%s*(%([+-]?%d+%))%s+(.*)$") end
     if quantity then fragment=rest end
     if fragment:find("[{}\n]") then return end
     local tag, partial = fragment:match("^%s*([^:]-)%s*:%s*(.*)$")
     if tag then
         local cat = ResolveCategoryByTag(tag)
         if not cat then return end
-        local n,remaining=partial:match("^%s*(%d+)%s+(.*)$")
-        if not n then n,remaining=partial:match("^%s*(%(%d+%))%s+(.*)$") end
+        local n,remaining=partial:match("^%s*([+-]?%d+)%s+(.*)$")
+        if not n then n,remaining=partial:match("^%s*(%([+-]?%d+%))%s+(.*)$") end
         if n then quantity=n;partial=remaining end
         return { start = start, cursor = cursor, cat = cat, partial = partial, prefix=quantity and quantity.." " or "" }
     end
@@ -1295,7 +1397,7 @@ local function BuildAutocomplete(editBox, owner)
     local function ValuePrefix()
         local value=valueInput:GetText() or ""
         value=value:match("^%s*(.-)%s*$")
-        return (value:match("^%d+$") or value:match("^%(%d+%)$")) and value.." " or ""
+        return (value:match("^[+-]?%d+$") or value:match("^%([+-]?%d+%)$")) and value.." " or ""
     end
     local rows, entries, selected = {}, {}, 1
     local context, cursorX, cursorY, cursorH, dismissedStart = nil, 0, 0, 14, nil
