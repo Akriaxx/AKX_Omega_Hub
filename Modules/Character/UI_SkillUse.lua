@@ -438,9 +438,15 @@ end
 function C:FilterSkillRaidMessage(message,author)
     return (message:gsub("%[Omega:([0-9a-f]+)%]",function(id)
         local skill=self:FindChatSkill(id)
-        if skill then return self:SkillChatLink(skill,id) end
+        local from=(author or ""):gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):gsub("[|:]","")
+        -- L'auteur voyage dans le lien : les références d'une fiche qu'on a
+        -- déjà (ancien partage) se cherchent aussi dans ce qu'il a envoyé.
+        if skill then
+            local link=self:SkillChatLink(skill,id)
+            if from~="" then link=link:gsub("|Homegaskill:"..id.."|h","|Homegaskill:"..id..":"..from.."|h",1) end
+            return link
+        end
         if #id==16 then
-            local from=(author or ""):gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):gsub("[|:]","")
             return "|cffdfbf79|Homegaskill:"..id..(from~="" and (":"..from) or "").."|h["..(from~="" and "Fiche Omega" or "Fiche Omega indisponible").."]|h|r"
         end
     end))
@@ -469,11 +475,12 @@ end
 -- une fiche modifiée a un autre identifiant). Ses références {{Tag : Nom}}
 -- se demandent de la même façon, et l'auteur ne répond qu'aux références
 -- présentes dans une fiche qu'il a déjà envoyée à ce joueur.
-local FETCH_PREFIX,FETCH_CHUNK,FETCH_TIMEOUT,CACHE_MAX="OmegaFiche",200,8,300
+local FETCH_PREFIX,FETCH_CHUNK,FETCH_TIMEOUT,CACHE_MAX="OmegaFiche",225,8,300
 local fetchFrame=CreateFrame("Frame")
 fetchFrame:Hide()
 local fetchQueue,pending,allowedRefs,refCache,refPending,incomingB={}, {}, {}, {}, {}, {}
 local fetchClock,reqSeq=0,0
+local refFailedAt,rerenderPending,sentRefs={}, {}, {}
 
 local function FullName(name)
     if not name or name=="" then return "" end
@@ -537,7 +544,13 @@ fetchFrame:SetScript("OnUpdate",function(self,dt)
     if item and item.fn then
         pcall(item.fn)
     elseif item and C.enabled then
-        C_ChatInfo.SendAddonMessage(FETCH_PREFIX,item[1],item[3],item[2])
+        -- Limite d'envoi du jeu atteinte : le message reste en tête de file
+        -- et repart une seconde plus tard (sinon il était perdu en silence).
+        local ok,result=pcall(C_ChatInfo.SendAddonMessage,FETCH_PREFIX,item[1],item[3],item[2])
+        if ok and (result==false or (type(result)=="number" and result~=0)) then
+            table.insert(fetchQueue,1,item)
+            fetchClock=-.9
+        end
     end
     local now=GetTime()
     for req,p in pairs(pending) do
@@ -640,6 +653,15 @@ fetchFrame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
                 local refKey=BaseName(sender).."\0"..RefKey(f[1],f[2])
                 refCache[refKey]=skill
                 C:RefreshSkillCardsFor("ref:"..refKey,skill)
+                -- Cartes déjà ouvertes de cet auteur : liens recolorés d'un coup.
+                local base=BaseName(sender)
+                if C.RerenderSkillCards and not rerenderPending[base] then
+                    rerenderPending[base]=true
+                    C_Timer.After(.4,function()
+                        rerenderPending[base]=nil
+                        C:RerenderSkillCards(function(sk) return sk.author and BaseName(sk.author)==base end)
+                    end)
+                end
             end
         end
         return
@@ -690,7 +712,7 @@ end
 -- À l'envoi d'une émote : son contenu part une fois au raid, chacun le garde
 -- en cache et lit la fiche dès qu'il clique, même non partagée. Ses
 -- références restent demandables par tout le groupe (voir « R »).
-local MAX_BROADCAST_REFS,refSeq=60,0
+local MAX_BROADCAST_REFS,MAX_REF_DEPTH,REF_RESEND,refSeq=30,2,600,0
 local function QueueChunks(kind,payload,channel)
     local total=math.max(1,math.ceil(#payload/FETCH_CHUNK))
     if total>60 then return end
@@ -717,27 +739,33 @@ function C:BroadcastEmoteSkills(skills,andThen)
         AllowRefs("*",skill)
         QueueChunks("B|"..self:SkillChatID(skill),EncodeRemote(skill),channel)
     end
+    -- Le chat part dès que les fiches de l'émote sont passées : pas
+    -- d'attente sur les références (les cartes ouvertes se recolorent à leur
+    -- arrivée, et le survol les redemande au besoin).
+    if andThen then fetchQueue[#fetchQueue+1]={fn=andThen};fetchFrame:Show() end
+    local now=GetTime()
     local seen,todo,sent={}, {}, 0
-    local function push(catKey,name) todo[#todo+1]={catKey,name} end
-    for _,skill in ipairs(skills or {}) do EachRef(skill,push) end
+    local function pusher(depth) return function(catKey,name) todo[#todo+1]={catKey,name,depth} end end
+    for _,skill in ipairs(skills or {}) do EachRef(skill,pusher(1)) end
     while #todo>0 and sent<MAX_BROADCAST_REFS do
-        local catKey,name=unpack(table.remove(todo,1))
+        local catKey,name,depth=unpack(table.remove(todo,1))
         local key=RefKey(catKey,name)
         if not seen[key] then
             seen[key]=true
             local ref=self:ResolveNumberedSkillRef(catKey,name)
             if ref then
-                sent=sent+1
                 AllowRefs("*",ref)
-                refSeq=refSeq+1
-                QueueChunks("C|"..refSeq,Field(catKey)..Field(name)..EncodeRemote(ref),channel)
-                EachRef(ref,push)
+                -- Déjà envoyée il y a peu : le raid l'a en cache.
+                if not sentRefs[key] or sentRefs[key]+REF_RESEND<now then
+                    sentRefs[key]=now
+                    sent=sent+1
+                    refSeq=refSeq+1
+                    QueueChunks("C|"..refSeq,Field(catKey)..Field(name)..EncodeRemote(ref),channel)
+                end
+                if depth<MAX_REF_DEPTH then EachRef(ref,pusher(depth+1)) end
             end
         end
     end
-    -- Le message de chat part en dernier : à sa lecture, fiches, références
-    -- et couleurs de leurs liens sont déjà arrivées.
-    if andThen then fetchQueue[#fetchQueue+1]={fn=andThen};fetchFrame:Show() end
 end
 
 -- Référence d'une fiche reçue, déjà en cache (sans rien demander) : sert
@@ -759,13 +787,16 @@ function C:RemoteSkillRef(author,catKey,name)
     local key=BaseName(author).."\0"..RefKey(catKey,name)
     local cached=refCache[key]
     if cached then return cached end
-    if cached==false then return {name=name,missing=true,missingText=UNAVAILABLE} end
+    -- Échec gardé 15 s seulement : une diffusion ou un nouveau survol
+    -- peut encore l'apporter (sinon le lien restait « introuvable » à vie).
+    if cached==false and (refFailedAt[key] or 0)+15>GetTime() then return {name=name,missing=true,missingText=UNAVAILABLE} end
     local loadKey="ref:"..key
     if not refPending[key] then
         refPending[key]=true
         Request(author,"R|"..catKey.."|"..name,function(skill)
             refPending[key]=nil
-            refCache[key]=skill or false
+            if skill or not refCache[key] then refCache[key]=skill or false end
+            if not skill then refFailedAt[key]=GetTime() end
             self:RefreshSkillCardsFor(loadKey,skill or {name=name,missing=true,missingText=UNAVAILABLE})
         end)
     end
@@ -780,6 +811,9 @@ if ChatFrame_OnHyperlinkShow then
         if not id then return original(frame,hyperlink,...) end
         if not C.enabled then return end
         local skill=C:FindChatSkill(id)
+        if skill and not skill.author and author~="" then
+            skill=setmetatable({author=author},{__index=skill})
+        end
         if not skill and author~="" then
             local loadKey="id:"..id
             skill={name="Fiche Omega",loading=true,loadKey=loadKey}

@@ -748,7 +748,7 @@ do
       local n=#sent;fetch.scripts.OnUpdate(fetch,.2)
       if #sent>n then local m=sent[#sent]
         if m[1]=='OmegaFiche' and m[3]=='RAID' then
-          local msg=m[2];if tamper then msg=msg:gsub('Lointain','Falsifié') end
+          local msg=m[2];if tamper then msg=msg:gsub('Lointain','Faussait') end
           fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',msg,'RAID','Auteur-Realm') end
       elseif not fetch.shown then break end
     end
@@ -773,7 +773,7 @@ do
         fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',m[2],'RAID','Auteur-Realm') end
     elseif not fetch.shown then break end end
   assert(order[1]=='chat','message de chat envoyé')
-  for _,k in ipairs(kinds) do assert(k:sub(2)=='-','fiches et références avant le chat : '..k) end;assert(#kinds>=3)
+  for _,k in ipairs(kinds) do if k:sub(1,1)=='B' then assert(k=='B-','fiches avant le chat') else assert(k=='C+','références après le chat : '..k) end end;assert(#kinds>=3)
   local zone=C:RemoteSkillRef('Auteur-Realm','index','Zone neuve');local fond=C:RemoteSkillRef('Auteur-Realm','index','Profond')
   assert(zone.description=='Voir {{Index : Profond}}' and fond.description=='Tout au fond','références en cache, récursives')
   assert(C:RemoteSkillRef('Auteur','index','Profond')==fond,'auteur reconnu sans royaume')
@@ -790,6 +790,20 @@ do
   local _,rskill=C:SkillTextOptions().resolveRef('Index','Rouge vif')
   C._refAuthor=nil
   assert(rskill and rskill.name:find('#FF0000',1,true),'le rendu retrouve le nom coloré')
+  -- Fiche déjà possédée : l'auteur voyage quand même dans le lien.
+  assert(C:FilterSkillRaidMessage('x [Omega:'..C:SkillChatID(secret)..']','Auteur-Realm'):find(':Auteur-Realm|h',1,true),'auteur dans le lien')
+  -- Échec d'une référence : oublié après 15 s, une diffusion la remplace.
+  C:RemoteSkillRef('Auteur-Realm','index','Absente');pump()
+  assert(C:RemoteSkillRef('Auteur-Realm','index','Absente').missing,'absente')
+  now=now+16
+  assert(C:RemoteSkillRef('Auteur-Realm','index','Absente').loading,'redemandée après 15 s');pump()
+  -- Limite d'envoi du jeu : le message refusé repart ensuite.
+  do local calls,orig=0,C_ChatInfo.SendAddonMessage
+    C_ChatInfo.SendAddonMessage=function(...) calls=calls+1;if calls==1 then return false end;return orig(...) end
+    local n=#sent;C:BroadcastEmoteSkills({{name='Relance',icon='1',description='x',usable=true}})
+    for _=1,20 do fetch.scripts.OnUpdate(fetch,.2) end
+    C_ChatInfo.SendAddonMessage=orig
+    assert(calls>=2 and #sent>n,'message renvoyé après refus') end
 end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;

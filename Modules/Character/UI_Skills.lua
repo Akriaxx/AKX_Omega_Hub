@@ -943,7 +943,7 @@ local function PlayOpen(card, width, height, side)
     end)
 end
 
-function ShowCard(depth, anchor, skill)
+function ShowCard(depth, anchor, skill, instant)
     local card = GetCard(depth)
     local fromChat=depth==1 and anchor.isSkillChatAnchor
     card.closeButton:SetShown(fromChat or false)
@@ -1076,6 +1076,11 @@ function ShowCard(depth, anchor, skill)
     card.linkSide=depth>1 and side or nil
     card:Show()
     PlayOpen(card, width, height, side)
+    -- Réaffichage (références arrivées) : directement ouverte, sans animation.
+    if instant then
+        local finish = card:GetScript("OnUpdate")
+        if finish then finish(card, OPEN_TIME) end
+    end
     -- Carte liée (ouverte au survol) : nouveau maintien, jamais épinglée
     -- d'office, même si elle remplace une carte épinglée au même niveau.
     if card.holdRing then
@@ -1093,6 +1098,18 @@ function C:RefreshSkillCardsFor(key, skill)
         if card:IsShown() and card.skill and card.skill.loadKey == key and cards[card.depth] == card then
             local hovered, link = card.linkHovered, card.sourceLink
             local fresh = ShowCard(card.depth, card.source, skill)
+            fresh.linkHovered, fresh.sourceLink = hovered, link
+        end
+    end
+end
+
+-- Redessine les cartes ouvertes dont la fiche vérifie match (ex. fiches
+-- d'un auteur dont les références viennent d'arriver), sans animation.
+function C:RerenderSkillCards(match)
+    for _, card in ipairs(AllCards()) do
+        if card:IsShown() and card.skill and cards[card.depth] == card and match(card.skill) then
+            local hovered, link = card.linkHovered, card.sourceLink
+            local fresh = ShowCard(card.depth, card.source, card.skill, true)
             fresh.linkHovered, fresh.sourceLink = hovered, link
         end
     end
