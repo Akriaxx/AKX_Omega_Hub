@@ -734,6 +734,25 @@ do
   C:RemoteSkillRef('Auteur-Realm','base','Cost Test');pump()
   assert(C:RemoteSkillRef('Auteur-Realm','base','Cost Test').missing,'référence hors fiche envoyée : refusée')
   assert(C:FilterSkillRaidMessage('x [Omega:0123456789abcdef] y','Auteur-Realm'):find('omegaskill:0123456789abcdef:Auteur-Realm',1,true),'lien avec auteur')
+  -- Diffusion à l'envoi : le raid reçoit la fiche sans rien demander.
+  local outside={name='Hors bibliothèque',icon='134400',description=string.rep('Lointain. ',60),usable=true,cost={resource='mana',amount=2}}
+  local oid=C:SkillChatID(outside);assert(not C:FindChatSkill(oid))
+  local function deliverRaid(tamper)
+    for _=1,400 do
+      local n=#sent;fetch.scripts.OnUpdate(fetch,.2)
+      if #sent>n then local m=sent[#sent]
+        if m[1]=='OmegaFiche' and m[3]=='RAID' then
+          local msg=m[2];if tamper then msg=msg:gsub('Lointain','Falsifié') end
+          fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',msg,'RAID','Auteur-Realm') end
+      elseif not fetch.shown then break end
+    end
+  end
+  C:BroadcastEmoteSkills({outside});deliverRaid(true)
+  assert(not C:FindChatSkill(oid),'contenu falsifié refusé')
+  C:BroadcastEmoteSkills({outside});deliverRaid(false)
+  local cached=C:FindChatSkill(oid)
+  assert(cached and cached.description==outside.description and cached.author=='Auteur-Realm' and not cached.usable,'fiche diffusée en cache')
+  assert(C:FilterSkillRaidMessage('x [Omega:'..oid..']','Auteur-Realm'):find('[Hors bibliothèque]',1,true),'le lien affiche son nom')
 end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
