@@ -443,6 +443,7 @@ end
 -- un niveau au-dessus ; elle reste ouverte tant que la souris est sur le
 -- lien ou sur elle, ce qui permet de suivre une référence dans une référence.
 local CARD_MIN_W, CARD_MAX_W, CARD_PAD, CARD_HEAD = 150, 300, 13, 31
+local CARD_TEXT_GAP = 26  -- « grand vide » entre le texte et le coût / Utiliser
 local MAX_CARDS = 5
 local cards = {}          -- carte active de chaque niveau (survol)
 local pinnedCards = {}    -- cartes verrouillées, détachées de leur niveau : autant qu'on veut
@@ -506,7 +507,7 @@ local function CheckCards()
                     local right=card.linkSide=="RIGHT"
                     card:ClearAllPoints()
                     card:SetPoint(right and "LEFT" or "RIGHT",UIParent,"BOTTOMLEFT",
-                        edge*ratio+(right and LINK_GAP or -LINK_GAP),top*ratio+(card.linkOffset or -card.content:GetHeight()/2))
+                        edge*ratio+(right and LINK_GAP or -LINK_GAP),top*ratio+(card.linkOffset or -card.content:GetHeight()/2)+(card.stackOffset or 0))
                 end
             end
             local onLink = card.linkHovered and source and source:IsMouseOver()
@@ -956,22 +957,36 @@ function ShowCard(depth, anchor, skill)
     local width = math.max(CARD_MIN_W, math.min(CARD_MAX_W, inner + CARD_PAD * 2))
     card.title:SetWidth(width - CARD_PAD * 2)
     local _, bodyHeight = RT.Render(content, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
-    local height = body ~= "" and (CARD_HEAD + 18 + bodyHeight) or CARD_HEAD + 8
     card.skill=skill
     local usable=skill.usable == true and not skill.missing and not skill.loading
     card.useButton:SetShown(usable)
     UpdateUseButton(card)
-    if usable then height=height+46 end
     if not card.costLabel then
         card.costLabel=content:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         UI.ApplyTitle(card.costLabel)
     end
-    card.costLabel:ClearAllPoints()
-    card.costLabel:SetPoint("BOTTOM",content,"BOTTOM",0,usable and 51 or 12)
     card.costLabel:SetShown(skill.cost~=nil)
-    if skill.cost then
-        card.costLabel:SetText("Coût : "..skill.cost.amount.." "..(({hp="Vie",mana="Mana",endurance="Endurance"})[skill.cost.resource] or ""))
-        height=height+22
+    -- Coût et « Utiliser » posés SOUS le texte, de haut en bas (et non
+    -- accrochés au bas de la carte) : le grand vide entre le texte et le
+    -- coût est le même sur toutes les cartes.
+    local y = body ~= "" and (CARD_HEAD + 6 + bodyHeight) or CARD_HEAD
+    local height
+    if skill.cost or usable then
+        y = y + CARD_TEXT_GAP
+        if skill.cost then
+            card.costLabel:SetText("Coût : "..skill.cost.amount.." "..(({hp="Vie",mana="Mana",endurance="Endurance"})[skill.cost.resource] or ""))
+            card.costLabel:ClearAllPoints()
+            card.costLabel:SetPoint("TOP",content,"TOP",0,-y)
+            y = y + 14 + (usable and 8 or 0)
+        end
+        if usable then
+            card.useButton:ClearAllPoints()
+            card.useButton:SetPoint("TOP",content,"TOP",0,-y)
+            y = y + 32
+        end
+        height = y + 12
+    else
+        height = body ~= "" and (CARD_HEAD + 18 + bodyHeight) or CARD_HEAD + 8
     end
     card.rule:SetShown(body ~= "")
     content:SetSize(width, height)
@@ -988,9 +1003,17 @@ function ShowCard(depth, anchor, skill)
     else
         card.linkOffset = nil
     end
-    card:SetFrameLevel((below:GetFrameLevel() or 0) + 20)
+    -- Toujours au-dessus de toutes les cartes ouvertes : sa croix / son
+    -- cercle (niveau carte + 3) restent sous les cartes plus récentes et ne
+    -- se voient pas à travers.
+    local level = (below:GetFrameLevel() or 0) + 20
+    for _, other in ipairs(AllCards()) do
+        if other ~= card and other:IsShown() then level = math.max(level, (other:GetFrameLevel() or 0) + 10) end
+    end
+    card:SetFrameLevel(math.min(level, 9000))
     card.closeButton:SetFrameLevel(card:GetFrameLevel()+3)
     card:ClearAllPoints()
+    card.stackOffset = nil
     local side = "UP"
     if depth == 1 then
         card:SetPoint("BOTTOM", anchor, "TOP", 0, LINK_GAP)
@@ -1001,10 +1024,40 @@ function ShowCard(depth, anchor, skill)
         -- Centrée sur la hauteur du lien survolé : le flux arrive au milieu
         -- de son bord (l'écran la garde entière, SetClampedToScreen).
         local dy = card.linkOffset or -height / 2
-        if right + LINK_GAP + width <= screen then
-            card:SetPoint("LEFT", UIParent, "BOTTOMLEFT", right + LINK_GAP, top + dy); side = "RIGHT"
+        local x0
+        if right + LINK_GAP + width <= screen then side = "RIGHT"; x0 = right + LINK_GAP
+        else side = "LEFT"; x0 = left - LINK_GAP - width end
+        -- Place libre : une carte liée déjà ouverte (verrouillée) sur le même
+        -- espace pousse la nouvelle en dessous, ou au-dessus s'il n'y a plus
+        -- de place en bas.
+        local center = top + dy
+        local function Blocking(c)
+            for _, other in ipairs(AllCards()) do
+                if other ~= card and other:IsShown() and (other.depth or 1) > 1 then
+                    local l, r, t, b = other:GetLeft(), other:GetRight(), other:GetTop(), other:GetBottom()
+                    if l and r and t and b and l < x0 + width and r > x0 and b < c + height / 2 + 4 and t > c - height / 2 - 4 then
+                        return other
+                    end
+                end
+            end
+        end
+        local blocker, guard = Blocking(center), 0
+        while blocker and guard < 12 do
+            center = blocker:GetBottom() - 6 - height / 2
+            blocker, guard = Blocking(center), guard + 1
+        end
+        if center - height / 2 < (UIParent:GetBottom() or 0) then
+            center, blocker, guard = top + dy, Blocking(top + dy), 0
+            while blocker and guard < 12 do
+                center = blocker:GetTop() + 6 + height / 2
+                blocker, guard = Blocking(center), guard + 1
+            end
+        end
+        card.stackOffset = center - (top + dy)
+        if side == "RIGHT" then
+            card:SetPoint("LEFT", UIParent, "BOTTOMLEFT", x0, center)
         else
-            card:SetPoint("RIGHT", UIParent, "BOTTOMLEFT", left - LINK_GAP, top + dy); side = "LEFT"
+            card:SetPoint("RIGHT", UIParent, "BOTTOMLEFT", x0 + width, center)
         end
     end
     card.linkSide=depth>1 and side or nil

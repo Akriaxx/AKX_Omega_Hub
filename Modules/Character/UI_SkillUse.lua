@@ -412,8 +412,7 @@ function C:OpenSkillUse(skill)
             for _,resource in ipairs(COST_ORDER) do
                 if totals[resource] then C:Delta(resource,-totals[resource],true) end
             end
-            C:BroadcastEmoteSkills(used)
-            C:SendSkillRaidMessage(message)
+            C:BroadcastEmoteSkills(used,function() C:SendSkillRaidMessage(message) end)
             popup:Hide()
         end)
         edit:SetScript("OnTextChanged",function(_,user) if user then RefreshReservation() end end)
@@ -441,7 +440,7 @@ function C:FilterSkillRaidMessage(message,author)
         local skill=self:FindChatSkill(id)
         if skill then return self:SkillChatLink(skill,id) end
         if #id==16 then
-            local from=author and author:gsub("[|:]","") or ""
+            local from=(author or ""):gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):gsub("[|:]","")
             return "|cffdfbf79|Homegaskill:"..id..(from~="" and (":"..from) or "").."|h["..(from~="" and "Fiche Omega" or "Fiche Omega indisponible").."]|h|r"
         end
     end))
@@ -450,7 +449,15 @@ if ChatFrame_AddMessageEventFilter then
     for _,event in ipairs({"CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER"}) do
         ChatFrame_AddMessageEventFilter(event,function(_,_,message,author,...)
             if not C.enabled then return end
-            return false,C:FilterSkillRaidMessage(message,author),author,...
+            -- Le nom affiché peut être réécrit par d'autres addons (TRP3,
+            -- Prat…) : le GUID de l'expéditeur donne son vrai nom.
+            local from=author
+            local guid=select(10,...)
+            if guid and GetPlayerInfoByGUID then
+                local _,_,_,_,_,name,realm=GetPlayerInfoByGUID(guid)
+                if name and name~="" then from=name..((realm and realm~="") and ("-"..realm) or "") end
+            end
+            return false,C:FilterSkillRaidMessage(message,from),author,...
         end)
     end
 end
@@ -472,6 +479,12 @@ local function FullName(name)
     if not name or name=="" then return "" end
     if name:find("-",1,true) then return name end
     return name.."-"..(GetRealmName() or ""):gsub("%s","")
+end
+-- Nom sans royaume ni couleur, en minuscules : les formes « Nom »,
+-- « Nom-Royaume » et « Nom-Royaume Espacé » désignent le même joueur.
+local function BaseName(name)
+    name=(name or ""):gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r","")
+    return (name:match("^([^%-]+)") or ""):lower()
 end
 local function InGroup(sender)
     local short=Ambiguate and Ambiguate(sender,"none") or sender
@@ -499,13 +512,15 @@ local function EncodeRemote(skill)
     local cost=skill.cost
     return Field(skill.name)..Field(skill.icon)..Field(skill.description)..Field(cost and cost.resource)..Field(cost and cost.amount)
 end
-local function DecodeRemote(payload,author)
-    local f=ReadFields(payload)
-    if not f or #f<5 or f[1]=="" or #f[1]>128 or #f[3]>8000 then return nil end
-    local skill={name=f[1],icon=f[2]~="" and f[2] or nil,description=f[3],usable=false,author=author,remote=true}
-    local amount=tonumber(f[5])
-    if f[4]~="" and amount then skill.cost={resource=f[4],amount=amount} end
+local function SkillFromFields(f,o,author)
+    if not f or #f<o+4 or f[o]=="" or #f[o]>128 or #f[o+2]>8000 then return nil end
+    local skill={name=f[o],icon=f[o+1]~="" and f[o+1] or nil,description=f[o+2],usable=false,author=author,remote=true}
+    local amount=tonumber(f[o+4])
+    if f[o+3]~="" and amount then skill.cost={resource=f[o+3],amount=amount} end
     return skill
+end
+local function DecodeRemote(payload,author)
+    return SkillFromFields(ReadFields(payload),1,author)
 end
 
 -- target = destinataire d'un message privé, ou nil avec channel (RAID/PARTY).
@@ -519,7 +534,11 @@ fetchFrame:SetScript("OnUpdate",function(self,dt)
     if fetchClock<.1 then return end
     fetchClock=0
     local item=table.remove(fetchQueue,1)
-    if item and C.enabled then C_ChatInfo.SendAddonMessage(FETCH_PREFIX,item[1],item[3],item[2]) end
+    if item and item.fn then
+        pcall(item.fn)
+    elseif item and C.enabled then
+        C_ChatInfo.SendAddonMessage(FETCH_PREFIX,item[1],item[3],item[2])
+    end
     local now=GetTime()
     for req,p in pairs(pending) do
         if p.expires<now then pending[req]=nil;p.done(nil) end
@@ -601,6 +620,30 @@ fetchFrame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
         end
         return
     end
+    -- Références diffusées avec l'émote : C|<n°>|i|n|<catégorie><nom écrit><fiche>.
+    local cseq,cindex,ctotal,cchunk=message:match("^C|(%d+)|(%d+)|(%d+)|(.*)$")
+    if cseq then
+        if (channel~="RAID" and channel~="PARTY") or sender==FullName(UnitName("player")) then return end
+        cindex,ctotal=tonumber(cindex),tonumber(ctotal)
+        if ctotal<1 or ctotal>60 or cindex<1 or cindex>ctotal then return end
+        local now=GetTime()
+        for key,buf in pairs(incomingB) do if buf.expires<now then incomingB[key]=nil end end
+        local key=sender.."\0C"..cseq
+        local buf=incomingB[key] or {chunks={},count=0,expires=now+30}
+        incomingB[key]=buf
+        if not buf.chunks[cindex] then buf.chunks[cindex]=cchunk;buf.count=buf.count+1 end
+        if buf.count>=ctotal then
+            incomingB[key]=nil
+            local f=ReadFields(table.concat(buf.chunks,"",1,ctotal))
+            local skill=f and f[1] and f[2] and SkillFromFields(f,3,sender)
+            if skill then
+                local refKey=BaseName(sender).."\0"..RefKey(f[1],f[2])
+                refCache[refKey]=skill
+                C:RefreshSkillCardsFor("ref:"..refKey,skill)
+            end
+        end
+        return
+    end
     if channel~="WHISPER" then return end
     local req,kind,a,b=message:match("^Q|(%d+)|(%a)|([^|]*)|?(.*)$")
     if req then
@@ -618,12 +661,12 @@ fetchFrame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
     local nreq=message:match("^N|(%d+)$")
     if nreq then
         local p=pending[nreq]
-        if p and p.author==sender then pending[nreq]=nil;p.done(nil) end
+        if p and BaseName(p.author)==BaseName(sender) then pending[nreq]=nil;p.done(nil) end
         return
     end
     local areq,index,total,chunk=message:match("^A|(%d+)|(%d+)|(%d+)|(.*)$")
     local p=areq and pending[areq]
-    if not p or p.author~=sender then return end
+    if not p or BaseName(p.author)~=BaseName(sender) then return end
     index,total=tonumber(index),tonumber(total)
     if total<1 or total>60 or index<1 or index>total then return end
     if not p.chunks[index] then p.chunks[index]=chunk;p.count=p.count+1 end
@@ -647,17 +690,49 @@ end
 -- À l'envoi d'une émote : son contenu part une fois au raid, chacun le garde
 -- en cache et lit la fiche dès qu'il clique, même non partagée. Ses
 -- références restent demandables par tout le groupe (voir « R »).
-function C:BroadcastEmoteSkills(skills)
+local MAX_BROADCAST_REFS,refSeq=60,0
+local function QueueChunks(kind,payload,channel)
+    local total=math.max(1,math.ceil(#payload/FETCH_CHUNK))
+    if total>60 then return end
+    for i=1,total do
+        Queue(kind.."|"..i.."|"..total.."|"..payload:sub((i-1)*FETCH_CHUNK+1,i*FETCH_CHUNK),nil,channel)
+    end
+end
+local function EachRef(skill,fn)
+    for tag,name in tostring(skill.description or ""):gmatch("{{%s*([^:{}]-)%s*:%s*([^{}]-)%s*}}") do
+        local cat=C:ResolveCategoryByTag(tag)
+        if cat then fn(cat.key,name) end
+    end
+end
+
+-- À l'envoi d'une émote, tout part au raid pour être lu sans bibliothèque :
+-- les fiches de l'émote, puis (then, ex. le message de chat, pour que les
+-- liens affichent déjà leur nom) , puis toutes les références qu'elles
+-- contiennent, récursivement (MAX_BROADCAST_REFS au plus). Chacun les garde
+-- en cache ; les références restent aussi demandables au survol.
+function C:BroadcastEmoteSkills(skills,andThen)
     local channel=(IsInRaid and IsInRaid() and "RAID") or (IsInGroup and IsInGroup() and "PARTY")
-    if not channel then return end
+    if not channel then if andThen then andThen() end;return end
     for _,skill in ipairs(skills or {}) do
         AllowRefs("*",skill)
-        local id=self:SkillChatID(skill)
-        local payload=EncodeRemote(skill)
-        local total=math.max(1,math.ceil(#payload/FETCH_CHUNK))
-        if total<=60 then
-            for i=1,total do
-                Queue("B|"..id.."|"..i.."|"..total.."|"..payload:sub((i-1)*FETCH_CHUNK+1,i*FETCH_CHUNK),nil,channel)
+        QueueChunks("B|"..self:SkillChatID(skill),EncodeRemote(skill),channel)
+    end
+    if andThen then fetchQueue[#fetchQueue+1]={fn=andThen};fetchFrame:Show() end
+    local seen,todo,sent={}, {}, 0
+    local function push(catKey,name) todo[#todo+1]={catKey,name} end
+    for _,skill in ipairs(skills or {}) do EachRef(skill,push) end
+    while #todo>0 and sent<MAX_BROADCAST_REFS do
+        local catKey,name=unpack(table.remove(todo,1))
+        local key=RefKey(catKey,name)
+        if not seen[key] then
+            seen[key]=true
+            local ref=self:ResolveNumberedSkillRef(catKey,name)
+            if ref then
+                sent=sent+1
+                AllowRefs("*",ref)
+                refSeq=refSeq+1
+                QueueChunks("C|"..refSeq,Field(catKey)..Field(name)..EncodeRemote(ref),channel)
+                EachRef(ref,push)
             end
         end
     end
@@ -666,7 +741,7 @@ end
 -- Référence {{Tag : Nom}} dans une fiche reçue : renvoie la fiche en cache,
 -- sinon une carte « Chargement… » rafraîchie à l'arrivée (RefreshSkillCardsFor).
 function C:RemoteSkillRef(author,catKey,name)
-    local key=author.."\0"..RefKey(catKey,name)
+    local key=BaseName(author).."\0"..RefKey(catKey,name)
     local cached=refCache[key]
     if cached then return cached end
     if cached==false then return {name=name,missing=true,missingText=UNAVAILABLE} end

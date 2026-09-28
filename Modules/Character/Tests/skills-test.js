@@ -560,6 +560,12 @@ local raid=true;IsInRaid=function() return raid end
 local sentUse;function SendChatMessage(message,channel) sentUse={message,channel} end
 local objectsBeforeUse=#objects
 dofile('Modules/Character/UI_SkillUse.lua')
+-- File d'envoi (fiches diffusées puis message de chat) : on la déroule.
+local function flushFetch()
+  for i=objectsBeforeUse+1,#objects do local o=objects[i]
+    if o.events and o.events.CHAT_MSG_ADDON and o.scripts.OnUpdate then
+      for _=1,500 do if not o.shown then break end;o.scripts.OnUpdate(o,.2) end end end
+end
 assert(C:ValidateSkillCost({resource='endurance',amount=0}) and C:CanPaySkillCost({resource='endurance',amount=0}),'coût 0 = gratuit')
 local id=C:SkillChatID(mergedUse);assert(#id==16)
 local link=C:SkillChatLink(mergedUse,id)
@@ -609,7 +615,7 @@ C:OpenSkillUse(mergedUse)
 local composer=CharacterSkillUsePopup;assert(composer:IsShown())
 local input=composer.edit;assert(input:GetText()=='*Votre émote ici.* ('..link..')',input:GetText())
 do local h=input.highlight;assert(h and input:GetText():sub(h[1]+1,h[2])=='Votre émote ici.','exemple sélectionné') end
-assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPressed(input)
+assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPressed(input);flushFetch()
 assert(sentUse and sentUse[1]==message and sentUse[2]=='RAID' and not composer:IsShown())
 assert(C:SaveSkill('grimoire',nil,'Codex','134400','Page du grimoire',true))
 assert(C:GetSkill('grimoire','Codex').usable)
@@ -753,6 +759,24 @@ do
   local cached=C:FindChatSkill(oid)
   assert(cached and cached.description==outside.description and cached.author=='Auteur-Realm' and not cached.usable,'fiche diffusée en cache')
   assert(C:FilterSkillRaidMessage('x [Omega:'..oid..']','Auteur-Realm'):find('[Hors bibliothèque]',1,true),'le lien affiche son nom')
+  -- Références envoyées avec l'émote, récursivement, et mises en cache.
+  assert(C:SaveSkill('index',nil,'Profond','134400','Tout au fond'))
+  assert(C:SaveSkill('index',nil,'Zone neuve','134400','Voir {{Index : Profond}}'))
+  local porteur={name='Porteur',icon='134400',description='Lire {{Index : Zone neuve}}',usable=true}
+  local order={}
+  local before=#sent
+  C:BroadcastEmoteSkills({porteur},function() order[#order+1]='chat' end)
+  local kinds={}
+  for _=1,400 do local n=#sent;fetch.scripts.OnUpdate(fetch,.2)
+    if #sent>n then local m=sent[#sent]
+      if m[1]=='OmegaFiche' then kinds[#kinds+1]=m[2]:sub(1,1)..(#order>0 and '+' or '-')
+        fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',m[2],'RAID','Auteur-Realm') end
+    elseif not fetch.shown then break end end
+  assert(order[1]=='chat','message de chat envoyé')
+  for _,k in ipairs(kinds) do if k:sub(1,1)=='B' then assert(k=='B-','fiches avant le chat') else assert(k=='C+','références après le chat') end end
+  local zone=C:RemoteSkillRef('Auteur-Realm','index','Zone neuve');local fond=C:RemoteSkillRef('Auteur-Realm','index','Profond')
+  assert(zone.description=='Voir {{Index : Profond}}' and fond.description=='Tout au fond','références en cache, récursives')
+  assert(C:RemoteSkillRef('Auteur','index','Profond')==fond,'auteur reconnu sans royaume')
 end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;

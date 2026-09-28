@@ -1412,8 +1412,7 @@ end
 -- Octroi manuel : le créateur débloque, INDÉPENDAMMENT, le nom de la Zone
 -- ou le nom d'une Sous-zone pour un joueur précis (voir ResolveBannerText
 -- pour les 4 combinaisons résultantes). Envoyé en whisper direct + repli
--- groupe/guilde (comme SendForcedRoll dans Dice/Modules/Network.lua : le
--- whisper seul n'est pas fiable à 100%). La liste "qui a appris quoi" est
+-- groupe/guilde (le whisper seul n'est pas fiable à 100%). La liste "qui a appris quoi" est
 -- tenue localement chez le créateur (pas diffusée) : elle n'a de sens que
 -- pour lui, et n'a pas besoin d'un aller-retour réseau pour exister — ces
 -- fonctions l'enregistrent au moment de l'envoi. Protocole : "G|<scope>|<id>|<cible>"
