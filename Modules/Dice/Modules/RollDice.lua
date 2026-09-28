@@ -65,9 +65,8 @@ local function ParsePerDieModifiers(modifiersText, numRolls)
     return perDie
 end
 
--- Construit le message de resultat pour un jeu de valeurs deja tirees (vrai
--- hasard ou valeurs truquees via /rdfdp) et l'envoie, avec animation le cas
--- echeant. Partage par OmegaDice.RollDice et OmegaDice.ExecuteForcedRoll.
+-- Construit le message de resultat pour un jeu de valeurs deja tirees et
+-- l'envoie, avec animation le cas echeant.
 function OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, separate, modifier, perDieMods, description)
     local diceLabel = numRolls .. (separate and "x" or "") .. "D" .. dieSides
     local resultMessage
@@ -164,26 +163,4 @@ function OmegaDice.RollDice(command)
     local modifier = separate and 0 or OmegaDice.SumModifiers(modifiers)
 
     OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, separate, modifier, perDieMods, description)
-end
-
--- Jet truque (/rdfdp, local ou recu via message d'addon depuis un autre
--- joueur) : chaque de tombe sur forcedValue au lieu d'etre tire au hasard.
--- Le message final a la meme forme qu'un jet normal, rien ne trahit le
--- trucage cote spectateurs du canal de raid.
-function OmegaDice.ExecuteForcedRoll(numRolls, dieSides, forcedValue, modifiersText, description)
-    numRolls    = tonumber(numRolls) or DEFAULT_ROLLS
-    dieSides    = tonumber(dieSides) or DEFAULT_SIDES
-    forcedValue = math.max(1, math.min(tonumber(forcedValue) or 1, dieSides))
-    description = OmegaDice.Trim(description)
-
-    local rolls   = {}
-    local rollSum = 0
-    for i = 1, numRolls do
-        rolls[i] = forcedValue
-        rollSum  = rollSum + forcedValue
-    end
-
-    local modifier = OmegaDice.SumModifiers(modifiersText)
-
-    OmegaDice.FinishRoll(numRolls, dieSides, rolls, rollSum, false, modifier, nil, description)
 end

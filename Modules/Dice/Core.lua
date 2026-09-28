@@ -44,10 +44,9 @@ end
 function OmegaDice:Enable()
     if OmegaDice.WarmDiceTextures then OmegaDice.WarmDiceTextures() end
     OmegaDice.RegisterCommands()
-    if OmegaDice.RegisterNetwork then OmegaDice.RegisterNetwork() end
     OmegaHub:SetModuleLoaded("Omega_Dice", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("Omega Dice activé.  |cffAAAAAA/rd <NdM[±X]>   /rd <NxdM[±X][!±X ou !D±X...]> (jets séparés, !D cible le dé D)   /rnd [min-max]   /rdfdp <joueur> <NdM>=<résultat>[±X] (jet truqué, discret)|r")
+        OmegaHub.Print("Omega Dice activé.  |cffAAAAAA/rd <NdM[±X]>   /rd <NxdM[±X][!±X ou !D±X...]> (jets séparés, !D cible le dé D)   /rnd [min-max]|r")
     end
 end
 
@@ -59,7 +58,6 @@ function OmegaDice:Disable()
         OmegaDice.textureWarmup=nil
     end
     OmegaDice.UnregisterCommands()
-    if OmegaDice.UnregisterNetwork then OmegaDice.UnregisterNetwork() end
     OmegaHub:SetModuleLoaded("Omega_Dice", false)
     OmegaHub.Print("Omega Dice désactivé.")
 end
