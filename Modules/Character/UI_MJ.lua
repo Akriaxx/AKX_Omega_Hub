@@ -472,7 +472,7 @@ UI.ApplyMutedText(hostStatus)
 -- l'écran : ancrée près du bouton elle recouvrait le reste du panneau MJ.
 -- Une fois validée, le PNJ apparaît dans la Vue MJ — PNJ.
 local npcPopup = CreateFrame("Frame", nil, impactPanel)
-npcPopup:SetSize(220, 154)
+npcPopup:SetSize(220, 184)
 npcPopup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 npcPopup:SetFrameStrata("DIALOG")
 npcPopup:SetMovable(true)
@@ -571,8 +571,65 @@ for i = 1, 4 do
 end
 local npcInitEB, npcHpEB, npcMpEB, npcEndEB = npcStatFields[1], npcStatFields[2], npcStatFields[3], npcStatFields[4]
 
+-- Connecteur : lie ce PNJ à une créature précise en jeu (son GUID, pas son
+-- nom — plusieurs créatures peuvent s'appeler pareil). À son tour, l'hôte la
+-- cible automatiquement (voir C:TargetLinkedNPC dans Core.lua).
+local selectedNpcLink = nil
+
+local npcLinkBtn = UI.CreatePanelButton(npcPopup, 92, 20, "Lier la cible")
+npcLinkBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -124)
+
+local npcLinkTxt = npcPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+npcLinkTxt:SetPoint("LEFT", npcLinkBtn, "RIGHT", 6, 0)
+npcLinkTxt:SetPoint("RIGHT", npcPopup, "RIGHT", -26, 0)
+npcLinkTxt:SetJustifyH("LEFT")
+npcLinkTxt:SetWordWrap(false)
+
+local npcUnlinkBtn = UI.CreateCloseButton(npcPopup, nil)
+npcUnlinkBtn:ClearAllPoints()
+npcUnlinkBtn:SetPoint("RIGHT", npcPopup, "RIGHT", -8, 0)
+npcUnlinkBtn:SetPoint("TOP", npcLinkBtn, "TOP", 0, -3)
+npcUnlinkBtn:SetSize(14, 14)
+
+local function RefreshNpcLink()
+    if selectedNpcLink then
+        npcLinkTxt:SetText("Lié : " .. (selectedNpcLink.name or "?"))
+        npcLinkTxt:SetTextColor(unpack(UI.colors.title))
+        npcUnlinkBtn:Show()
+    else
+        npcLinkTxt:SetText("Non lié")
+        npcLinkTxt:SetTextColor(unpack(UI.colors.textMuted))
+        npcUnlinkBtn:Hide()
+    end
+end
+
+npcLinkBtn:SetScript("OnClick", function()
+    local guid = UnitGUID("target")
+    if not guid or UnitIsPlayer("target") or not guid:match("^Creature") and not guid:match("^Vehicle") then
+        if ShowImpactStatus then ShowImpactStatus("Ciblez d'abord le PNJ en jeu") end
+        return
+    end
+    selectedNpcLink = { guid = guid, name = UnitName("target") }
+    if not npcNameEB:GetText():match("%S") then npcNameEB:SetText(selectedNpcLink.name or "") end
+    RefreshNpcLink()
+end)
+npcLinkBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("Lier à la cible actuelle", unpack(UI.colors.title))
+    GameTooltip:AddLine("Ciblez le PNJ en jeu puis cliquez : à son tour, il sera ciblé automatiquement.", unpack(UI.colors.textMuted))
+    GameTooltip:AddLine("Le lien suit la créature exacte (GUID), pas son nom.", unpack(UI.colors.textMuted))
+    if selectedNpcLink then GameTooltip:AddLine(selectedNpcLink.guid, .6, .6, .6) end
+    GameTooltip:Show()
+end)
+npcLinkBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+npcUnlinkBtn:SetScript("OnClick", function()
+    selectedNpcLink = nil
+    RefreshNpcLink()
+end)
+RefreshNpcLink()
+
 local npcAddConfirmBtn = UI.CreatePanelButton(npcPopup, 200, 22, "Ajouter le PNJ")
-npcAddConfirmBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -124)
+npcAddConfirmBtn:SetPoint("TOPLEFT", npcPopup, "TOPLEFT", 10, -154)
 
 local editingNpcId
 local function CloseNpcPopup()
@@ -582,6 +639,8 @@ local function CloseNpcPopup()
     npcNameEB:SetText("")
     selectedNpcIcon = nil
     npcIconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    selectedNpcLink = nil
+    RefreshNpcLink()
 end
 
 local npcPopupCloseBtn = UI.CreateCloseButton(npcPopup, function() CloseNpcPopup() end)
@@ -597,9 +656,9 @@ npcAddConfirmBtn:SetScript("OnClick", function()
         local editing=editingNpcId~=nil
         local added
         if editing then
-            added=C:UpdateNPC(editingNpcId,name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon)
+            added=C:UpdateNPC(editingNpcId,name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon,selectedNpcLink)
         else
-            added=C:AddNPC(name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon)
+            added=C:AddNPC(name,init,npcHpEB:GetText(),npcMpEB:GetText(),npcEndEB:GetText(),selectedNpcIcon,selectedNpcLink)
         end
         if added then
             CloseNpcPopup()
@@ -626,6 +685,8 @@ local function FillNpcPopup(prefill)
     npcEndEB:SetText(prefill.endurance ~= nil and tostring(prefill.endurance) or "")
     selectedNpcIcon = prefill.icon
     npcIconTex:SetTexture(prefill.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    selectedNpcLink = prefill.link
+    RefreshNpcLink()
 end
 
 local function OpenNpcPopup(prefill,editId)
@@ -664,7 +725,7 @@ local function RefreshCombatControls()
     combatToggleBtn:SetText(active and "Fin de combat" or "Début de combat")
     RefreshCombatTint(false)
     local phase = C.initiative.phase
-    nextTurnBtn:SetText(phase == "resolve_start" and "Valider les états" or phase == "round_end" and "Fin de tour…" or phase == "transition" and "Changement de tour…" or C.initiative._roundTransition and "Transition de tour…" or "Joueur suivant")
+    nextTurnBtn:SetText(phase == "setup" and "Lancer le combat" or phase == "resolve_start" and "Valider les états" or phase == "round_end" and "Fin de tour…" or phase == "transition" and "Changement de tour…" or C.initiative._roundTransition and "Transition de tour…" or "Joueur suivant")
     nextTurnBtn:SetEnabled(active and hasParticipants and not C.initiative._roundTransition)
     nextTurnBtn:SetAlpha((active and hasParticipants) and 1 or 0.45)
     addNpcBtn:SetAlpha(active and 1 or 0.45)
@@ -1023,8 +1084,12 @@ local function NpcRow(parent, npcId)
 
     function row:SetSelected(selected) row:SetCardSelected(selected) end
 
+    -- Un clic sélectionne le PNJ pour l'Action du MJ et, s'il est lié à une
+    -- créature en jeu (voir le connecteur du popup), la cible aussi.
     row:SetScript("PostClick", function()
         if SelectPlayerForImpact then SelectPlayerForImpact(row.npcId) end
+        local p = C.initiative.isHost and FindNpcParticipant(row.npcId)
+        if p and p.link then C:TargetLinkedNPC(p) end
     end)
 
     local iconTex = row:CreateTexture(nil, "ARTWORK")
@@ -1109,7 +1174,7 @@ local function NpcRow(parent, npcId)
         local p=FindNpcParticipant(row.npcId)
         if not p or not C.initiative.isHost then return end
         GameTooltip:Hide()
-        OpenNpcPopup({name=p.name,initiative=p.initiative,icon=p.icon,
+        OpenNpcPopup({name=p.name,initiative=p.initiative,icon=p.icon,link=p.link,
             hp=p.hp and p.hp.max,mana=p.mana and p.mana.max,endurance=p.endurance and p.endurance.max},p.id)
     end)
     row.editBtn=editBtn
@@ -1284,7 +1349,7 @@ TogglePnjPanel = function()
 end
 
 RefreshTurnHighlights = function()
-    local cur = C.initiative.active and C.initiative.participants[C.initiative.currentIndex]
+    local cur = C.initiative.active and C.initiative.phase ~= "setup" and C.initiative.participants[C.initiative.currentIndex]
     for name, row in pairs(rows) do
         if row.SetTurn then row:SetTurn(cur and cur.kind == "player" and cur.id == name) end
     end

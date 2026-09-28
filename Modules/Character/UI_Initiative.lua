@@ -1424,7 +1424,7 @@ local function Rebuild()
             card:SetPoint("TOPLEFT", header, "BOTTOMLEFT", x, -5)
             card:Refresh(p, p == current and (not phase or phase == "play"))
             card:Show()
-            if p==current then activeX=x end
+            if p==current and phase~="setup" then activeX=x end
             x = x + CARD_W + CARD_GAP
         end
     end

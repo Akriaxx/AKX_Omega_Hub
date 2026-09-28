@@ -80,6 +80,21 @@ assert(decoded.offensive.Slash.description=='a:b|c\\n{{rouge}}hit{{/}}')
 assert(not C.SkillLibraryCodec.Decode(payload..'garbage'))
 assert(not C.SkillLibraryCodec.Decode('999999:x'))
 C:ToggleSkillsBuilder();assert(CharacterSkillsBuilder:IsShown())
+do
+ local originalCursor=GetCursorPosition
+ local cx,cy=125,190
+ GetCursorPosition=function() return cx,cy end
+ local source={skillLinkRects={{key='charskill:index:Test',left=20,right=60,top=0,bottom=20}}}
+ function source:GetLeft() return 100 end
+ function source:GetTop() return 200 end
+ function source:GetEffectiveScale() return 1 end
+ assert(C.RichText.IsPointerOverLink(source,'charskill:index:Test'))
+ cx=180
+ assert(not C.RichText.IsPointerOverLink(source,'charskill:index:Test'),'leaving horizontally on the same line closes hover')
+ cx=125;source.skillLinkRects={}
+ assert(not C.RichText.IsPointerOverLink(source,'charskill:index:Test'),'redrawn text cannot retain stale hover')
+ GetCursorPosition=originalCursor
+end
 local form=CharacterSkillsBuilder.form;assert(not form:IsShown(),'formulaire caché hors édition')
 for _,o in ipairs(objects) do if o.kind=='Button' and o.text=='+ Nouvelle' then o.scripts.OnClick(o) end end
 assert(form:IsShown(),'visible pour une création')
@@ -88,7 +103,7 @@ assert(not form:IsShown(),'caché au changement d onglet')
 C:OpenSkillInBuilder('offensive','Slash');assert(form:IsShown(),'visible pour une modification')
 assert(C:SaveSkill('base',nil,'Action de Déplacement','',''));assert(C:SaveSkill('base',nil,'Esquive','',''))
 local desc
-for _,o in ipairs(objects) do if o.kind=='EditBox' and o.scripts.OnTabPressed then desc=o end end
+for _,o in ipairs(objects) do if o.kind=='EditBox' and o.scripts.OnTabPressed and o.scripts.OnCursorChanged then desc=o end end
 assert(desc);desc.cursor=0
 function desc:HasFocus() return true end
 function desc:GetCursorPosition() return self.cursor end
@@ -113,9 +128,46 @@ assert(C:SaveSkill('index',nil,'[[#ac8b74]]Arme à distance[[/]]','',''))
 assert(C:RenderSkillText('{{Index : Arme à distance}}')=='|Hcharskill:index:Arme à distance|h|cffac8b74[|r|cffac8b74Arme à distance|r|cffac8b74]|r|h','lien à la couleur du nom')
 do local out=C:RenderSkillText('{{Index : Arme à distance}} suite');local _,opens=out:gsub('|c','');local _,closes=out:gsub('|r','');assert(opens==closes,'couleurs équilibrées') end
 assert(C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary())).index.Garde.description=='Posture')
-local triangle=0;for _,o in ipairs(objects) do if o.cat and o.back then triangle=triangle+1;assert(o.cat.key~='index','pas de bouton Index dans le triangle') end end;assert(triangle==5,triangle)
+local triangle=0;for _,o in ipairs(objects) do if o.cat and o.back then triangle=triangle+1;assert(o.cat.key~='index','pas de bouton Index dans le triangle') end end;assert(triangle==7,triangle)
 typeText('');typeText('{{Action : char');desc.scripts.OnTabPressed(desc)
 assert(desc.text=='{{Action : Charge}}',desc.text)
+local completion
+for _,o in ipairs(objects) do if o.valueInput then completion=o end end
+assert(completion,'optional quantity field')
+typeText('{{Action : char')
+completion.valueInput:SetText('3')
+desc.scripts.OnTabPressed(desc)
+assert(desc.text=='{{Action : 3 Charge}}',desc.text)
+typeText('')
+typeText('{{Action : char')
+completion.valueInput:SetText('(8)')
+desc.scripts.OnTabPressed(desc)
+assert(desc.text=='{{Action : (8) Charge}}',desc.text)
+local qtySkill,qtyPrefix,qtyTarget=C:ResolveNumberedSkillRef('base','(8) Charge')
+assert(qtySkill and qtyPrefix=='(8) ' and qtyTarget=='Charge')
+assert(C:RenderSkillText(desc.text):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):find('[(8) Charge]',1,true))
+typeText('')
+typeText('{{Action : (8) char');desc.scripts.OnTabPressed(desc)
+assert(desc.text=='{{Action : (8) Charge}}',desc.text)
+
+typeText('')
+typeText('{{Action : 2 char');desc.scripts.OnTabPressed(desc)
+assert(desc.text=='{{Action : 2 Charge}}',desc.text)
+assert(C:RenderSkillText('{{Action : 2 Charge}}'):find('|Hcharskill:base:Charge|h',1,true))
+assert(C:RenderSkillText('{{Action : 2 Charge}}'):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):find('[2 Charge]',1,true))
+do
+ local cat,skill,prefix,target=C:SkillTextOptions().resolveRef('Action','2 Charge')
+ assert(cat=='base' and skill and prefix=='2 ' and target=='Charge')
+ local parsed=C.RichText.Parse('{{Action : 2 Charge}}',C:SkillTextOptions())
+ local visible=''
+ for _,paragraph in ipairs(parsed) do for _,run in ipairs(paragraph.runs) do
+  visible=visible..run.text
+  if run.style.link then assert(run.style.link.name=='Charge') end
+ end end
+ assert(visible=='[2 Charge]',visible)
+end
+
+typeText('{{Action : Charge}}')
 assert(C:FindSkillRef('base','charge').name=='[[#ff8800]]Charge[[/]]')
 assert(C:RenderSkillText(desc.text)=='|Hcharskill:base:Charge|h|cffff8800[|r|cffff8800Charge|r|cffff8800]|r|h')
 C:ShowSkillTooltip(UIParent,{name='Source',description='Voir {{Action : Charge}}'})
@@ -135,7 +187,14 @@ flux.scripts.OnUpdate(flux,.1);local d=flux.dots[1].point;assert(d and d[2]==UIP
 links1.scripts.OnHyperlinkEnter(links1,'charskill:base:Charge')
 local card2=CharacterSkillCard2
 assert(card2:IsShown() and card2.title.text=='|cffff8800Charge|r',card2.title.text)
-assert(card2.level>card1.level and card2.point[2]==links1,'la référence s’ouvre à côté, au-dessus')
+assert(card2.level>card1.level and card2.point[2]==UIParent,'la référence s’ouvre à côté, au-dessus')
+-- A stale depth on card 2's content must open card 3, never anchor card 2 to itself.
+card2.content.cardDepth=1
+card2.content.scripts.OnHyperlinkEnter(card2.content,'charskill:base:Charge')
+assert(CharacterSkillCard3:IsShown() and CharacterSkillCard3.point[2]==UIParent)
+CharacterSkillCard3:Hide()
+card2.content.cardDepth=2
+
 -- Carte liée : s'ouvre en largeur (de gauche à droite quand la place est à droite).
 assert(card2.w==1 and card2.h==card2.content.h,'carte liée fermée au départ');card2.scripts.OnUpdate(card2,.3);assert(card2.w==card2.content.w)
 links1.scripts.OnHyperlinkLeave(links1);for _,fn in ipairs(timers) do fn() end
@@ -515,10 +574,20 @@ assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPress
 assert(sentUse and sentUse[1]==message and sentUse[2]=='RAID' and not composer:IsShown())
 assert(C:SaveSkill('grimoire',nil,'Codex','134400','Page du grimoire',true))
 assert(C:GetSkill('grimoire','Codex').usable)
+assert(C:SaveSkill('class',nil,'Classe Test','134400','Compétence de classe',true))
+assert(C:GetSkill('class','Classe Test').usable)
+assert(C:SaveSkill('movement',nil,'Pas rapide','134400','Avancer',true))
+assert(C.ActionFrames.cats.movement and C.ActionFrames.OFFSETS.movement[1]<0 and C.ActionFrames.OFFSETS.movement[2]<0)
+assert(C.ActionFrames.cats.class and C.ActionFrames.OFFSETS.class[1]==0 and C.ActionFrames.OFFSETS.class[2]<0)
 local grimoireRoundTrip=C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary()))
 assert(grimoireRoundTrip.grimoire.Codex.description=='Page du grimoire')
-assert(C.ActionFrames.cats.grimoire and C.ActionFrames.OFFSETS.grimoire[2]==-70)
-assert(C.ActionFrames.OFFSETS.ranged[2]==0 and C.ActionFrames.OFFSETS.defensive[2]==0)
+assert(grimoireRoundTrip.class['Classe Test'].description=='Compétence de classe')
+assert(grimoireRoundTrip.movement['Pas rapide'].description=='Avancer')
+assert(C.ActionFrames.cats.grimoire and C.ActionFrames.OFFSETS.grimoire[2]>0 and C.ActionFrames.OFFSETS.grimoire[1]==0)
+assert(C.ActionFrames.OFFSETS.ranged[1]>0 and C.ActionFrames.OFFSETS.ranged[2]>0)
+assert(C.ActionFrames.OFFSETS.offensive[1]<0 and C.ActionFrames.OFFSETS.offensive[2]>0)
+assert(C.ActionFrames.OFFSETS.defensive[1]>0 and C.ActionFrames.OFFSETS.defensive[2]<0)
+assert(C.ActionFrames.OFFSETS.base[1]==0 and C.ActionFrames.OFFSETS.base[2]==0)
 -- États : onglet de bibliothèque indicatif, comme l'Index, sans place dans Action.
 assert(C:SaveSkill('etats',nil,'Étourdi','134400','Ne peut pas agir'))
 assert(C.SkillLibraryCodec.Decode(C.SkillLibraryCodec.Encode(C:GetOwnedSkillLibrary())).etats['Étourdi'])

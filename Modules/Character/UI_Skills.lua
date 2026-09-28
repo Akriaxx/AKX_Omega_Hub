@@ -17,6 +17,8 @@ C.SKILL_CATEGORIES = {
     { key = "defensive", label = "Compétence Défensive",  tag = "Défensive", aliases = { "defensive", "défensive" } },
     { key = "ranged",    label = "Compétence à Distance", tag = "Distance",  aliases = { "distance" } },
     { key = "grimoire", label = "Grimoire", tag = "Grimoire", aliases = { "grimoire" } },
+    { key = "class", label = "Classe", tag = "Classe", aliases = { "classe", "class" } },
+    { key = "movement", label = "Déplacement", tag = "Déplacement", aliases = { "déplacement", "deplacement", "movement", "Déplacement" } },
     -- Index : fiches consultables par référence {{Index : Nom}} et dans le
     -- builder, mais sans bouton dans le triangle du bouton Action.
     { key = "index",     label = "Index",                 tag = "Index",     aliases = { "index" }, hidden = true },
@@ -378,7 +380,8 @@ function C:SkillTextOptions()
         resolveRef = function(tag, name)
             local cat = ResolveCategoryByTag(tag)
             if not cat then return end
-            return cat.key, C:FindSkillRef(cat.key, name)
+            local skill,prefix,target=C:ResolveNumberedSkillRef(cat.key,name)
+            return cat.key,skill,prefix,target
         end,
     }
     return skillTextOptions
@@ -398,6 +401,17 @@ function C:FindSkillRef(catKey, name)
     end
 end
 
+-- A leading quantity belongs to the visible link, not to its target.
+-- Exact names win, including entries whose real names start with a number.
+function C:ResolveNumberedSkillRef(catKey,name)
+    local skill=self:FindSkillRef(catKey,name)
+    if skill then return skill,"",name end
+    local quantity,target=name:match("^%s*(%d+)%s+(.+)$")
+    if not quantity then quantity,target=name:match("^%s*(%(%d+%))%s+(.+)$") end
+    if quantity then return self:FindSkillRef(catKey,target),quantity.." ",target end
+    return nil,"",name
+end
+
 function C:RenderSkillText(text)
     text = RenderColors(tostring(text or ""))
     text = text:gsub("{{%s*([^:{}]-)%s*:%s*([^{}]-)%s*}}", function(tag, name)
@@ -405,15 +419,15 @@ function C:RenderSkillText(text)
         if not cat then return "{{" .. tag .. " : " .. name .. "}}" end
         -- Le lien reprend la couleur du nom en base s'il en a une (la
         -- première, crochets compris), sinon le bleu des liens.
-        local skill = C:FindSkillRef(cat.key, name)
+        local skill,prefix,target = C:ResolveNumberedSkillRef(cat.key, name)
         local hex = skill and tostring(skill.name):match("%[%[%s*#(%x%x%x%x%x%x)%s*%]%]")
         if hex then
             local color = "|cff" .. hex
             -- Chaque |c doit avoir son |r : le client empile les couleurs, et
             -- une couleur non refermée teinterait tout le texte qui suit.
-            return "|Hcharskill:" .. cat.key .. ":" .. name .. "|h" .. color .. "[|r" .. RenderColors(skill.name) .. color .. "]|r|h"
+            return "|Hcharskill:" .. cat.key .. ":" .. target .. "|h" .. color .. "[|r" .. (prefix~="" and color..prefix.."|r" or "") .. RenderColors(skill.name) .. color .. "]|r|h"
         end
-        return "|Hcharskill:" .. cat.key .. ":" .. name .. "|h|cff8fd6ff[" .. name .. "]|r|h"
+        return "|Hcharskill:" .. cat.key .. ":" .. target .. "|h|cff8fd6ff[" .. name .. "]|r|h"
     end)
     return text
 end
@@ -458,8 +472,23 @@ local function CheckCards()
         if card:IsShown() then
             local source = card.source
             local sourceGone = not source or not source:IsVisible()
+            if not sourceGone and card.linkSide then
+                local ratio=source:GetEffectiveScale()/UIParent:GetEffectiveScale()
+                local top=source:GetTop()
+                local edge=card.linkSide=="RIGHT" and source:GetRight() or source:GetLeft()
+                if top and edge then
+                    local right=card.linkSide=="RIGHT"
+                    card:ClearAllPoints()
+                    card:SetPoint(right and "LEFT" or "RIGHT",UIParent,"BOTTOMLEFT",
+                        edge*ratio+(right and LINK_GAP or -LINK_GAP),top*ratio+(card.linkOffset or -card.content:GetHeight()/2))
+                end
+            end
             local onLink = card.linkHovered and source and source:IsMouseOver()
                 and math.abs(CursorY() - (CardLinkY(card) or CursorY())) <= LINK_LINE_TOLERANCE
+            if source and source.skillLinkRects then
+                onLink=not sourceGone and source:IsMouseOver()
+                    and C.RichText.IsPointerOverLink(source,card.sourceLink)
+            end
             if sourceGone or (not onLink and not card:IsMouseOver() and not (deeper and deeper:IsShown())) then
                 card:Hide()
             end
@@ -479,18 +508,31 @@ cardWatcher:SetScript("OnUpdate", function(self, elapsed)
     if not (cards[2] and cards[2]:IsShown()) then self:Hide() end
 end)
 
+local function LinkedCardDepth(source)
+    local depth=source.cardDepth or 1
+    local parent=source
+    while parent do
+        for i,card in ipairs(cards) do
+            if parent==card then depth=math.max(depth,i) end
+        end
+        parent=parent:GetParent()
+    end
+    return depth+1
+end
+
 local function OnSkillLinkEnter(self, link)
     local kind, catKey, name = link:match("^(%a+):([^:]+):(.+)$")
     if kind ~= "charskill" then return end
-    local depth = (self.cardDepth or 1) + 1
+    local depth = LinkedCardDepth(self)
     if depth > MAX_CARDS then return end
     local skill = C:FindSkillRef(catKey, name)
     ShowCard(depth, self, skill or { name = name, missing = true })
     cards[depth].linkHovered = true
+    cards[depth].sourceLink = link
 end
 
 local function OnSkillLinkLeave(self)
-    local card = cards[(self.cardDepth or 1) + 1]
+    local card = cards[LinkedCardDepth(self)]
     if card then card.linkHovered = false end
     C_Timer.After(.15, CheckCards)
 end
@@ -846,17 +888,19 @@ function ShowCard(depth, anchor, skill)
     if depth == 1 then
         card:SetPoint("BOTTOM", anchor, "TOP", 0, LINK_GAP)
     else
-        local right = anchor:GetRight() or 0
+        local right,top = ToUI(anchor,anchor:GetRight() or 0,anchor:GetTop() or 0)
+        local left = ToUI(anchor,anchor:GetLeft() or 0,0)
         local screen = UIParent:GetRight() or 0
         -- Centrée sur la hauteur du lien survolé : le flux arrive au milieu
         -- de son bord (l'écran la garde entière, SetClampedToScreen).
         local dy = card.linkOffset or -height / 2
         if right + LINK_GAP + width <= screen then
-            card:SetPoint("LEFT", anchor, "TOPRIGHT", LINK_GAP, dy); side = "RIGHT"
+            card:SetPoint("LEFT", UIParent, "BOTTOMLEFT", right + LINK_GAP, top + dy); side = "RIGHT"
         else
-            card:SetPoint("RIGHT", anchor, "TOPLEFT", -LINK_GAP, dy); side = "LEFT"
+            card:SetPoint("RIGHT", UIParent, "BOTTOMLEFT", left - LINK_GAP, top + dy); side = "LEFT"
         end
     end
+    card.linkSide=depth>1 and side or nil
     card:Show()
     PlayOpen(card, width, height, side)
     return card
@@ -1189,7 +1233,7 @@ end
 -- "{{Act" propose les catégories ; "{{Action : " (ou "{{Action:") propose
 -- les compétences de la catégorie, filtrées par ce qui est tapé après les
 -- deux-points. Clic ou Tab insère "{{Action : Nom}}". Échap ferme la liste.
-local AC_ROWS, AC_ROW_H, AC_W = 8, 22, 240
+local AC_ROWS, AC_ROW_H, AC_W = math.max(8, #CATEGORIES), 22, 240
 local autocomplete
 
 local function MatchesTag(cat, typed)
@@ -1209,14 +1253,20 @@ local function ReadRefContext(editBox)
     local start = before:match(".*(){{")
     if not start then return end
     local fragment = before:sub(start + 2)
+    local quantity,rest=fragment:match("^%s*(%d+)%s+(.*)$")
+    if not quantity then quantity,rest=fragment:match("^%s*(%(%d+%))%s+(.*)$") end
+    if quantity then fragment=rest end
     if fragment:find("[{}\n]") then return end
     local tag, partial = fragment:match("^%s*([^:]-)%s*:%s*(.*)$")
     if tag then
         local cat = ResolveCategoryByTag(tag)
         if not cat then return end
-        return { start = start, cursor = cursor, cat = cat, partial = partial }
+        local n,remaining=partial:match("^%s*(%d+)%s+(.*)$")
+        if not n then n,remaining=partial:match("^%s*(%(%d+%))%s+(.*)$") end
+        if n then quantity=n;partial=remaining end
+        return { start = start, cursor = cursor, cat = cat, partial = partial, prefix=quantity and quantity.." " or "" }
     end
-    return { start = start, cursor = cursor, partial = fragment:match("^%s*(.*)$") }
+    return { start = start, cursor = cursor, partial = fragment:match("^%s*(.*)$"), prefix=quantity and quantity.." " or "" }
 end
 
 local function BuildAutocomplete(editBox, owner)
@@ -1227,9 +1277,26 @@ local function BuildAutocomplete(editBox, owner)
     ac:EnableMouse(true)
     ac:Hide()
     local bg = ac:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(); UI.ApplyWindowBackground(bg, 0.98)
+    bg:SetPoint("TOPLEFT", 5, -5)
+    bg:SetPoint("BOTTOMRIGHT", -5, 5)
+    bg:SetColorTexture(.025, .035, .05, 1)
     UI.ApplyBorder(ac)
 
+    local valueLabel=ac:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    valueLabel:SetPoint("TOPLEFT",10,-14)
+    valueLabel:SetText("Valeur (facultatif)")
+    UI.ApplyMutedText(valueLabel)
+    local valueInput=UI.CreateStyledEditBox(ac,64,24)
+    valueInput:SetPoint("TOPRIGHT",-10,-8)
+    valueInput:SetAutoFocus(false)
+    valueInput:SetNumeric(false)
+    valueInput:SetMaxLetters(11)
+    ac.valueInput=valueInput
+    local function ValuePrefix()
+        local value=valueInput:GetText() or ""
+        value=value:match("^%s*(.-)%s*$")
+        return (value:match("^%d+$") or value:match("^%(%d+%)$")) and value.." " or ""
+    end
     local rows, entries, selected = {}, {}, 1
     local context, cursorX, cursorY, cursorH, dismissedStart = nil, 0, 0, 14, nil
 
@@ -1245,12 +1312,12 @@ local function BuildAutocomplete(editBox, owner)
         local after = text:sub(context.cursor + 1)
         local insert
         if entry.skill then
-            insert = "{{" .. context.cat.tag .. " : " .. C:StripSkillMarkup(entry.skill.name) .. "}}"
+            insert = "{{" .. context.cat.tag .. " : " .. ValuePrefix() .. C:StripSkillMarkup(entry.skill.name) .. "}}"
             -- Remplace aussi la fin d'une référence déjà fermée ("...Nom}}").
             local tail = after:match("^[^{}\n]*}}")
             if tail then after = after:sub(#tail + 1) end
         else
-            insert = "{{" .. entry.cat.tag .. " : "
+            insert = "{{" .. entry.cat.tag .. " : " .. ValuePrefix()
         end
         local head = text:sub(1, context.start - 1) .. insert
         editBox:SetText(head .. after)
@@ -1262,8 +1329,8 @@ local function BuildAutocomplete(editBox, owner)
     for i = 1, AC_ROWS do
         local row = CreateFrame("Button", nil, ac)
         row:SetHeight(AC_ROW_H)
-        row:SetPoint("TOPLEFT", ac, "TOPLEFT", 3, -3 - (i - 1) * AC_ROW_H)
-        row:SetPoint("RIGHT", ac, "RIGHT", -3, 0)
+        row:SetPoint("TOPLEFT", ac, "TOPLEFT", 12, -44 - (i - 1) * AC_ROW_H)
+        row:SetPoint("TOPRIGHT", ac, "TOPRIGHT", -12, -44 - (i - 1) * AC_ROW_H)
         row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints()
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(18, 18); row.icon:SetPoint("LEFT", 2, 0)
@@ -1294,7 +1361,12 @@ local function BuildAutocomplete(editBox, owner)
     end
 
     function ac.Refresh()
-        context = editBox:HasFocus() and ReadRefContext(editBox) or nil
+        local previous=context
+        if editBox:HasFocus() then context=ReadRefContext(editBox)
+        elseif not valueInput:HasFocus() then context=nil end
+        if context and (not previous or context.start~=previous.start or not ac:IsShown()) then
+            valueInput:SetText((context.prefix or ""):match("^%s*(.-)%s*$") or "")
+        end
         if not context or context.start ~= dismissedStart then dismissedStart = nil end
         entries = context and not dismissedStart and Collect() or {}
         if #entries == 0 then ac:Hide(); return end
@@ -1304,7 +1376,7 @@ local function BuildAutocomplete(editBox, owner)
             if entry then
                 if entry.skill then
                     row.icon:SetTexture(C:ResolveIconValue(entry.skill.icon))
-                    row.text:SetText(C:RenderSkillName(entry.skill.name))
+                    row.text:SetText(ValuePrefix()..C:RenderSkillName(entry.skill.name))
                 else
                     row.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
                     row.text:SetText(entry.cat.tag .. "  |cff808080" .. entry.cat.label .. "|r")
@@ -1314,13 +1386,23 @@ local function BuildAutocomplete(editBox, owner)
                 row:Hide()
             end
         end
-        ac:SetHeight(6 + math.min(#entries, AC_ROWS) * AC_ROW_H)
+        ac:SetHeight(56 + math.min(#entries, AC_ROWS) * AC_ROW_H)
         ac:ClearAllPoints()
-        ac:SetPoint("TOPLEFT", editBox, "TOPLEFT", math.min(cursorX, editBox:GetWidth() - AC_W), cursorY - cursorH - 2)
+        -- Anchor outside the entire editor viewport, never over the typed text.
+        local viewport=editBox:GetParent()
+        local bottom=viewport:GetBottom()
+        if bottom and bottom<ac:GetHeight()+12 then
+            ac:SetPoint("BOTTOMLEFT",viewport,"TOPLEFT",0,8)
+        else
+            ac:SetPoint("TOPLEFT",viewport,"BOTTOMLEFT",0,-8)
+        end
         Paint()
         ac:Show()
     end
 
+    valueInput:SetScript("OnEnterPressed",function() editBox:SetFocus();ac.AcceptSelected() end)
+    valueInput:SetScript("OnTabPressed",function() editBox:SetFocus() end)
+    valueInput:SetScript("OnEscapePressed",function() ac.Dismiss();editBox:SetFocus() end)
     function ac.SetCursor(x, y, h) cursorX, cursorY, cursorH = x or 0, y or 0, h or 14 end
     function ac.Dismiss() dismissedStart = context and context.start; ac:Hide() end
     function ac.AcceptSelected() Accept(entries[selected]) end
@@ -1585,10 +1667,17 @@ local function Build()
     -- indicatives (Index, États), un losange à la place du filet (même
     -- espacement partout, seul l'ornement marque la séparation).
     tabButtons = {}
-    local tabW = (PANEL_W - 20) / #CATEGORIES
+    local tabOrder={}
+    for _,key in ipairs({"base","offensive","ranged","defensive","movement","class","grimoire"}) do
+        for _,cat in ipairs(CATEGORIES) do
+            if cat.key==key then tabOrder[#tabOrder+1]=cat;break end
+        end
+    end
+    for _,cat in ipairs(CATEGORIES) do if cat.hidden then tabOrder[#tabOrder+1]=cat end end
+    local tabW = (PANEL_W - 20) / #tabOrder
     local tabX, reach = 10, 0
-    for i, cat in ipairs(CATEGORIES) do
-        if i > 1 and cat.hidden and not CATEGORIES[i - 1].hidden then
+    for i, cat in ipairs(tabOrder) do
+        if i > 1 and cat.hidden and not tabOrder[i - 1].hidden then
             local cx = tabX - 1
             for _, dy in ipairs({ -10, 10 }) do
                 local line = panel:CreateTexture(nil, "ARTWORK")
@@ -1612,7 +1701,7 @@ local function Build()
         tabX = tabX + tabW
         btn.cat = cat
         local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetAllPoints(); label:SetJustifyH("CENTER"); label:SetText(cat.tag=="Action" and "Actions de base" or cat.tag)
+        label:SetAllPoints(); label:SetJustifyH("CENTER"); label:SetText(cat.tag=="Action" and "Base" or cat.tag)
         local line = btn:CreateTexture(nil, "ARTWORK")
         line:SetPoint("BOTTOMLEFT", -reach, 0); line:SetPoint("BOTTOMRIGHT"); line:SetHeight(2); reach = 0
         btn.label, btn.line = label, line
@@ -2313,7 +2402,7 @@ local function Build()
     descEB:HookScript("OnTextChanged",autocomplete.Refresh)
     descEB:HookScript("OnCursorChanged",function(_,x,y,_,height) autocomplete.SetCursor(x,y,height);autocomplete.Refresh() end)
     descEB:HookScript("OnEditFocusGained",autocomplete.Refresh)
-    descEB:HookScript("OnEditFocusLost",function() C_Timer.After(0,function() if not autocomplete:IsMouseOver() then autocomplete:Hide() end end) end)
+    descEB:HookScript("OnEditFocusLost",function() C_Timer.After(0,function() if not autocomplete:IsMouseOver() and not autocomplete.valueInput:HasFocus() then autocomplete:Hide() end end) end)
     descEB:SetScript("OnTabPressed",function() if autocomplete:IsShown() then autocomplete.AcceptSelected() end end)
     descEB:SetScript("OnEscapePressed",function(self) if autocomplete:IsShown() then autocomplete.Dismiss() else self:ClearFocus() end end)
     previewViewport:SetScript("OnMouseWheel",function(self,d) self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-d*18))) end)

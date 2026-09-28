@@ -1,6 +1,6 @@
 const fs=require('fs'),cp=require('child_process');
 const s=fs.readFileSync('Modules/Character/Core.lua','utf8');
-const fn=s.slice(s.indexOf('function C:UpdateNPC('),s.indexOf('-- Même mécanique que C:Delta'));
+const fn=s.slice(s.indexOf('function C:UpdateNPC('),s.indexOf('-- ── Lien PNJ'));
 const lua=`
 local p={id='n',kind='npc',hp={cur=7,max=10,temp=2},mana={cur=3,max=5},endurance={cur=9,max=10}}
 local C={initiative={active=true,isHost=true,currentIndex=1,participants={p}}}

@@ -386,7 +386,9 @@ local function SortParticipants(list)
     -- l'index sur quelqu'un d'autre (et "tour suivant" partirait du mauvais
     -- participant, ex. le dernier de la liste au lieu de boucler sur le 1er).
     local st = C.initiative
-    local current = (list == st.participants) and list[st.currentIndex] or nil
+    -- Phase "setup" (inscription des initiatives, avant le 1er tour) : aucun
+    -- tour en cours à préserver, le 1er de la liste triée sera le premier à jouer.
+    local current = (list == st.participants) and st.phase ~= "setup" and list[st.currentIndex] or nil
     table.sort(list, function(a, b)
         if a.initiative ~= b.initiative then return a.initiative > b.initiative end
         return (a.name or "") < (b.name or "")
@@ -531,7 +533,7 @@ local function UnpackInitiative(payload)
     end
 
     local phase = t[idx]
-    C.initiative.phase = (phase == "resolve_start" or phase == "resolution_end" or phase == "counter_focus" or phase == "round_end" or phase == "transition" or phase == "round_start") and phase or "play"
+    C.initiative.phase = (phase == "setup" or phase == "resolve_start" or phase == "resolution_end" or phase == "counter_focus" or phase == "round_end" or phase == "transition" or phase == "round_start") and phase or "play"
     C.initiative.active       = active
     C.initiative.currentIndex = currentIndex
     C.initiative.round        = round
@@ -610,7 +612,7 @@ function C:StartCombat()
     C.initiative.isHost       = true
     C.initiative.active       = false
     C.initiative.currentIndex = 1
-    C.initiative.phase = "play"
+    C.initiative.phase = "setup"
     C.initiative._pendingRound = nil
     C.initiative.round        = 1
     C.initiative._roundTransition = true
@@ -648,7 +650,7 @@ end
 
 local DEFAULT_NPC_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-function C:AddNPC(name, initiative, hp, mana, endurance, icon)
+function C:AddNPC(name, initiative, hp, mana, endurance, icon, link)
     if not C.initiative.isHost or not C.initiative.active then return false end
     name = tostring(name or ""):match("^%s*(.-)%s*$") or ""
     if name == "" then return false end
@@ -664,6 +666,7 @@ function C:AddNPC(name, initiative, hp, mana, endurance, icon)
         initiative = math.floor(tonumber(initiative) or 0),
         creator    = MyName(),
         icon       = icon,
+        link       = link,
         hp         = { cur = hpMax,  max = hpMax,  temp = 0 },
         mana       = { cur = mpMax,  max = mpMax,  temp = 0 },
         endurance  = { cur = endMax, max = endMax, temp = 0 },
@@ -675,7 +678,7 @@ function C:AddNPC(name, initiative, hp, mana, endurance, icon)
 end
 
 -- Edit in place: keep identity, attached effects and the current participant.
-function C:UpdateNPC(id,name,initiative,hp,mana,endurance,icon)
+function C:UpdateNPC(id,name,initiative,hp,mana,endurance,icon,link)
     if not self.initiative.isHost or not self.initiative.active then return false end
     local p=FindNPC(id);if not p then return false end
     name=tostring(name or ""):match("^%s*(.-)%s*$")
@@ -684,7 +687,7 @@ function C:UpdateNPC(id,name,initiative,hp,mana,endurance,icon)
     if name=="" or not init or not values.hp or not values.mana or not values.endurance then return false end
     for _,value in pairs(values) do if value<0 then return false end end
     local current=self.initiative.participants[self.initiative.currentIndex]
-    p.name=name;p.initiative=math.floor(init);p.icon=icon or p.icon
+    p.name=name;p.initiative=math.floor(init);p.icon=icon or p.icon;p.link=link
     for stat,value in pairs(values) do
         local resource=p[stat] or {cur=0,temp=0}
         resource.max=math.floor(value)
@@ -700,6 +703,103 @@ function C:UpdateNPC(id,name,initiative,hp,mana,endurance,icon)
     BroadcastInitiative()
     if self.OnInitiativeChanged then self.OnInitiativeChanged() end
     return true
+end
+
+-- ── Lien PNJ ↔ créature en jeu ───────────────────────────────────────────────
+-- `p.link = { guid, name }` est capturé depuis la cible du MJ (popup PNJ) et
+-- reste purement local à l'hôte : PackInitiative ne l'envoie pas, et l'hôte
+-- ignore ses propres diffusions, donc il survit aux rediffusions. Plusieurs
+-- créatures peuvent porter le même nom (4 « Serena ») : seul le GUID les
+-- distingue. TargetUnit est protégé ; C_Epsilon.RunPrivileged (client
+-- Epsilon, déjà utilisé par Arcanum) permet de l'appeler hors clic.
+local function RunPrivileged(script)
+    if not (C_Epsilon and type(C_Epsilon.RunPrivileged) == "function") then return false end
+    return (pcall(C_Epsilon.RunPrivileged, script))
+end
+
+-- Unités dont le client connaît le GUID : il n'existe pas de « cibler par
+-- GUID », on cherche donc un jeton d'unité qui pointe sur la bonne créature.
+local function FindUnitTokenByGUID(guid)
+    local tokens = { "target", "mouseover", "focus", "targettarget" }
+    for i = 1, 40 do tokens[#tokens + 1] = "nameplate" .. i end
+    for i = 1, 4 do tokens[#tokens + 1] = "party" .. i .. "target" end
+    for i = 1, 40 do tokens[#tokens + 1] = "raid" .. i .. "target" end
+    for _, unit in ipairs(tokens) do
+        if UnitGUID(unit) == guid then return unit end
+    end
+end
+
+-- Plusieurs créatures peuvent porter le même nom et le MJ observe souvent
+-- la scène de loin (en l'air) : le Tab et les nameplates ne portent pas assez
+-- loin, alors que le ciblage par nom marche à toute distance d'affichage et
+-- passe à l'homonyme suivant à chaque appel. On le répète donc, une fois par
+-- frame (enchaîné dans la même frame, le cycle n'avance pas), jusqu'à tomber
+-- sur le bon GUID ; puis Tab en complément si le MJ est proche.
+local SEARCH_NAME_TRIES, SEARCH_TAB_TRIES = 12, 20
+
+local linkSearch  -- recherche en cours : une nouvelle l'annule
+local linkSearchFrame = CreateFrame("Frame")
+linkSearchFrame:Hide()
+
+local function EndLinkSearch(found)
+    local search = linkSearch
+    linkSearch = nil
+    linkSearchFrame:Hide()
+    if not search or found then return end
+    if search.name and search.name ~= "" then
+        RunPrivileged(string.format("TargetUnit(%q, true)", search.name))
+    end
+    OmegaHub.Print("|cffFF4444Character :|r " .. (search.name or "PNJ") .. " lié introuvable — cible par nom.")
+end
+
+linkSearchFrame:SetScript("OnUpdate", function()
+    local search = linkSearch
+    if not search then linkSearchFrame:Hide(); return end
+    if UnitGUID("target") == search.guid then return EndLinkSearch(true) end
+
+    local unit = FindUnitTokenByGUID(search.guid)
+    if unit then
+        RunPrivileged(string.format("TargetUnit(%q)", unit))
+        if UnitGUID("target") == search.guid then return EndLinkSearch(true) end
+    end
+
+    search.tries = search.tries + 1
+    if search.tries <= SEARCH_NAME_TRIES and search.name and search.name ~= "" then
+        RunPrivileged(string.format("TargetUnit(%q, true)", search.name))
+    elseif search.tries <= SEARCH_NAME_TRIES + SEARCH_TAB_TRIES then
+        RunPrivileged(search.tries % 2 == 1 and "TargetNearestFriend()" or "TargetNearestEnemy()")
+    else
+        return EndLinkSearch(false)
+    end
+    if UnitGUID("target") == search.guid then EndLinkSearch(true) end
+end)
+
+-- Cible la créature liée au PNJ `p` (son GUID exact). Immédiat si le client
+-- la connaît déjà (nameplate, survol, focus…) ou si le premier ciblage par
+-- nom tombe dessus ; sinon recherche étalée sur quelques frames (plus haut).
+function C:TargetLinkedNPC(p)
+    local link = p and p.link
+    if not link or not link.guid then return false end
+    linkSearch = nil
+    if UnitGUID("target") == link.guid then return true end
+    if not (C_Epsilon and type(C_Epsilon.RunPrivileged) == "function") then
+        OmegaHub.Print("|cffFF4444Character :|r ciblage auto indisponible (C_Epsilon.RunPrivileged absent).")
+        return false
+    end
+
+    local unit = FindUnitTokenByGUID(link.guid)
+    if unit then
+        RunPrivileged(string.format("TargetUnit(%q)", unit))
+        if UnitGUID("target") == link.guid then return true end
+    end
+    if link.name and link.name ~= "" then
+        RunPrivileged(string.format("TargetUnit(%q, true)", link.name))
+        if UnitGUID("target") == link.guid then return true end
+    end
+
+    linkSearch = { guid = link.guid, name = link.name, tries = 0 }
+    linkSearchFrame:Show()
+    return false
 end
 
 -- Même mécanique que C:Delta / C:AddTemp pour un joueur, mais appliquée
@@ -1181,6 +1281,7 @@ local function ApplyTurnAdvance(idx, ending, roundAdvanced)
     TickStatusesFor(p, roundAdvanced)
     BroadcastInitiative()
     C:AnnounceCurrentTurn()
+    if p.kind == "npc" and p.link then C:TargetLinkedNPC(p) end
     TickEventsFor(p, roundAdvanced)
     if C.OnInitiativeChanged then C.OnInitiativeChanged() end
 end
@@ -1204,6 +1305,21 @@ function C:NextTurn()
     if C.initiative._roundTransition then return false end
     local n = #C.initiative.participants
     if n == 0 then return false end
+
+    -- Fin de l'inscription des initiatives : le combat démarre sur le premier
+    -- participant vivant de la liste triée (le plus haut), pas sur le premier
+    -- inscrit.
+    if C.initiative.phase == "setup" then
+        for i = 1, n do
+            local p = C.initiative.participants[i]
+            if p and IsParticipantAlive(p) then
+                C.initiative.phase = "play"
+                ApplyTurnAdvance(i, nil, false)
+                return true
+            end
+        end
+        return false
+    end
 
     -- Le tour de CE participant se termine à l'instant où on avance : c'est
     -- lui qu'ExpireStatusesFor doit nettoyer (voir TickStatusesFor), pas le

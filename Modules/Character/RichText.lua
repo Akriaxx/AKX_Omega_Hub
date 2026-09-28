@@ -101,9 +101,9 @@ local ParseInto
 -- Le nom d'une référence garde ses propres balises : seules les parties
 -- entre balises de couleur sont colorées. Les crochets prennent la couleur
 -- du nom (sa première) ; sans couleur du tout, tout le lien est bleu.
-local function EmitReference(state, paragraph, emit, catKey, displayName, skill, opts)
-    local link = { catKey = catKey, name = displayName }
-    local source = skill and skill.name or displayName
+local function EmitReference(state, paragraph, emit, catKey, displayName, skill, opts, prefix, target)
+    local link = { catKey = catKey, name = target or displayName }
+    local source = skill and ((prefix or "")..skill.name) or displayName
     local firstHex = source:match("%[%[%s*#(%x%x%x%x%x%x)%s*%]%]")
     local linkColor = not firstHex and RT.LINK_COLOR or nil
     local bracketColor = firstHex and HexColor(firstHex) or RT.LINK_COLOR
@@ -156,10 +156,10 @@ function ParseInto(text, state, paragraph, emit, opts, link, linkColor)
         elseif text:sub(pos, pos + 1) == "{{" then
             local tag, name, stop = text:match("^{{%s*([^:{}\n]-)%s*:%s*([^{}\n]-)%s*}}()", pos)
             if tag and not link and opts.resolveRef then
-                local catKey, skill = opts.resolveRef(tag, name)
+                local catKey, skill, prefix, target = opts.resolveRef(tag, name)
                 if catKey then
                     flush()
-                    EmitReference(state, paragraph, emit, catKey, name, skill, opts)
+                    EmitReference(state, paragraph, emit, catKey, name, skill, opts, prefix, target)
                     pos = stop
                     handled = true
                 end
@@ -390,6 +390,7 @@ local function NextTexture(pool, frame, layer)
 end
 
 function RT.Clear(frame)
+    frame.skillLinkRects={}
     local pool = frame.richText
     if not pool then return end
     for i = 1, #pool.strings do pool.strings[i]:Hide() end
@@ -442,6 +443,11 @@ function RT.Render(frame, text, width, opts, x, y)
                     fs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", px + dx, py)
                     return fs
                 end
+                if style.link then
+                    local rects=frame.skillLinkRects
+                    rects[#rects+1]={key="charskill:"..style.link.catKey..":"..style.link.name,
+                        left=px,right=px+piece.width,top=y+top,bottom=y+top+line.height}
+                end
                 local fs = draw(0)
                 if fakeBold then draw(1) end
                 if style.bg then
@@ -470,4 +476,18 @@ function RT.Render(frame, text, width, opts, x, y)
         end
     end
     return maxWidth, top
+end
+
+
+-- Test the actual glyph runs, including wrapped and formatted links.
+function RT.IsPointerOverLink(frame,key)
+    local left,top=frame:GetLeft(),frame:GetTop()
+    if not left or not top then return false end
+    local x,y=GetCursorPosition()
+    local scale=frame:GetEffectiveScale()
+    x,y=x/scale-left,top-y/scale
+    for _,rect in ipairs(frame.skillLinkRects or {}) do
+        if rect.key==key and x>=rect.left and x<=rect.right and y>=rect.top and y<=rect.bottom then return true end
+    end
+    return false
 end

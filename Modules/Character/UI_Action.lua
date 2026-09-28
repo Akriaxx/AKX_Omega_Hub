@@ -30,6 +30,8 @@ local CATEGORY_ICON = {
     offensive = "Interface\\Icons\\Ability_Warrior_Savageblow",
     defensive = "Interface\\Icons\\Ability_Defend",
     ranged    = "Interface\\Icons\\Ability_Marksmanship",
+    movement  = "Interface\\Icons\\Ability_Rogue_Sprint",
+    class     = "Interface\\Icons\\INV_Misc_Coin_01",
     grimoire  = "Interface\\Icons\\INV_Misc_Book_09",
     base      = "Interface\\Icons\\INV_Misc_Gear_01",
 }
@@ -42,11 +44,13 @@ local IDLE_ICON = "Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Eind
 -- atterrissent les 4 autres catégories une fois sélectionnées.
 local RESET_X, RESET_Y = BTN / 2, -BTN / 2
 local OFFSETS = {
-    offensive = { 0, 70 },
-    ranged    = { -70, 0 },
-    defensive = { 70, 0 },
+    grimoire  = { 0, 78 },
+    offensive = { -67.55, 39 },
+    ranged    = { 67.55, 39 },
+    movement  = { -67.55, -39 },
+    defensive = { 67.55, -39 },
+    class     = { 0, -78 },
     base      = { 0, 0 },
-    grimoire  = { 0, -70 },
 }
 
 -- Fenêtre indépendante (pas un enfant positionné sous le cadre) : elle
@@ -211,7 +215,8 @@ for _, cat in ipairs(C.SKILL_CATEGORIES) do
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         local isBack = self.back:IsShown()
-        GameTooltip:AddLine(isBack and "Retour aux catégories" or cat.label, unpack(UI.colors.title))
+        local hoverLabel = ({ offensive = "Offensive", ranged = "Distance", defensive = "Défensive" })[cat.key] or cat.label
+        GameTooltip:AddLine(isBack and "Retour aux catégories" or hoverLabel, unpack(UI.colors.title))
         GameTooltip:AddLine(isBack and "Clic pour revenir au menu" or "Clic droit pour fermer", unpack(UI.colors.textMuted))
         GameTooltip:AddLine("Maintenez pour déplacer", unpack(UI.colors.textMuted))
         GameTooltip:Show()
@@ -223,13 +228,13 @@ end
 
 -- Diamond plate behind the five category buttons.
 local plate=root:CreateTexture(nil,"BACKGROUND")
-plate:SetSize(172,172);plate:SetPoint("CENTER",root,"TOPLEFT",RESET_X,RESET_Y)
-plate:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ActionDiamond.tga")
+plate:SetSize(192,192);plate:SetPoint("CENTER",root,"TOPLEFT",RESET_X,RESET_Y)
+plate:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\ActionHexagon.tga")
 plate:Hide()
 for key,b in pairs(catButtons) do
     local label=b:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     label:SetPoint("TOP",b,"BOTTOM",0,-4)
-    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Actions",grimoire="Grimoire"})[key])
+    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Actions",grimoire="Grimoire",class="Classe",movement="Déplacement"})[key])
     UI.ApplyTitle(label);b.label=label;label:Hide()
     -- Lisibilité sur la plaque et sur les icônes : ombre portée noire.
     label:SetShadowColor(0,0,0,1);label:SetShadowOffset(1.5,-1.5)
@@ -551,7 +556,7 @@ local function BuildLayout()
         tab.cat = cat
         local label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         label:SetAllPoints(); label:SetJustifyH("CENTER")
-        label:SetText(({ base = "Actions", offensive = "Offensive", defensive = "Défensive", ranged = "Distance", grimoire = "Grimoire" })[cat.key] or cat.tag)
+        label:SetText(({ base = "Actions", offensive = "Offensive", defensive = "Défensive", ranged = "Distance", grimoire = "Grimoire", class = "Classe", movement = "Déplacement" })[cat.key] or cat.tag)
         local line = tab:CreateTexture(nil, "ARTWORK")
         line:SetPoint("BOTTOMLEFT"); line:SetPoint("BOTTOMRIGHT"); line:SetHeight(2)
         tab.label, tab.line = label, line
