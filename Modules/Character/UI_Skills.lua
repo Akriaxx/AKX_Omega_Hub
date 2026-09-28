@@ -675,7 +675,8 @@ local function FluxFrame()
             if vertical then
                 x, y = sx + spread, sy + (ty - sy) * phase
             else
-                x, y = sx + (tx - sx) * phase, sy + spread
+                -- Carte liée décalée (empilée) : le flux descend jusqu'à elle.
+                x, y = sx + (tx - sx) * phase, sy + (ty - sy) * phase + spread
             end
             dot:ClearAllPoints()
             dot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
@@ -920,7 +921,12 @@ local function PlayOpen(card, width, height, side)
         if not (edge and target) then return end
         local sx = ToUI(source, edge, 0)
         local y = CardLinkY(card) or select(2, ToUI(source, 0, sourceBottom or 0))
-        return sx, y, target, y, false
+        -- Arrivée : au milieu du bord de la carte, sur le losange (même
+        -- hauteur que le lien, sauf carte empilée sous une autre).
+        local ty = y
+        local cardTop, cardBottom = card:GetTop(), card:GetBottom()
+        if cardTop and cardBottom then ty = (cardTop + cardBottom) / 2 end
+        return sx, y, target, ty, false
     end
     card.flux:Show()
     Draw(0)
