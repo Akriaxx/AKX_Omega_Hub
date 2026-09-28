@@ -558,13 +558,14 @@ local filters={};function ChatFrame_AddMessageEventFilter(event,fn) filters[even
 local nativeLinks=0;function ChatFrame_OnHyperlinkShow() nativeLinks=nativeLinks+1 end
 local raid=true;IsInRaid=function() return raid end
 local sentUse;function SendChatMessage(message,channel) sentUse={message,channel} end
+local objectsBeforeUse=#objects
 dofile('Modules/Character/UI_SkillUse.lua')
 assert(C:ValidateSkillCost({resource='endurance',amount=0}) and C:CanPaySkillCost({resource='endurance',amount=0}),'coût 0 = gratuit')
 local id=C:SkillChatID(mergedUse);assert(#id==16)
 local link=C:SkillChatLink(mergedUse,id)
 local message=C:PrepareSkillRaidMessage('Avant '..link..' apres',mergedUse)
 assert(message and not message:find('|',1,true))
-assert(C:FilterSkillRaidMessage(message)=='Avant '..link..' apres')
+assert(C:FilterSkillRaidMessage(message)=='Avant apres ('..link..')',C:FilterSkillRaidMessage(message))
 assert(C:FindChatSkill(id).name==mergedUse.name)
 assert(not C:PrepareSkillRaidMessage('sans lien',mergedUse))
 local long=C:PrepareSkillRaidMessage(string.rep('x ',200)..link,mergedUse);assert(long)
@@ -606,7 +607,7 @@ function M:GetCursorPosition() return self.cursor or 0 end
 function M:HighlightText(a,b) self.highlight={a,b} end
 C:OpenSkillUse(mergedUse)
 local composer=CharacterSkillUsePopup;assert(composer:IsShown())
-local input=composer.edit;assert(input:GetText()=='*Votre émote ici.* '..link)
+local input=composer.edit;assert(input:GetText()=='*Votre émote ici.* ('..link..')',input:GetText())
 do local h=input.highlight;assert(h and input:GetText():sub(h[1]+1,h[2])=='Votre émote ici.','exemple sélectionné') end
 assert(input);input:SetText('Avant '..link..' apres');input.scripts.OnEnterPressed(input)
 assert(sentUse and sentUse[1]==message and sentUse[2]=='RAID' and not composer:IsShown())
@@ -666,6 +667,11 @@ local function pick(plain) for _,row in ipairs(picker.rows) do local e=row.entry
 local headers={};for _,row in ipairs(picker.rows) do if row.entry and row.entry.header then headers[row.entry.header]=true end end
 assert(headers['Index'],'Index proposé')
 for _,row in ipairs(picker.rows) do assert(not(row.entry and row.entry.skill and row.entry.skill.name=='Cost Test'),'pas la fiche principale') end
+do local function visible() local n={} for _,row in ipairs(picker.rows) do if row.shown and row.entry and row.entry.skill then n[#n+1]=C:StripSkillMarkup(row.entry.skill.name) end end return n end
+for _,q in ipairs({'Ti','ti','TIR','simple'}) do picker.search:SetText(q);picker.search.scripts.OnTextChanged(picker.search,true)
+  local found=false;for _,n in ipairs(visible()) do if n=='Tir simple' then found=true end end
+  assert(found,'recherche '..q..' : '..table.concat(visible(),', ')) end
+picker.search:SetText('');picker.search.scripts.OnTextChanged(picker.search,true) end
 assert(pick('Tir simple') and pick('Portée'))
 assert(picker.add.text=='Ajouter (2)' or picker.add:GetText()=='Ajouter (2)')
 input.cursor=#input:GetText()
@@ -673,6 +679,11 @@ picker.add.scripts.OnClick(picker.add)
 local text=input:GetText();local tir=C:GetSkill('base','Tir simple');local portee=C:GetSkill('index','Portée')
 assert(text:find(C:SkillChatLink(tir,C:SkillChatID(tir)),1,true) and text:find(C:SkillChatLink(portee,C:SkillChatID(portee)),1,true),'liens insérés : '..text)
 assert(text:sub(-15)==' [Coût : 9 MP]','coût total en fin : '..text)
+do local pl=C:SkillChatLink(paidSkill,C:SkillChatID(paidSkill))
+assert(text:find(' ('..pl..C:SkillChatLink(tir,C:SkillChatID(tir))..C:SkillChatLink(portee,C:SkillChatID(portee))..') [Coût',1,true),'groupe ( … ) avant le coût : '..text)
+-- Liens déplacés au milieu du texte : ils reviennent dans le groupe, dans l'ordre.
+local moved=C:ComposeSkillEmote('*A* '..C:SkillChatLink(tir,C:SkillChatID(tir))..' *B* '..pl..' [Coût : 1 MP]',paidSkill,composer.extras)
+assert(moved=='*A* *B* ('..pl..C:SkillChatLink(tir,C:SkillChatID(tir))..') [Coût : 9 MP]',moved) end
 assert(C.skillCostReservation.mana==9,'réservation cumulée')
 local msg=C:PrepareSkillRaidMessage(text,paidSkill,composer.extras)
 assert(msg and select(2,msg:gsub('%[Omega:',''))==3,'trois références : '..tostring(msg))
@@ -682,6 +693,48 @@ assert(resources.mana.cur==1 and not composer:IsShown(),'les deux coûts payés'
 resources.mana.cur=10;C:OpenSkillUse(paidSkill);composer.extras={tir}
 assert(C:PrepareSkillRaidMessage(input:GetText(),paidSkill,composer.extras):find('[Coût : 7 MP]',1,true))
 composer:Hide();assert(not picker:IsShown())
+-- Plusieurs ressources : une seule étiquette de coût.
+assert(C:ApplySkillCostTags('Salut',{mana=4,endurance=5})=='Salut [Coût : 4 MP · 5 End.]')
+assert(C:ApplySkillCostTags('A [Coût : 4 MP · 5 End.] B',{mana=1})=='A  B [Coût : 1 MP]')
+-- Deux ressources : l'émote reste envoyable (aucun « | » dans le message).
+do local both={name='Deux',icon='134400',description='x',usable=true,cost={resource='endurance',amount=5}}
+local m=C:PrepareSkillRaidMessage('*Go* '..C:SkillChatLink(both,C:SkillChatID(both)),both,{paidSkill})
+assert(m,'envoyable')
+local m2,err=C:PrepareSkillRaidMessage('*Go* '..C:SkillChatLink(both,C:SkillChatID(both))..' '..C:SkillChatLink(paidSkill,C:SkillChatID(paidSkill)),both,{paidSkill})
+assert(m2 and m2:find('[Coût : 7 MP · 5 End.]',1,true) and not m2:find('|',1,true),tostring(m2)..' '..tostring(err)) end
+assert(composer.header and composer.header.scripts.OnDragStart,'titre déplaçable')
+-- Fiche non partagée : demandée à son auteur, références comprises.
+do
+  UnitInRaid=function() return 1 end;Ambiguate=function(n) return n end
+  assert(C:SaveSkill('index',nil,'Portée longue','134400','Très loin'))
+  assert(C:SaveSkill('base',nil,'Secret','134400',string.rep('Texte long. ',40)..'{{Index : Portée longue}}',true,{resource='mana',amount=3}))
+  local secret=C:GetSkill('base','Secret');local sid=C:SkillChatID(secret)
+  local fetch;for i=objectsBeforeUse+1,#objects do local o=objects[i];if o.events and o.events.CHAT_MSG_ADDON then fetch=o end end
+  assert(fetch,'cadre de demande')
+  local function pump()
+    for _=1,400 do
+      local n=#sent
+      fetch.scripts.OnUpdate(fetch,.2)
+      if #sent>n then
+        local m=sent[#sent]
+        if m[1]=='OmegaFiche' then
+          assert(#m[2]<=255,'message trop long')
+          fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',m[2],'WHISPER',m[4]=='Auteur-Realm' and 'Receveur-Realm' or 'Auteur-Realm')
+        end
+      elseif not fetch.shown then break end
+    end
+  end
+  local got
+  C:FetchChatSkill(sid,'Auteur-Realm',function(sk) got=sk end);pump()
+  assert(got and got.description==secret.description and got.author=='Auteur-Realm' and got.usable==false and got.cost.amount==3,'fiche reçue')
+  assert(CharacterDB.remoteSkills[sid]==got,'gardée en cache')
+  assert(C:RemoteSkillRef('Auteur-Realm','index','Portée longue').loading,'référence en chargement');pump()
+  local ref=C:RemoteSkillRef('Auteur-Realm','index','Portée longue')
+  assert(ref.description=='Très loin' and ref.author=='Auteur-Realm','référence reçue')
+  C:RemoteSkillRef('Auteur-Realm','base','Cost Test');pump()
+  assert(C:RemoteSkillRef('Auteur-Realm','base','Cost Test').missing,'référence hors fiche envoyée : refusée')
+  assert(C:FilterSkillRaidMessage('x [Omega:0123456789abcdef] y','Auteur-Realm'):find('omegaskill:0123456789abcdef:Auteur-Realm',1,true),'lien avec auteur')
+end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});if(r.stderr) {const m=r.stderr.match(/stdin:(\d+)/);if(m){const n=Number(m[1]);process.stdout.write(code.split('\n').slice(n-3,n+2).join('\n')+'\n');}}process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||((r.stderr||'').includes('stack traceback')?1:0));

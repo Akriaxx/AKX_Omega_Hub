@@ -48,7 +48,9 @@ function C:ResolveIconValue(icon)
     return tonumber(icon) or icon
 end
 
-local function ResolveCategoryByTag(tag)
+local ResolveCategoryByTag
+function C:ResolveCategoryByTag(tag) return ResolveCategoryByTag(tag) end
+function ResolveCategoryByTag(tag)
     tag = (tag or ""):lower()
     for _, cat in ipairs(CATEGORIES) do
         for _, alias in ipairs(cat.aliases) do
@@ -546,6 +548,13 @@ local function OnSkillLinkEnter(self, link)
     local depth = LinkedCardDepth(self)
     if depth > MAX_CARDS then return end
     local skill = C:FindSkillRef(catKey, name)
+    -- Fiche reçue d'un autre joueur (non partagée) : ses références sont
+    -- demandées au même auteur (voir C:RemoteSkillRef, UI_SkillUse.lua).
+    if not skill and C.RemoteSkillRef then
+        local owner = OwnerCard(self)
+        local author = owner and owner.skill and owner.skill.author
+        if author then skill = C:RemoteSkillRef(author, catKey, name) end
+    end
     local card = ShowCard(depth, self, skill or { name = name, missing = true })
     card.linkHovered = true
     card.sourceLink = link
@@ -933,7 +942,10 @@ function ShowCard(depth, anchor, skill)
     local body
     if skill.missing then
         card.title:SetTextColor(1, .35, .3)
-        body = "Compétence introuvable dans cette bibliothèque."
+        body = skill.missingText or "Compétence introuvable dans cette bibliothèque."
+    elseif skill.loading then
+        card.title:SetTextColor(.6, .6, .6)
+        body = "Chargement de la fiche…"
     else
         UI.ApplyTitle(card.title)
         body = skill.description or ""
@@ -946,7 +958,7 @@ function ShowCard(depth, anchor, skill)
     local _, bodyHeight = RT.Render(content, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
     local height = body ~= "" and (CARD_HEAD + 18 + bodyHeight) or CARD_HEAD + 8
     card.skill=skill
-    local usable=skill.usable == true and not skill.missing
+    local usable=skill.usable == true and not skill.missing and not skill.loading
     card.useButton:SetShown(usable)
     UpdateUseButton(card)
     if usable then height=height+46 end
@@ -1006,6 +1018,18 @@ function ShowCard(depth, anchor, skill)
         card.holdRing:Start()
     end
     return card
+end
+
+-- Une fiche demandée à un autre joueur vient d'arriver : les cartes encore
+-- en « Chargement… » pour elle (même loadKey) l'affichent à la place.
+function C:RefreshSkillCardsFor(key, skill)
+    for _, card in ipairs(AllCards()) do
+        if card:IsShown() and card.skill and card.skill.loadKey == key and cards[card.depth] == card then
+            local hovered, link = card.linkHovered, card.sourceLink
+            local fresh = ShowCard(card.depth, card.source, skill)
+            fresh.linkHovered, fresh.sourceLink = hovered, link
+        end
+    end
 end
 
 function C:ShowSkillTooltip(owner, skill)

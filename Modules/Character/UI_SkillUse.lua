@@ -29,7 +29,8 @@ function C:FindChatSkill(id)
         end
     end
     end
-    return found
+    -- Fiche non partagée, déjà demandée à son auteur (voir plus bas).
+    return found or (CharacterDB and CharacterDB.remoteSkills and CharacterDB.remoteSkills[id])
 end
 function C:SkillChatLink(skill,id)
     local name=self:StripSkillMarkup(skill.name):gsub("[|%[%]\r\n]","")
@@ -37,7 +38,7 @@ function C:SkillChatLink(skill,id)
 end
 local COST_ORDER={"hp","mana","endurance"}
 local COST_SHORT={hp="HP",mana="MP",endurance="End."}
-local COST_TAG_PATTERN="%[Coût : %d+ [^%]]*%]"
+local COST_TAG_PATTERN="%[Coût : %d[^%]]*%]"
 -- Coût en abrégé, écrit en dernier dans l'émote : [Coût : 50 MP].
 local function CostTag(resource,amount)
     return "[Coût : "..amount.." "..(COST_SHORT[resource] or "").."]"
@@ -56,15 +57,17 @@ function C:SkillCostTotals(skills)
     end
     return totals
 end
--- Retire tous les [Coût : …] du texte et remet les totaux à la fin.
+-- Retire tous les [Coût : …] du texte et remet le total à la fin, en une
+-- seule étiquette : [Coût : 4 MP · 5 End.] (pas de « | » : réservé aux
+-- codes de couleur/lien, un message de chat ne peut pas en contenir).
 function C:ApplySkillCostTags(text,totals)
     text=text:gsub(COST_TAG_PATTERN,"")
-    local tags={}
+    local parts={}
     for _,resource in ipairs(COST_ORDER) do
-        if totals[resource] then tags[#tags+1]=CostTag(resource,totals[resource]) end
+        if totals[resource] then parts[#parts+1]=totals[resource].." "..(COST_SHORT[resource] or "") end
     end
-    if #tags==0 then return text end
-    return text:gsub("%s+$","").." "..table.concat(tags," ")
+    if #parts==0 then return text end
+    return text:gsub("%s+$","").." [Coût : "..table.concat(parts," · ").."]"
 end
 -- Fiche principale + fiches ajoutées (« Ajouter une action ») dont le lien est
 -- encore dans le texte : une fiche ajoutée puis effacée n'est ni envoyée ni payée.
@@ -75,13 +78,38 @@ function C:SkillsInEmote(text,skill,extras)
     end
     return used
 end
+local function RemovePlain(text,needle)
+    local start,finish=text:find(needle,1,true)
+    while start do
+        text=text:sub(1,start-1)..text:sub(finish+1)
+        start,finish=text:find(needle,start,true)
+    end
+    return text
+end
+-- Mise en forme finale : texte libre, puis toutes les fiches groupées entre
+-- parenthèses (principale d'abord, puis les ajouts dans l'ordre), puis le
+-- coût en conclusion : *Texte* ([Coup de Poing][Assaut]) [Coût : 4 MP].
+-- Les liens déplacés ou collés au milieu du texte reviennent dans le groupe.
+function C:ComposeSkillEmote(text,skill,extras)
+    local used=self:SkillsInEmote(text,skill,extras)
+    local links={}
+    for i,entry in ipairs(used) do
+        links[i]=self:SkillChatLink(entry,self:SkillChatID(entry))
+        text=RemovePlain(text,links[i])
+    end
+    text=text:gsub(COST_TAG_PATTERN,""):gsub("%(%s*%)","")
+    text=text:gsub("[ \t][ \t]+"," "):gsub("%s+$","")
+    text=text..(text~="" and " " or "").."("..table.concat(links,"")..")"
+    return self:ApplySkillCostTags(text,self:SkillCostTotals(used)),used
+end
 function C:PrepareSkillRaidMessage(text,skill,extras)
     if not self.enabled then return nil,"Character est désactivé." end
     if not skill or skill.usable~=true then return nil,"Cette entrée n’est pas utilisable." end
     if not IsInRaid() then return nil,"Rejoignez un raid pour envoyer cette émote." end
     local hyperlink=self:SkillChatLink(skill,self:SkillChatID(skill))
     if not text:find(hyperlink,1,true) then return nil,"Conservez le lien de la fiche dans votre émote." end
-    local used=self:SkillsInEmote(text,skill,extras)
+    local used
+    text,used=self:ComposeSkillEmote(text,skill,extras)
     for _,entry in ipairs(used) do
         local id=self:SkillChatID(entry)
         local link,marker=self:SkillChatLink(entry,id),"[Omega:"..id.."]"
@@ -92,9 +120,10 @@ function C:PrepareSkillRaidMessage(text,skill,extras)
         end
     end
     text=text:gsub("[\r\n]+"," ")
-    if text:find("[|]") then return nil,"Utilisez du texte simple autour du lien." end
-    -- Le coût termine toujours l'émote, même déplacé ou effacé à la saisie.
-    return self:ApplySkillCostTags(text,self:SkillCostTotals(used)),nil,used
+    if text:find("[|]") then return nil,"Retirez le caractère « | » de votre texte." end
+    -- Le coût termine toujours l'émote, même déplacé ou effacé à la saisie
+    -- (déjà remis en place par ComposeSkillEmote).
+    return text,nil,used
 end
 -- Split on words where possible, never inside UTF-8 or an Omega reference.
 function C:SplitSkillRaidMessage(text)
@@ -198,16 +227,12 @@ local function InsertSkills(skills)
         links[#links+1]=C:SkillChatLink(skill,id)
     end
     if #links==0 then return end
+    -- Toujours à la fin du groupe ( … ), avant le coût : voir ComposeSkillEmote.
     local text=edit:GetText()
-    local pos=math.max(0,math.min(#text,edit:GetCursorPosition() or #text))
-    local before,after=text:sub(1,pos),text:sub(pos+1)
-    local insert=table.concat(links," ")
-    if before~="" and not before:find("%s$") then insert=" "..insert end
-    if after~="" and not after:find("^%s") then insert=insert.." " end
-    text=before..insert..after
-    local used=C:SkillsInEmote(text,popup.skill,popup.extras)
-    edit:SetText(C:ApplySkillCostTags(text,C:SkillCostTotals(used)))
-    edit:SetCursorPosition(math.min(#edit:GetText(),#before+#insert))
+    local pos=edit:GetCursorPosition() or #text
+    edit:SetText((C:ComposeSkillEmote(text.." "..table.concat(links," "),popup.skill,popup.extras)))
+    local free=edit:GetText():find(" %(|c") or #edit:GetText()
+    edit:SetCursorPosition(math.max(0,math.min(pos,free-1)))
     RefreshReservation()
 end
 
@@ -247,7 +272,9 @@ local function BuildPicker()
         edit:SetFocus()
         InsertSkills(skills)
     end)
-    search:SetScript("OnTextChanged",function() picker:Refresh() end)
+    -- Nouvelle recherche : retour en haut, sinon les résultats (moins
+    -- nombreux) restaient sous la zone visible si la liste était défilée.
+    search:SetScript("OnTextChanged",function() scroll:SetVerticalScroll(0);picker:Refresh() end)
     search:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
 
     local function Row(i)
@@ -296,6 +323,8 @@ local function BuildPicker()
         end
         for i=#entries+1,#self.rows do self.rows[i]:Hide();self.rows[i].entry=nil end
         content:SetHeight(math.max(1,#entries*PICK_ROW))
+        local range=math.max(0,#entries*PICK_ROW-(scroll:GetHeight() or 0))
+        if scroll:GetVerticalScroll()>range then scroll:SetVerticalScroll(range) end
         local count=0
         for _ in pairs(self.selected) do count=count+1 end
         self.add:SetText(count>0 and ("Ajouter ("..count..")") or "Ajouter")
@@ -327,6 +356,14 @@ function C:OpenSkillUse(skill)
         local bg=popup:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints();UI.ApplyWindowBackground(bg)
         local title=popup:CreateFontString(nil,"OVERLAY","GameFontNormal")
         title:SetPoint("TOPLEFT",12,-8);title:SetText("Utiliser — émote en raid");UI.ApplyTitle(title)
+        -- Barre de titre : glisser pour déplacer la fenêtre (la croix reste cliquable).
+        popup:SetMovable(true)
+        local header=CreateFrame("Frame",nil,popup)
+        header:SetPoint("TOPLEFT",0,0);header:SetPoint("TOPRIGHT",-32,0);header:SetHeight(30)
+        header:EnableMouse(true);header:RegisterForDrag("LeftButton")
+        header:SetScript("OnDragStart",function() popup:StartMoving() end)
+        header:SetScript("OnDragStop",function() popup:StopMovingOrSizing() end)
+        popup.header=header
         local close=C:CreateRoundCloseButton(popup,function() popup:Hide() end)
         close:SetPoint("TOPRIGHT",-6,-5)
         viewport=CreateFrame("ScrollFrame",nil,popup)
@@ -350,7 +387,7 @@ function C:OpenSkillUse(skill)
         popup.edit=edit
         local hint=popup:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         hint:SetPoint("TOPLEFT",12,-242);hint:SetWidth(516);hint:SetJustifyH("LEFT")
-        hint:SetText("Écrivez avant ou après le lien · N'oubliez pas vos astérisques · Entrée : envoyer · Échap : annuler")
+        hint:SetText("Les fiches et le coût se placent à la fin · N'oubliez pas vos astérisques · Entrée : envoyer · Échap : annuler")
         UI.ApplyMutedText(hint)
         errorText=popup:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         errorText:SetPoint("TOPLEFT",12,-270);errorText:SetWidth(340);errorText:SetJustifyH("LEFT")
@@ -387,39 +424,218 @@ function C:OpenSkillUse(skill)
     popup.skill=skill
     popup.extras={}
     local link=self:SkillChatLink(skill,self:SkillChatID(skill))
-    errorText:SetText("");local tag=self:SkillCostTag(skill)
+    errorText:SetText("")
     local placeholder="Votre émote ici."
-    edit:SetText("*"..placeholder.."* "..link..(tag and (" "..tag) or ""));viewport:SetVerticalScroll(0)
+    edit:SetText((self:ComposeSkillEmote("*"..placeholder.."* "..link,skill,{})));viewport:SetVerticalScroll(0)
     -- Texte d'exemple déjà sélectionné entre les astérisques : il suffit
     -- d'écrire (positions en octets, comme l'EditBox de WoW).
     popup:Show();self:SetSkillCostReservation(self:SkillCostTotals({skill}));edit:SetFocus()
     edit:SetCursorPosition(1+#placeholder);edit:HighlightText(1,1+#placeholder)
 end
 
-function C:FilterSkillRaidMessage(message)
+-- author : expéditeur de l'émote. Une fiche qu'on ne possède pas (entrée
+-- non partagée) garde son nom dans le lien, pour la lui demander au clic.
+function C:FilterSkillRaidMessage(message,author)
     return (message:gsub("%[Omega:([0-9a-f]+)%]",function(id)
         local skill=self:FindChatSkill(id)
         if skill then return self:SkillChatLink(skill,id) end
-        if #id==16 then return "|cffdfbf79|Homegaskill:"..id.."|h[Fiche Omega indisponible]|h|r" end
+        if #id==16 then
+            local from=author and author:gsub("[|:]","") or ""
+            return "|cffdfbf79|Homegaskill:"..id..(from~="" and (":"..from) or "").."|h["..(from~="" and "Fiche Omega" or "Fiche Omega indisponible").."]|h|r"
+        end
     end))
 end
 if ChatFrame_AddMessageEventFilter then
     for _,event in ipairs({"CHAT_MSG_RAID","CHAT_MSG_RAID_LEADER"}) do
-        ChatFrame_AddMessageEventFilter(event,function(_,_,message,...)
+        ChatFrame_AddMessageEventFilter(event,function(_,_,message,author,...)
             if not C.enabled then return end
-            return false,C:FilterSkillRaidMessage(message),...
+            return false,C:FilterSkillRaidMessage(message,author),author,...
         end)
     end
+end
+
+-- ── Fiches non partagées : demandées à l'auteur ─────────────────────────────
+-- Une émote ne transporte que l'identifiant d'une fiche. Si on ne l'a pas
+-- (l'auteur ne l'a pas partagée), un clic la demande à l'auteur en message
+-- d'addon privé ; elle est gardée en cache (l'identifiant dépend du contenu,
+-- une fiche modifiée a un autre identifiant). Ses références {{Tag : Nom}}
+-- se demandent de la même façon, et l'auteur ne répond qu'aux références
+-- présentes dans une fiche qu'il a déjà envoyée à ce joueur.
+local FETCH_PREFIX,FETCH_CHUNK,FETCH_TIMEOUT,CACHE_MAX="OmegaFiche",200,8,300
+local fetchFrame=CreateFrame("Frame")
+fetchFrame:Hide()
+local fetchQueue,pending,allowedRefs,refCache,refPending={}, {}, {}, {}, {}
+local fetchClock,reqSeq=0,0
+
+local function FullName(name)
+    if not name or name=="" then return "" end
+    if name:find("-",1,true) then return name end
+    return name.."-"..(GetRealmName() or ""):gsub("%s","")
+end
+local function InGroup(sender)
+    local short=Ambiguate and Ambiguate(sender,"none") or sender
+    return (UnitInRaid and UnitInRaid(short)) or (UnitInParty and UnitInParty(short))
+end
+local function RefKey(catKey,name)
+    return catKey..":"..C:StripSkillMarkup(name or ""):lower():match("^%s*(.-)%s*$")
+end
+local function Field(value)
+    value=tostring(value or "")
+    return #value..":"..value
+end
+local function ReadFields(text)
+    local out,pos={},1
+    while pos<=#text do
+        local len,start=text:match("^(%d+):()",pos)
+        if not len then return nil end
+        len=tonumber(len)
+        out[#out+1]=text:sub(start,start+len-1)
+        pos=start+len
+    end
+    return out
+end
+local function EncodeRemote(skill)
+    local cost=skill.cost
+    return Field(skill.name)..Field(skill.icon)..Field(skill.description)..Field(cost and cost.resource)..Field(cost and cost.amount)
+end
+local function DecodeRemote(payload,author)
+    local f=ReadFields(payload)
+    if not f or #f<5 or f[1]=="" or #f[1]>128 or #f[3]>8000 then return nil end
+    local skill={name=f[1],icon=f[2]~="" and f[2] or nil,description=f[3],usable=false,author=author,remote=true}
+    local amount=tonumber(f[5])
+    if f[4]~="" and amount then skill.cost={resource=f[4],amount=amount} end
+    return skill
+end
+
+local function Queue(message,target)
+    if #fetchQueue>2000 then return end
+    fetchQueue[#fetchQueue+1]={message,target}
+    fetchFrame:Show()
+end
+fetchFrame:SetScript("OnUpdate",function(self,dt)
+    fetchClock=fetchClock+dt
+    if fetchClock<.1 then return end
+    fetchClock=0
+    local item=table.remove(fetchQueue,1)
+    if item and C.enabled then C_ChatInfo.SendAddonMessage(FETCH_PREFIX,item[1],"WHISPER",item[2]) end
+    local now=GetTime()
+    for req,p in pairs(pending) do
+        if p.expires<now then pending[req]=nil;p.done(nil) end
+    end
+    if #fetchQueue==0 and not next(pending) then self:Hide() end
+end)
+
+local function Request(author,query,done)
+    reqSeq=reqSeq+1
+    local req=tostring(reqSeq)
+    pending[req]={author=FullName(author),chunks={},count=0,done=done,expires=GetTime()+FETCH_TIMEOUT}
+    Queue("Q|"..req.."|"..query,author)
+end
+
+-- Côté auteur : les références d'une fiche envoyée deviennent demandables.
+local function AllowRefs(sender,skill)
+    local allowed=allowedRefs[sender] or {}
+    allowedRefs[sender]=allowed
+    for tag,name in tostring(skill.description or ""):gmatch("{{%s*([^:{}]-)%s*:%s*([^{}]-)%s*}}") do
+        local cat=C:ResolveCategoryByTag(tag)
+        if cat then allowed[RefKey(cat.key,name)]=true end
+    end
+end
+local function Reply(sender,req,skill)
+    if not skill then Queue("N|"..req,sender);return end
+    AllowRefs(sender,skill)
+    local payload=EncodeRemote(skill)
+    local total=math.max(1,math.ceil(#payload/FETCH_CHUNK))
+    for i=1,total do
+        Queue("A|"..req.."|"..i.."|"..total.."|"..payload:sub((i-1)*FETCH_CHUNK+1,i*FETCH_CHUNK),sender)
+    end
+end
+
+fetchFrame:RegisterEvent("CHAT_MSG_ADDON")
+if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then C_ChatInfo.RegisterAddonMessagePrefix(FETCH_PREFIX) end
+fetchFrame:SetScript("OnEvent",function(_,_,prefix,message,channel,sender)
+    if prefix~=FETCH_PREFIX or channel~="WHISPER" or not C.enabled or #message>255 then return end
+    sender=FullName(sender)
+    local req,kind,a,b=message:match("^Q|(%d+)|(%a)|([^|]*)|?(.*)$")
+    if req then
+        if not InGroup(sender) then return end
+        if kind=="I" then
+            Reply(sender,req,a:match("^[0-9a-f]+$") and C:FindChatSkill(a) or nil)
+        elseif kind=="R" then
+            local allowed=allowedRefs[sender]
+            local skill=allowed and allowed[RefKey(a,b)] and C:ResolveNumberedSkillRef(a,b) or nil
+            Reply(sender,req,skill)
+        end
+        return
+    end
+    local nreq=message:match("^N|(%d+)$")
+    if nreq then
+        local p=pending[nreq]
+        if p and p.author==sender then pending[nreq]=nil;p.done(nil) end
+        return
+    end
+    local areq,index,total,chunk=message:match("^A|(%d+)|(%d+)|(%d+)|(.*)$")
+    local p=areq and pending[areq]
+    if not p or p.author~=sender then return end
+    index,total=tonumber(index),tonumber(total)
+    if total<1 or total>60 or index<1 or index>total then return end
+    if not p.chunks[index] then p.chunks[index]=chunk;p.count=p.count+1 end
+    if p.count>=total then
+        pending[areq]=nil
+        p.done(DecodeRemote(table.concat(p.chunks,"",1,total),sender))
+    end
+end)
+
+local UNAVAILABLE="L’auteur n’a pas pu l’envoyer (hors ligne, hors du groupe ou fiche supprimée)."
+
+-- Fiche d'une émote, par identifiant : cache, sinon demande à l'auteur.
+function C:FetchChatSkill(id,author,done)
+    CharacterDB.remoteSkills=CharacterDB.remoteSkills or {}
+    local cache=CharacterDB.remoteSkills
+    Request(author,"I|"..id,function(skill)
+        if skill then
+            local n=0;for _ in pairs(cache) do n=n+1 end
+            if n>=CACHE_MAX then cache[next(cache)]=nil end
+            cache[id]=skill
+        end
+        done(skill)
+    end)
+end
+
+-- Référence {{Tag : Nom}} dans une fiche reçue : renvoie la fiche en cache,
+-- sinon une carte « Chargement… » rafraîchie à l'arrivée (RefreshSkillCardsFor).
+function C:RemoteSkillRef(author,catKey,name)
+    local key=author.."\0"..RefKey(catKey,name)
+    local cached=refCache[key]
+    if cached then return cached end
+    if cached==false then return {name=name,missing=true,missingText=UNAVAILABLE} end
+    local loadKey="ref:"..key
+    if not refPending[key] then
+        refPending[key]=true
+        Request(author,"R|"..catKey.."|"..name,function(skill)
+            refPending[key]=nil
+            refCache[key]=skill or false
+            self:RefreshSkillCardsFor(loadKey,skill or {name=name,missing=true,missingText=UNAVAILABLE})
+        end)
+    end
+    return {name=name,loading=true,loadKey=loadKey}
 end
 -- Intercept only our links; all native links retain their original handler.
 local chatAnchor
 if ChatFrame_OnHyperlinkShow then
     local original=ChatFrame_OnHyperlinkShow
     ChatFrame_OnHyperlinkShow=function(frame,hyperlink,...)
-        local id=hyperlink and hyperlink:match("^omegaskill:([0-9a-f]+)$")
+        local id,author=hyperlink and hyperlink:match("^omegaskill:([0-9a-f]+):?(.*)$")
         if not id then return original(frame,hyperlink,...) end
         if not C.enabled then return end
         local skill=C:FindChatSkill(id)
+        if not skill and author~="" then
+            local loadKey="id:"..id
+            skill={name="Fiche Omega",loading=true,loadKey=loadKey}
+            C:FetchChatSkill(id,author,function(found)
+                C:RefreshSkillCardsFor(loadKey,found or {name="Fiche indisponible",missing=true,missingText=UNAVAILABLE})
+            end)
+        end
         -- Capture the click position, not the top of the entire chat window.
         -- The anchor stays still so the mouse can enter the card and its links.
         if not chatAnchor then
