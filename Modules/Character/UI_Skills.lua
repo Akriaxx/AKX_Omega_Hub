@@ -12,7 +12,6 @@ local C = Character
 local UI = C.RPGUI or OS2.UI
 
 C.SKILL_CATEGORIES = {
-    { key = "base",      label = "Actions de base",       tag = "Action",    aliases = { "action" } },
     { key = "offensive", label = "Compétence Offensive",  tag = "Offensive", aliases = { "offensive" } },
     { key = "defensive", label = "Compétence Défensive",  tag = "Défensive", aliases = { "defensive", "défensive" } },
     { key = "ranged",    label = "Compétence à Distance", tag = "Distance",  aliases = { "distance" } },
@@ -1479,9 +1478,9 @@ local function ReadRefContext(editBox)
 end
 
 local function BuildAutocomplete(editBox, owner)
-    local ac = CreateFrame("Frame", nil, owner)
-    ac:SetFrameStrata("FULLSCREEN_DIALOG")
-    ac:SetFrameLevel(owner:GetFrameLevel() + 50)
+    local ac = CreateFrame("Frame", nil, UIParent)
+    ac:SetFrameStrata("TOOLTIP")
+    ac:SetFrameLevel(1000)
     ac:SetWidth(AC_W)
     ac:EnableMouse(true)
     ac:Hide()
@@ -1877,7 +1876,7 @@ local function Build()
     -- espacement partout, seul l'ornement marque la séparation).
     tabButtons = {}
     local tabOrder={}
-    for _,key in ipairs({"base","offensive","ranged","defensive","movement","class","grimoire"}) do
+    for _,key in ipairs({"offensive","ranged","defensive","movement","class","grimoire"}) do
         for _,cat in ipairs(CATEGORIES) do
             if cat.key==key then tabOrder[#tabOrder+1]=cat;break end
         end

@@ -205,7 +205,10 @@ idleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- ── Les 5 boutons de catégorie (positions du triangle OU repliées) ─────────
 local catButtons = {}
-for _, cat in ipairs(C.SKILL_CATEGORIES) do
+-- The central control is not a skill category.
+local menuItems={{key="base",label="Fermer",closeOnly=true}}
+for _,cat in ipairs(C.SKILL_CATEGORIES) do menuItems[#menuItems+1]=cat end
+for _, cat in ipairs(menuItems) do
   if not cat.hidden then -- l'Index n'a pas de place dans le triangle
     local b = NewSquareButton(root, BTN)
     b:Hide()
@@ -215,9 +218,13 @@ for _, cat in ipairs(C.SKILL_CATEGORIES) do
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         local isBack = self.back:IsShown()
-        local hoverLabel = ({ offensive = "Offensive", ranged = "Distance", defensive = "Défensive" })[cat.key] or cat.label
+        local hoverLabel = ({ base = "Fermer", offensive = "Offensive", ranged = "Distance", defensive = "Défensive" })[cat.key] or cat.label
         GameTooltip:AddLine(isBack and "Retour aux catégories" or hoverLabel, unpack(UI.colors.title))
-        GameTooltip:AddLine(isBack and "Clic pour revenir au menu" or "Clic droit pour fermer", unpack(UI.colors.textMuted))
+        if isBack then
+            GameTooltip:AddLine("Clic pour revenir au menu", unpack(UI.colors.textMuted))
+        elseif cat.closeOnly then
+            GameTooltip:AddLine("Clic pour fermer", unpack(UI.colors.textMuted))
+        end
         GameTooltip:AddLine("Maintenez pour déplacer", unpack(UI.colors.textMuted))
         GameTooltip:Show()
     end)
@@ -234,7 +241,7 @@ plate:Hide()
 for key,b in pairs(catButtons) do
     local label=b:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     label:SetPoint("TOP",b,"BOTTOM",0,-4)
-    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Actions",grimoire="Grimoire",class="Classe",movement="Déplacement"})[key])
+    label:SetText(({offensive="Offensive",defensive="Défensive",ranged="Distance",base="Fermer",grimoire="Grimoire",class="Classe",movement="Déplacement"})[key])
     UI.ApplyTitle(label);b.label=label;label:Hide()
     -- Lisibilité sur la plaque et sur les icônes : ombre portée noire.
     label:SetShadowColor(0,0,0,1);label:SetShadowOffset(1.5,-1.5)
@@ -452,9 +459,10 @@ end)
 for key,b in pairs(catButtons) do
     b:SetScript("OnClick",function(_,mouse)
         if b.suppressClick or root.dragging or state=="animating" then return end
-        -- Bouton retour : tout clic (gauche ou droit) revient aux catégories.
+        if mouse=="RightButton" and not b.cat.closeOnly then return end
+        -- Les catégories s'ouvrent et reviennent au menu au clic gauche.
         if state=="expanded" then ReturnToTriangle()
-        elseif mouse=="RightButton" then CloseTriangle()
+        elseif b.cat.closeOnly then CloseTriangle()
         else ShowExpanded(b.cat) end
     end)
 end
