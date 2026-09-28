@@ -706,10 +706,10 @@ local function EachRef(skill,fn)
 end
 
 -- À l'envoi d'une émote, tout part au raid pour être lu sans bibliothèque :
--- les fiches de l'émote, puis (then, ex. le message de chat, pour que les
--- liens affichent déjà leur nom) , puis toutes les références qu'elles
--- contiennent, récursivement (MAX_BROADCAST_REFS au plus). Chacun les garde
--- en cache ; les références restent aussi demandables au survol.
+-- les fiches de l'émote et toutes les références qu'elles contiennent,
+-- récursivement (MAX_BROADCAST_REFS au plus), puis andThen (le message de
+-- chat). Chacun les garde en cache ; les références restent aussi
+-- demandables au survol.
 function C:BroadcastEmoteSkills(skills,andThen)
     local channel=(IsInRaid and IsInRaid() and "RAID") or (IsInGroup and IsInGroup() and "PARTY")
     if not channel then if andThen then andThen() end;return end
@@ -717,7 +717,6 @@ function C:BroadcastEmoteSkills(skills,andThen)
         AllowRefs("*",skill)
         QueueChunks("B|"..self:SkillChatID(skill),EncodeRemote(skill),channel)
     end
-    if andThen then fetchQueue[#fetchQueue+1]={fn=andThen};fetchFrame:Show() end
     local seen,todo,sent={}, {}, 0
     local function push(catKey,name) todo[#todo+1]={catKey,name} end
     for _,skill in ipairs(skills or {}) do EachRef(skill,push) end
@@ -736,6 +735,22 @@ function C:BroadcastEmoteSkills(skills,andThen)
             end
         end
     end
+    -- Le message de chat part en dernier : à sa lecture, fiches, références
+    -- et couleurs de leurs liens sont déjà arrivées.
+    if andThen then fetchQueue[#fetchQueue+1]={fn=andThen};fetchFrame:Show() end
+end
+
+-- Référence d'une fiche reçue, déjà en cache (sans rien demander) : sert
+-- au rendu, pour que le lien prenne la couleur du nom de la fiche visée.
+-- La cible du lien reste le nom écrit, pour que le survol la retrouve.
+function C:PeekRemoteSkillRef(author,catKey,name)
+    local skill=refCache[BaseName(author).."\0"..RefKey(catKey,name)]
+    if not skill then return nil,"",name end
+    local quantity=name:match("^%s*([+-]?%d+)%s+.+$") or name:match("^%s*(%([+-]?%d+%))%s+.+$")
+    if quantity and C:StripSkillMarkup(skill.name):lower()~=C:StripSkillMarkup(name):lower() then
+        return skill,quantity.." ",name
+    end
+    return skill,"",name
 end
 
 -- Référence {{Tag : Nom}} dans une fiche reçue : renvoie la fiche en cache,

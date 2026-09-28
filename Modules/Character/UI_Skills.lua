@@ -384,6 +384,11 @@ function C:SkillTextOptions()
             local cat = ResolveCategoryByTag(tag)
             if not cat then return end
             local skill,prefix,target=C:ResolveNumberedSkillRef(cat.key,name)
+            -- Fiche reçue d'un autre joueur : ses références (et donc la
+            -- couleur de leur lien) viennent de ce qu'il a envoyé avec elle.
+            if not skill and C._refAuthor and C.PeekRemoteSkillRef then
+                skill,prefix,target=C:PeekRemoteSkillRef(C._refAuthor,cat.key,name)
+            end
             return cat.key,skill,prefix,target
         end,
     }
@@ -958,11 +963,13 @@ function ShowCard(depth, anchor, skill)
         body = skill.description or ""
     end
     local RT, opts = C.RichText, C:SkillTextOptions()
+    C._refAuthor = skill.author
     local bodyWidth = RT.Measure(content, body, CARD_MAX_W - CARD_PAD * 2, opts)
     local inner = math.max(TextWidth(card.title), bodyWidth)
     local width = math.max(CARD_MIN_W, math.min(CARD_MAX_W, inner + CARD_PAD * 2))
     card.title:SetWidth(width - CARD_PAD * 2)
     local _, bodyHeight = RT.Render(content, body, width - CARD_PAD * 2, opts, CARD_PAD, CARD_HEAD + 6)
+    C._refAuthor = nil
     card.skill=skill
     local usable=skill.usable == true and not skill.missing and not skill.loading
     card.useButton:SetShown(usable)

@@ -773,10 +773,23 @@ do
         fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',m[2],'RAID','Auteur-Realm') end
     elseif not fetch.shown then break end end
   assert(order[1]=='chat','message de chat envoyé')
-  for _,k in ipairs(kinds) do if k:sub(1,1)=='B' then assert(k=='B-','fiches avant le chat') else assert(k=='C+','références après le chat') end end
+  for _,k in ipairs(kinds) do assert(k:sub(2)=='-','fiches et références avant le chat : '..k) end;assert(#kinds>=3)
   local zone=C:RemoteSkillRef('Auteur-Realm','index','Zone neuve');local fond=C:RemoteSkillRef('Auteur-Realm','index','Profond')
   assert(zone.description=='Voir {{Index : Profond}}' and fond.description=='Tout au fond','références en cache, récursives')
   assert(C:RemoteSkillRef('Auteur','index','Profond')==fond,'auteur reconnu sans royaume')
+  -- Couleur du lien d'une référence reçue : celle du nom de la fiche visée.
+  assert(C:SaveSkill('index',nil,'[[#FF0000]]Rouge vif[[/]]','134400','Rouge'))
+  local teinte={name='Teinte',icon='134400',description='Voir {{Index : Rouge vif}}',usable=true}
+  C:BroadcastEmoteSkills({teinte})
+  for _=1,400 do local n=#sent;fetch.scripts.OnUpdate(fetch,.2)
+    if #sent>n then local m=sent[#sent]
+      if m[1]=='OmegaFiche' then fetch.scripts.OnEvent(fetch,'CHAT_MSG_ADDON','OmegaFiche',m[2],'RAID','Auteur-Realm') end
+    elseif not fetch.shown then break end end
+  assert(C:PeekRemoteSkillRef('Auteur-Realm','index','Rouge vif').description=='Rouge','référence colorée en cache')
+  C._refAuthor='Auteur-Realm'
+  local _,rskill=C:SkillTextOptions().resolveRef('Index','Rouge vif')
+  C._refAuthor=nil
+  assert(rskill and rskill.name:find('#FF0000',1,true),'le rendu retrouve le nom coloré')
 end
 print('OK: legacy skills, collision guard, codec, builder, animation lifecycle, imports, full replacement, raid checks, stale revision, read-only ownership')
 `;
