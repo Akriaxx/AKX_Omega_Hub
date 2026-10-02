@@ -80,6 +80,12 @@ Hub:RegisterModule({
     desc    = "Journal RP et écritoire MJ — /jq",
 })
 
+Hub:RegisterModule({
+    name    = "GrimoireCraft",
+    title   = "Grimoire de Craft",
+    desc    = "Recettes d'artisanat et transmission de savoir — /grimoire",
+})
+
 -- Omega_Weather est commenté dans le TOC (usage privé, non chargé)
 -- Hub:RegisterModule({ name = "Omega_Weather", ... })
 

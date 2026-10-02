@@ -17,6 +17,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Grimoire de Craft : la database embarquée est régénérée depuis la
+      # « Database Maître » (Google Drive) à chaque release — les mainteneurs
+      # n'ont qu'à éditer le tableur.
+      - name: Update Grimoire database
+        run: python3 Tools/Update-GrimoireDatabase.py
+
       - name: Build ZIP
         env:
           TAG_NAME: ${{ github.ref_name }}

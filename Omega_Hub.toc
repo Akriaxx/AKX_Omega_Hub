@@ -4,7 +4,7 @@
 ## Author: Lorkk
 ## Version: 1.2.19
 ## OptionalDeps: SpellCreator
-## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB
+## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB GrimoireCraftDB
 ## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
 
 ## -- Hub --
@@ -149,6 +149,12 @@ Modules\Quest\Quest_UI_BookMotion.lua
 Modules\Quest\Quest_Panel_MJ.lua
 Modules\Quest\Quest_Comm.lua
 Modules\Quest\Quest.lua
+
+## -- Grimoire de Craft --
+Modules\GrimoireCraft\Version.lua
+Modules\GrimoireCraft\ObjectDatabase.lua
+Modules\GrimoireCraft\RecipeDatabase.lua
+Modules\GrimoireCraft\GrimoireCraft.lua
 
 ## -- Omega Weather (désactivé — usage privé) --
 ## Modules\Weather\Version.lua
