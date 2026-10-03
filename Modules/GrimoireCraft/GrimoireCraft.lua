@@ -1,4 +1,4 @@
--- GrimoireCraft v2.57.47
+-- GrimoireCraft v2.59.2
 -- Base stable V2.0 reconstruite avec classement des recettes par métier.
 
 local ADDON_NAME = ...  -- "Omega_Hub" : le Grimoire est désormais un module du Hub
@@ -355,6 +355,9 @@ local function InitDB()
     DB.nextID = tonumber(DB.nextID) or 1
     DB.databaseVersion = tonumber(DB.databaseVersion) or 1
     DB.favorites = DB.favorites or {}
+    DB.craftPreferences = DB.craftPreferences or {}
+    if DB.craftPreferences.modifier == nil then DB.craftPreferences.modifier = 0 end
+    if DB.craftPreferences.workshopAvailable == nil then DB.craftPreferences.workshopAvailable = false end
 
     -- Une database reçue reste active uniquement pour cette génération de l'addon.
     -- Installer une nouvelle version de GrimoireCraft rend automatiquement la base embarquée prioritaire.
@@ -1305,9 +1308,12 @@ local function GetRequiredBagCount(itemID)
 end
 
 local function HasAllRecipeMaterialsInBags(recipe)
+    local totals={}
     for _,material in ipairs(recipe.materials or {}) do
-        local needed=math.max(1,tonumber(material.quantity) or 1)
-        if GetRequiredBagCount(material.itemID) < needed then
+        local id=material.itemID
+        if not id then return false,material end
+        totals[id]=(totals[id] or 0)+math.max(1,tonumber(material.quantity) or 1)
+        if GetRequiredBagCount(id) < totals[id] then
             return false,material
         end
     end
@@ -1364,7 +1370,7 @@ end
 local function GetBagSlotsForItem(itemID)
     local found={}
     local firstBag=(Enum and Enum.BagIndex and Enum.BagIndex.Backpack) or 0
-    local lastBag=(Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or 5
+    local lastBag=(Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or NUM_BAG_SLOTS or 4
 
     for bag=firstBag,lastBag do
         local slots
@@ -1547,6 +1553,8 @@ end
 -- Détection du jet par lecture des lignes réellement affichées dans le chat.
 -- ============================================================================
 local CraftV3=nil
+local V3Open
+local V3MassStart
 
 local function V3SecureButton(parent,text,w,h)
     local b=CreateFrame("Button",nil,parent,"SecureActionButtonTemplate,BackdropTemplate")
@@ -1653,15 +1661,136 @@ local function V3Close()
     CraftV3=nil
 end
 
--- Le résultat n'est JAMAIS mémorisé comme "réussite" de manière libre.
--- Cette fonction recalcule systématiquement total >= target.
+-- Critical results are derived only from an actual resolved dice roll.
+-- Otherwise the original Total >= Rand rule applies.
+local function V3CriticalResult()
+    local s=CraftV3
+    if not s or s.mass or not s.hasDiceRoll then return nil end
+    local total=tonumber(s.rollTotal)
+    if not total then return nil end
+    local natural=total-(tonumber(s.modifier) or 0)
+    if natural==20 then return "success" end
+    if natural==1 then return "failure" end
+end
+
+local function V3OutputQuantity(recipe)
+    return math.max(1,math.floor(tonumber(recipe.outputQuantity) or 1))
+end
 local function V3IsSuccess()
     local s=CraftV3
-    if not s then return false end
+    if not s or s.forceFailure then return false end
+    local critical=V3CriticalResult()
+    if critical=="failure" then return false end
+    if critical=="success" then return true end
     local total=tonumber(s.rollTotal)
     local target=tonumber(s.target)
     if target~=nil and target<=0 then return true end
     return total~=nil and target~=nil and total>=target
+end
+
+local function V3RefreshRepeatButton()
+    local s=CraftV3
+    local f=UI.craftV3
+    if not s or not f or not f.repeatButton then return end
+
+    local canRepeat=HasAllRecipeMaterialsInBags(s.recipe)
+        and HasProfessionConditions(s.recipe,s.workshopAvailable)
+        and s.recipe.outputItemID~=nil
+
+    canRepeat=canRepeat and s.completed and not s.mass and not s.inventoryWait
+    if canRepeat then
+        f.repeatButton:Enable()
+        f.repeatButton:SetAlpha(1)
+        f.repeatButton:SetCraftText("Refabriquer")
+    else
+        f.repeatButton:Disable()
+        f.repeatButton:SetAlpha(.45)
+        f.repeatButton:SetCraftText("Refabriquer")
+    end
+end
+
+local function V3ShowRepeatButton()
+    local f=UI.craftV3
+    if not f or not f.repeatButton then return end
+    if not CraftV3 or not CraftV3.completed then return end
+    f.repeatButton:Show()
+    V3RefreshRepeatButton()
+end
+
+-- One command at a time; never advance until the bags confirm its effect.
+local function V3MassStop(reason)
+    local s=CraftV3
+    if not s then return end
+    s.mass=false
+    s.inventoryWait=nil
+    s.paused=true
+    if UI.craftV3.massButton then UI.craftV3.massButton:Hide() end
+    V3State(reason or "Mass Craft arrêté.",1,.78,.48)
+end
+
+-- Read physical bag slots: cached item totals can lag behind BAG_UPDATE.
+local function V3MassBagCount(itemID)
+    if (C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo)
+        or (GetContainerNumSlots and GetContainerItemID and GetContainerItemInfo) then
+        local count=0
+        for _,entry in ipairs(GetBagSlotsForItem(tonumber(itemID))) do
+            count=count+entry.count
+        end
+        return count
+    end
+    return GetRequiredBagCount(itemID)
+end
+
+local function V3MassCommand(itemID,quantity,done)
+    local s=CraftV3
+    if not s or not s.mass or s.inventoryWait then return end
+    if InCombatLockdown and InCombatLockdown() then
+        V3MassStop("Mass Craft arrêté : combat.")
+        return
+    end
+    local send=(C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
+
+    local before=V3MassBagCount(itemID)
+    if quantity<0 and before < -quantity then
+        V3MassStop("Composants insuffisants : Mass Craft arrêté.")
+        return
+    end
+    local wait={itemID=itemID,expected=before+quantity,deadline=GetTime()+8,done=done}
+    s.inventoryWait=wait
+    local command="additem "..tostring(itemID).." "..tostring(quantity)
+    local epsilon=EpsilonLib and EpsilonLib.AddonCommands
+    local ok
+    if epsilon and type(epsilon.Send)=="function" then
+        -- Epsilon AddonCommands takes the command WITHOUT its leading dot.
+        -- Acknowledgement alone is insufficient: still confirm the physical bags.
+        ok=pcall(epsilon.Send,"GrimoireCraft",command,function(success)
+            if CraftV3~=s or s.inventoryWait~=wait then return end
+            if not success then V3MassStop("Epsilon a refusé la commande : "..command) end
+        end)
+    elseif epsilon and type(epsilon.SendByChat)=="function" then
+        ok=pcall(epsilon.SendByChat,command)
+    elseif send then
+        -- Same fallback channel as EpsilonLib.SendByChat (also without a guild).
+        ok=pcall(send,"."..command,"GUILD")
+    end
+    -- Never retry an unconfirmed mutation through a second transport.
+
+    if not ok then V3MassStop("Commande refusée : Mass Craft arrêté.") end
+end
+
+local function V3MassPoll()
+    local s=CraftV3
+    if not s or not s.mass then return end
+    local wait=s.inventoryWait
+    if not wait then return end
+    local actual=V3MassBagCount(wait.itemID)
+    if actual==wait.expected then
+        s.inventoryWait=nil
+        wait.done()
+    elseif GetTime()>=wait.deadline then
+        V3MassStop("Commande non confirmée pour #"..tostring(wait.itemID).." : "..actual..
+            " en sac, "..wait.expected.." attendu. Mass Craft arrêté.")
+    end
 end
 
 local function V3Finish()
@@ -1669,21 +1798,40 @@ local function V3Finish()
     local f=UI.craftV3
     if not s or not f then return end
 
-    -- HARD GATE : aucune commande d'ajout avant cette comparaison.
+    -- Reward only after critical rules / Total >= Rand have been evaluated.
     f.action:SetAttribute("macrotext","")
     f.action:SetScript("PostClick",nil)
 
     local total=tonumber(s.rollTotal)
     local target=tonumber(s.target)
     local success=V3IsSuccess()
+    local critical=V3CriticalResult()
+    local outputQuantity=V3OutputQuantity(s.recipe)*(critical=="success" and 2 or 1)
 
     f.action:Show()
     f.action:Enable()
 
+    if success and s.mass then
+        f.action:Hide()
+        V3MassCommand(s.recipe.outputItemID,outputQuantity,function()
+            s.completed=true
+            s.massCount=(s.massCount or 0)+1
+            s.massRemaining=s.massRemaining-1
+            if s.stopRequested or s.massRemaining<=0
+                or not HasAllRecipeMaterialsInBags(s.recipe)
+                or not HasProfessionConditions(s.recipe,s.workshopAvailable) then
+                V3MassStop("Mass Craft terminé : "..s.massCount.." fabrication(s).")
+                V3ShowRepeatButton()
+            else
+                V3MassStart(true)
+            end
+        end)
+        return
+    end
     if success then
         if f.recipeWaiting then f.recipeWaiting:Hide() end
-        f.action:SetCraftText("Achever la fabrication")
-        f.action:SetAttribute("macrotext",".additem "..tostring(s.recipe.outputItemID).." 1")
+        f.action:SetCraftText(critical=="success" and "Recevoir ×"..outputQuantity.." (critique)" or "Achever la fabrication")
+        f.action:SetAttribute("macrotext",".additem "..tostring(s.recipe.outputItemID).." "..tostring(outputQuantity))
 
         if not f.action.leftOrnament then
             local left=f.action:CreateTexture(nil,"ARTWORK")
@@ -1701,12 +1849,21 @@ local function V3Finish()
         f.action.leftOrnament:Show()
         f.action.rightOrnament:Show()
 
-        V3State("Réussite : "..total.." / "..target.." — fabrication autorisée.",.78,.94,.72)
+        if critical=="success" then
+            V3State("Réussite critique : dé naturel 20 — "..outputQuantity.." objets fabriqués.",.78,.94,.72)
+        else
+            V3State("Réussite : "..total.." / "..target.." — fabrication autorisée.",.78,.94,.72)
+        end
         f.action:SetScript("PostClick",function()
             f.action:Disable()
             f.action:SetAttribute("macrotext","")
             f.action:SetCraftText("Fabrication terminée")
-            if C_Timer and C_Timer.After then C_Timer.After(1,V3Close) end
+            s.completed=true
+            if C_Timer and C_Timer.After then
+                C_Timer.After(.55,function() if CraftV3==s then V3ShowRepeatButton() end end)
+            else
+                V3ShowRepeatButton()
+            end
         end)
     else
         if f.action.leftOrnament then f.action.leftOrnament:Hide() end
@@ -1714,7 +1871,11 @@ local function V3Finish()
 
         f.action:SetCraftText("Fabrication refusée — refermer")
         f.action:SetAttribute("macrotext","")
-        V3State("Vous échouez pitoyablement votre fabrication.  ("..tostring(total or "?").." / "..tostring(target or "?")..")",1,.58,.46)
+        if critical=="failure" then
+            V3State("Échec critique : dé naturel 1 — composants du craft perdus, aucun objet produit.",1,.58,.46)
+        else
+            V3State("Vous échouez pitoyablement votre fabrication.  ("..tostring(total or "?").." / "..tostring(target or "?")..")",1,.58,.46)
+        end
         f.action:SetScript("PostClick",V3Close)
     end
 end
@@ -1727,7 +1888,10 @@ local function V3Resume()
     s.lastTick=GetTime()
     f.action:SetAttribute("macrotext","")
     f.action:Hide()
-    V3State("La préparation prend forme...",.96,.84,.64)
+    local critical=V3CriticalResult()
+    V3State(critical=="success" and "Réussite critique — production doublée..."
+        or critical=="failure" and "Échec critique — les composants du craft sont perdus..."
+        or "La préparation prend forme...",.96,.84,.64)
 end
 
 local function V3MaterialStop(index)
@@ -1750,8 +1914,7 @@ local function V3MaterialStop(index)
         if line.craftIcon then line.craftIcon:Show() end
     end
 
-    -- Sur réussite OU échec non-mineur : composants consommés.
-    -- Sur échec mineur : cette étape n'est jamais atteinte.
+    -- Critical failure consumes every required material, including minor recipes.
     local failedCraft=not V3IsSuccess()
     if failedCraft then
         f.action:SetCraftText("Ajout maladroit : "..qty.." × "..name)
@@ -1761,6 +1924,17 @@ local function V3MaterialStop(index)
         V3State("Incorporer "..qty.." × "..name..".",1,.86,.60)
     end
 
+    if s.mass then
+        f.action:Hide()
+        V3MassCommand(m.itemID,-qty,function()
+            if f.materialLines[index] then
+                f.materialLines[index]:SetText(qty.." × "..name)
+            end
+            s.nextMaterial=index+1
+            V3Resume()
+        end)
+        return
+    end
     f.action:SetAttribute("macrotext",".additem "..tostring(m.itemID).." -"..tostring(qty))
     f.action:Show()
     f.action:Enable()
@@ -1795,7 +1969,7 @@ local function V3BeginChannel()
     local isMinor=((s.recipe.difficulty or "Mineur")=="Mineur")
 
     -- Échec mineur : aucun composant perdu, aucun canal de suppression.
-    if not success and isMinor then
+    if not success and isMinor and V3CriticalResult()~="failure" then
         f.bar:SetValue(10)
         f.barText:SetText("Échec mineur")
         V3Finish()
@@ -1807,7 +1981,11 @@ local function V3BeginChannel()
     s.lastTick=GetTime()
     s.nextMaterial=1
     s.paused=false
-    V3State(success and "Jet réussi — confection en cours..." or "Jet échoué — les composants seront perdus...", success and .78 or 1, success and .94 or .60, success and .72 or .48)
+    local critical=V3CriticalResult()
+    V3State(critical=="success" and "Réussite critique : dé naturel 20 — production doublée !"
+        or critical=="failure" and "Échec critique : dé naturel 1 — tous les composants du craft seront perdus."
+        or (success and "Jet réussi — confection en cours..." or "Jet échoué — les composants seront perdus..."),
+        success and .78 or 1,success and .94 or .60,success and .72 or .48)
 end
 
 local function V3Resolve(total)
@@ -1830,6 +2008,7 @@ local function V3Resolve(total)
     end
 
     s.rollTotal=total
+    s.hasDiceRoll=true
     s.rollResolved=true
     s.waitingRoll=false
 
@@ -1896,7 +2075,47 @@ local function V3InstallChatHooks()
     end
 end
 
-local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
+V3MassStart=function(continuing)
+    local s=CraftV3
+    local f=UI.craftV3
+    if not s or not f or V3RecipeTarget(s.recipe)~=0 or s.target~=0 then return end
+    if not HasAllRecipeMaterialsInBags(s.recipe)
+        or not HasProfessionConditions(s.recipe,s.workshopAvailable) then
+        V3MassStop("Composants ou conditions insuffisants.") return
+    end
+    if not continuing then
+        -- Compute the finite limit from net consumption when an ingredient is returned.
+        local totals={}
+        for _,m in ipairs(s.materials) do
+            totals[m.itemID]=(totals[m.itemID] or 0)+math.max(1,tonumber(m.quantity) or 1)
+        end
+        local limit=nil
+        for id,qty in pairs(totals) do
+            local net=qty-((tonumber(id)==tonumber(s.recipe.outputItemID)) and V3OutputQuantity(s.recipe) or 0)
+            if net>0 then
+                local count=1+math.floor((GetRequiredBagCount(id)-qty)/net)
+                limit=math.min(limit or count,count)
+            end
+        end
+        if not limit or limit<1 then V3MassStop("Aucune limite finie de composants : Mass Craft indisponible.") return end
+        s.massRemaining=limit
+        s.massCount=0
+    end
+    s.mass=true
+    s.completed=false
+    s.rollTotal=0
+    s.hasDiceRoll=false
+    s.rollResolved=true
+    s.waitingRoll=false
+    f.repeatButton:Hide()
+    f.action:SetAttribute("macrotext","")
+    f.action:Hide()
+    f.massButton:SetCraftText("Arrêter après ce craft")
+    for _,line in ipairs(f.materialLines) do line:Hide() end
+    V3BeginChannel()
+end
+
+V3Open=function(recipe,natureModifier,selectedRollType,workshopAvailable)
     if CraftV3 then return end
     V3InstallChatHooks()
 
@@ -1943,7 +2162,7 @@ local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
     local f=CreateFrame("Frame",nil,UIParent,"BackdropTemplate")
     UI.craftV3=f
     f.veil=veil
-    f:SetSize(620,430)
+    f:SetSize(620,480)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetFrameLevel(710)
@@ -2061,12 +2280,37 @@ local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
     local modifier=(mod>0 and ("+"..mod)) or (mod<0 and tostring(mod)) or ""
 
     local roll=V3SecureButton(f,"Effectuer le jet",210,34)
-    roll:SetPoint("BOTTOM",0,62)
+    roll:SetPoint("BOTTOM",0,96)
     roll:SetAttribute("macrotext","/rd 1d20"..modifier.." "..rollType)
     f.roll=roll
 
     local action=V3SecureButton(f,"Incorporer le composant",300,34)
-    action:SetPoint("BOTTOM",0,22); action:Hide(); f.action=action
+    action:SetPoint("BOTTOM",0,70); action:Hide(); f.action=action
+
+    local repeatButton=V3SecureButton(f,"Refabriquer",150,30)
+    repeatButton:SetPoint("BOTTOMRIGHT",-44,32)
+    repeatButton:SetAttribute("type",nil)
+    repeatButton:SetAttribute("macrotext",nil)
+    repeatButton:Hide()
+    f.repeatButton=repeatButton
+
+    local massButton=Button(f,"Mass Craft",200,30)
+    massButton:SetPoint("BOTTOMLEFT",44,32)
+    f.massButton=massButton
+    if target~=0 then massButton:Hide() end
+    massButton:SetScript("OnClick",function()
+        local s=CraftV3
+        if not s then return end
+        if s.mass then
+            s.stopRequested=true
+            massButton:Disable()
+            massButton:SetText("Arrêt après ce craft")
+        elseif not s.rollResolved or s.completed then
+            V3MassStart(false)
+        end
+    end)
+    -- Match the secure-button label interface without adding a protected action.
+    function massButton:SetCraftText(text) self:SetText(text) end
 
     CraftV3={
         recipe=recipe,
@@ -2075,16 +2319,39 @@ local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
         rollType=rollType,
         target=target,                 -- FIGÉ depuis la recette
         modifier=mod,
+        workshopAvailable=workshopAvailable and true or false,
         waitingRoll=false,
         rollResolved=false,
         rollTotal=nil,
+        hasDiceRoll=false,
         paused=false,
         chatSnapshot=V3SnapshotChat(),
     }
 
+    repeatButton:SetScript("OnClick",function()
+        local s=CraftV3
+        if not s or not s.completed or s.mass or s.inventoryWait then return end
+        -- Explicit click-time gate, independent of the last displayed button state.
+        if not HasAllRecipeMaterialsInBags(s.recipe)
+            or not HasProfessionConditions(s.recipe,s.workshopAvailable) then
+            V3RefreshRepeatButton()
+            V3State("Composants ou conditions insuffisants.",1,.58,.46)
+            return
+        end
+        V3RefreshRepeatButton()
+        if not repeatButton:IsEnabled() then return end
+        local recipeToRepeat=s.recipe
+        local modifierToRepeat=s.modifier
+        local rollToRepeat=s.rollType
+        local workshopToRepeat=s.workshopAvailable
+        V3Close()
+        V3Open(recipeToRepeat,modifierToRepeat,rollToRepeat,workshopToRepeat)
+    end)
+
     roll:SetScript("PreClick",function()
         local s=CraftV3
         if not s or s.rollResolved then return end
+        if f.massButton then f.massButton:Hide() end
         s.chatSnapshot=V3SnapshotChat()
         s.waitingRoll=true
         V3State("Résolution du jet... seuil requis : "..s.target..".",.92,.78,.52)
@@ -2098,6 +2365,16 @@ local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
         local s=CraftV3
         if not s then return end
 
+        if s.completed then V3RefreshRepeatButton() end
+        if s.mass then
+            V3MassPoll()
+            if CraftV3~=s or not s.mass or s.inventoryWait then return end
+        elseif self.massButton and self.massButton:IsShown() then
+            local ready=HasAllRecipeMaterialsInBags(s.recipe)
+                and HasProfessionConditions(s.recipe,s.workshopAvailable)
+                and (not s.rollResolved or s.completed)
+            if ready then self.massButton:Enable() else self.massButton:Disable() end
+        end
         if s.waitingRoll then
             V3ScanNewChatLines()
             return
@@ -2124,7 +2401,9 @@ local function V3Open(recipe,natureModifier,selectedRollType,workshopAvailable)
         if s.elapsed>=10 then
             s.elapsed=nil
             self.bar:SetValue(10)
-            self.barText:SetText(V3IsSuccess() and "Confection réussie" or "Confection échouée")
+            self.barText:SetText(V3CriticalResult()=="success" and "Réussite critique"
+                or V3CriticalResult()=="failure" and "Échec critique"
+                or (V3IsSuccess() and "Confection réussie" or "Confection échouée"))
             V3Finish()
         end
     end)
@@ -2550,8 +2829,10 @@ RefreshDetails=function()
 
         local recipeProfession=V3RecipeProfession(recipe)
         local selectedRollType=V3RequiredRoll(recipe) or "Nature"
-        local selectedNatureModifier=0
-        local workshopAvailable=false
+        DB.craftPreferences = DB.craftPreferences or {}
+        local selectedNatureModifier=tonumber(DB.craftPreferences.modifier) or 0
+        if selectedNatureModifier>20 then selectedNatureModifier=20 elseif selectedNatureModifier<-20 then selectedNatureModifier=-20 end
+        local workshopAvailable=(DB.craftPreferences.workshopAvailable==true)
         local RefreshCraftButton
 
         -- Validation RP manuelle de l'atelier / installation de métier.
@@ -2613,6 +2894,7 @@ RefreshDetails=function()
 
         workshopButton:SetScript("OnClick",function()
             workshopAvailable=not workshopAvailable
+            DB.craftPreferences.workshopAvailable=workshopAvailable
             RefreshWorkshopButton()
             if RefreshCraftButton then RefreshCraftButton() end
         end)
@@ -2737,6 +3019,7 @@ RefreshDetails=function()
                 info.checked=(selectedNatureModifier==value)
                 info.func=function()
                     selectedNatureModifier=value
+                    DB.craftPreferences.modifier=value
                     UIDropDownMenu_SetSelectedValue(natureDrop,value)
                     natureValue:SetText((value>0 and ("+"..value)) or tostring(value))
                     CloseDropDownMenus()
@@ -2744,7 +3027,8 @@ RefreshDetails=function()
                 UIDropDownMenu_AddButton(info,level)
             end
         end)
-        UIDropDownMenu_SetSelectedValue(natureDrop,0)
+        UIDropDownMenu_SetSelectedValue(natureDrop,selectedNatureModifier)
+        natureValue:SetText((selectedNatureModifier>0 and ("+"..selectedNatureModifier)) or tostring(selectedNatureModifier))
 
         local craftButton=Button(page,"Fabriquer",108,28)
         craftButton:SetPoint("TOPLEFT",304,y+6)
@@ -4091,7 +4375,7 @@ end
 
 function GC:Disable()
     moduleEnabled = false
-    for _,key in ipairs({"main","editor","transferSender","transferReceiver","launcherButton"}) do
+    for _,key in ipairs({"main","editor","craftAssistant","transferSender","transferReceiver","launcherButton"}) do
         local frame=UI[key]
         if type(frame)=="table" and frame.Hide then frame:Hide() end
     end

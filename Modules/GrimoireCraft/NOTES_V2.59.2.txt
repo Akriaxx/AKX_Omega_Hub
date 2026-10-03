@@ -1,0 +1,28 @@
+GrimoireCraft V2.59.2 — Réussites et échecs critiques
+
+Dé naturel = Total du jet - modificateur signé sélectionné.
+Exemples : Total 25 et bonus +5 donnent 20 ; Total -4 et malus -5 donnent 1.
+
+- Dé naturel 20 : réussite critique, même sous le seuil de fabrication.
+  La quantité de la recette est doublée : 1 donne 2, 4 donne 8, etc.
+  Les composants requis ne sont consommés qu'une seule fois.
+- Dé naturel 1 : échec critique, même si le Total atteint le seuil.
+  Tous les composants requis sont consommés par les étapes habituelles,
+  y compris pour une recette mineure. Aucun objet n'est attribué.
+- Autres résultats : règle Total >= Rand inchangée.
+- Mass Craft à Rand 0 : aucun jet, donc aucun critique.
+- Refabriquer réinitialise le résultat critique et conserve les préférences.
+- Les quantités de sortie définies dans la recette sont respectées en
+  fabrication manuelle et en Mass Craft.
+
+Le dé est reconstitué à partir du Total affiché et du Bonus/Malus sélectionné
+à l'ouverture. Aucun autre modificateur extérieur n'est déduit.
+
+Installation : remplacer le dossier Interface/AddOns/GrimoireCraft par celui
+contenu dans ce ZIP puis /reload. Conserver les SavedVariables.
+Compatibilité Epsilon 9.2.7 et correctif d'envoi des commandes de V2.59.1 conservés.
+
+Validation : syntaxe Lua 5.1, parcours simulés complets de consommation et
+récompense, bonus/malus de -20 à +20 (cas représentatifs), critiques prioritaires,
+quantités multiples, échecs mineurs, réinitialisation et régressions Mass Craft.
+Validation en jeu non effectuée ici.
