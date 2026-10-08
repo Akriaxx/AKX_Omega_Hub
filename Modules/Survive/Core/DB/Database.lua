@@ -58,7 +58,7 @@ local rebuildFns = {}
 local NormalizePhraseList
 local NormalizeDisablePhraseEntries
 
-local UI = OS2.UI or {}
+local UI = OS2.SurviveUI or {}
 local DBSchema = (OS2.DB and OS2.DB.Schema) or {}
 
 local function Trim(text)

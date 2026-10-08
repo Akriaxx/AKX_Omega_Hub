@@ -1,7 +1,7 @@
 OS2 = OS2 or {}
 OS2.DB = OS2.DB or {}
 
-local UI = OS2.UI or {}
+local UI = OS2.SurviveUI or {}
 
 local PANEL_W = 220
 local PANEL_H = 214

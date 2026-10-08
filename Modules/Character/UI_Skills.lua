@@ -1,7 +1,7 @@
 -- ============================================================
 --  Character - Base de données de compétences
 --  Catégories (Actions de base / Offensive / Défensive /
---  Distance / Grimoire) + Index et États (hors du bouton Action), éditables via un builder (Paramètres -> Base de
+--  Distance / Grimoire) + Index et États, en sous-catégories (hors du bouton Action), éditables via un builder (Paramètres -> Base de
 --  données). Chaque compétence : nom, icône, description. Nom et
 --  description acceptent la couleur [[#rrggbb]]...[[/]] ; la
 --  description, des références croisées {{Catégorie : Nom}} qui
@@ -23,9 +23,29 @@ C.SKILL_CATEGORIES = {
     { key = "index",     label = "Index",                 tag = "Index",     aliases = { "index" }, hidden = true },
     -- États : fiches indicatives, comme l'Index (hors du bouton Action).
     -- ("É" n'est pas abaissé par lower() : les deux casses sont listées.)
-    { key = "etats",     label = "États",                 tag = "États",     aliases = { "états", "état", "etats", "etat", "États", "État" }, hidden = true },
+    -- "etats" garde les états créés avant les sous-catégories (« non classés »)
+    -- et {{États : Nom}} cherche aussi dans les sous-catégories.
+    { key = "etats",     label = "États non classés",     tag = "États",     aliases = { "états", "état", "etats", "etat", "États", "État" }, hidden = true },
+    -- Sous-catégories d'États : un même nom peut exister dans plusieurs
+    -- (une Brûlure élémentaire n'est pas une Brûlure physique). Rangées sous
+    -- l'onglet États du builder ; clé ≤ 16 caractères (protocole de partage).
+    { key = "etat_malediction", label = "États · Malédiction", tag = "Malédiction", aliases = { "malédiction", "malediction" }, hidden = true, parent = "etats" },
+    { key = "etat_temporel",    label = "États · Temporel",    tag = "Temporel",    aliases = { "temporel" }, hidden = true, parent = "etats" },
+    { key = "etat_elementaire", label = "États · Élémentaire", tag = "Élémentaire", aliases = { "élémentaire", "elementaire", "Élémentaire" }, hidden = true, parent = "etats" },
+    { key = "etat_psychique",   label = "États · Psychique",   tag = "Psychique",   aliases = { "psychique" }, hidden = true, parent = "etats" },
+    { key = "etat_physique",    label = "États · Physique",    tag = "Physique",    aliases = { "physique" }, hidden = true, parent = "etats" },
+    { key = "etat_position",    label = "États · Position",    tag = "Position",    aliases = { "position" }, hidden = true, parent = "etats" },
+    { key = "etat_combat",      label = "États · Combat",      tag = "Combat",      aliases = { "combat" }, hidden = true, parent = "etats" },
 }
 local CATEGORIES = C.SKILL_CATEGORIES
+
+-- Sous-catégories d'une catégorie (dans l'ordre de CATEGORIES).
+local function ChildCategories(key)
+    local list = {}
+    for _, cat in ipairs(CATEGORIES) do if cat.parent == key then list[#list + 1] = cat end end
+    return list
+end
+C.SkillChildCategories = function(_, key) return ChildCategories(key) end
 
 local COLOR_TAGS = {
     rouge  = "ffe23c3c", bleu   = "ff3ca0e2", vert  = "ff3ce26b", jaune = "ffe2d33c",
@@ -406,6 +426,32 @@ function C:FindSkillRef(catKey, name)
     for _, candidate in ipairs(self:ListAllSkills(catKey)) do
         if self:StripSkillMarkup(candidate.name):lower() == name then return candidate end
     end
+    -- {{États : Nom}} : un état rangé depuis dans une sous-catégorie reste
+    -- trouvé (la première sous-catégorie qui a ce nom).
+    for _, child in ipairs(ChildCategories(catKey)) do
+        local skill = self:FindSkillRef(child.key, name)
+        if skill then return skill, child.key end
+    end
+end
+
+-- Déplace une entrée vers une autre catégorie (sous-catégories d'États).
+function C:MoveSkill(fromKey, toKey, name)
+    if self:IsSkillLibraryReadOnly() then return false, "Lecture seule : seuls le créateur et ses éditeurs peuvent modifier" end
+    if not FindCategory(fromKey) or not FindCategory(toKey) then return false, "Catégorie inconnue" end
+    local db = GetSkillDB()
+    local skill = db[fromKey] and db[fromKey][name]
+    if not skill then return false, "Entrée introuvable" end
+    if fromKey == toKey then return true end
+    if db[toKey][name] then return false, "Ce nom existe déjà dans « " .. FindCategory(toKey).tag .. " »" end
+    db[fromKey][name], db[toKey][name] = nil, skill
+    -- Une entrée déplacée reste cochée pour le partage partiel.
+    local picked = not selectedOwner and CharacterDB.skillShare and CharacterDB.skillShare.picked
+    if picked and picked[fromKey] and picked[fromKey][name] then
+        picked[fromKey][name] = nil
+        picked[toKey] = picked[toKey] or {}; picked[toKey][name] = true
+    end
+    if self.OnSkillsChanged then self.OnSkillsChanged() end
+    return true
 end
 
 -- A leading quantity belongs to the visible link, not to its target.
@@ -1189,6 +1235,9 @@ local saveControl,deleteControl
 local pendingDelete
 local activeCat, editingName
 local RefreshList, RefreshForm
+-- Sous-catégorie choisie en dernier sous chaque onglet parent (États).
+local lastChildCat = {}
+local OnTabSelected
 local formFrame, formHint
 
 -- Le formulaire n'apparaît que pendant une création ou une modification ;
@@ -1290,10 +1339,21 @@ function RefreshForm()
 end
 
 local function SelectTab(cat)
+    -- Onglet parent (États) : on rouvre la dernière sous-catégorie, sinon
+    -- les non classés s'il en reste, sinon la première sous-catégorie.
+    local children = ChildCategories(cat.key)
+    if #children > 0 then
+        local unsorted = next(GetSkillDB()[cat.key] or {}) ~= nil
+        local last = lastChildCat[cat.key]
+        if last == cat and not unsorted then last = nil end
+        cat = last or (unsorted and cat) or children[1]
+    end
+    if cat.parent or #children > 0 then lastChildCat[cat.parent or cat.key] = cat end
     activeCat = cat
     pendingDelete=nil
     if searchEB then searchEB:SetText("") end
-    for _, btn in ipairs(tabButtons) do UI.ApplyTabState(btn, btn.cat == cat) end
+    for _, btn in ipairs(tabButtons) do UI.ApplyTabState(btn, btn.cat == cat or btn.cat.key == cat.parent) end
+    if OnTabSelected then OnTabSelected(cat) end
     RefreshList()
     RefreshForm()
     ShowStatus("")
@@ -1520,7 +1580,7 @@ local function BuildAutocomplete(editBox, owner)
         local after = text:sub(context.cursor + 1)
         local insert
         if entry.skill then
-            insert = "{{" .. context.cat.tag .. " : " .. ValuePrefix() .. C:StripSkillMarkup(entry.skill.name) .. "}}"
+            insert = "{{" .. (entry.cat or context.cat).tag .. " : " .. ValuePrefix() .. C:StripSkillMarkup(entry.skill.name) .. "}}"
             -- Remplace aussi la fin d'une référence déjà fermée ("...Nom}}").
             local tail = after:match("^[^{}\n]*}}")
             if tail then after = after:sub(#tail + 1) end
@@ -1560,6 +1620,15 @@ local function BuildAutocomplete(editBox, owner)
                     list[#list + 1] = { skill = skill }
                 end
             end
+            -- "{{États : " propose aussi les sous-catégories, insérées sous
+            -- leur propre étiquette ({{Malédiction : Nom}}).
+            for _, child in ipairs(ChildCategories(context.cat.key)) do
+                for _, skill in ipairs(C:ListSkills(child.key)) do
+                    if partial == "" or C:StripSkillMarkup(skill.name):lower():find(partial, 1, true) then
+                        list[#list + 1] = { skill = skill, cat = child }
+                    end
+                end
+            end
         else
             for _, cat in ipairs(CATEGORIES) do
                 if MatchesTag(cat, partial) then list[#list + 1] = { cat = cat } end
@@ -1584,7 +1653,7 @@ local function BuildAutocomplete(editBox, owner)
             if entry then
                 if entry.skill then
                     row.icon:SetTexture(C:ResolveIconValue(entry.skill.icon))
-                    row.text:SetText(ValuePrefix()..C:RenderSkillName(entry.skill.name))
+                    row.text:SetText(ValuePrefix()..C:RenderSkillName(entry.skill.name)..(entry.cat and "  |cff808080"..entry.cat.tag.."|r" or ""))
                 else
                     row.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
                     row.text:SetText(entry.cat.tag .. "  |cff808080" .. entry.cat.label .. "|r")
@@ -1837,6 +1906,119 @@ local function InsertReference(editBox)
     if autocomplete then autocomplete.Refresh() end
 end
 
+-- ── Sous-catégories d'États dans le builder ────────────────────────────────
+-- Sélecteur de sous-catégorie (colonne gauche) et « Déplacer vers… »
+-- (formulaire). Hors de Build, qui touche déjà la limite de 60 upvalues de Lua 5.1.
+local function BuildFamilyControls(panel, newBtn, deleteBtn)
+    -- Petit menu déroulant (sous-catégories d'États, « Déplacer vers »).
+    local pickMenu
+    local pickRows={}
+    local function OpenPickMenu(anchor,items,onPick)
+        if not pickMenu then
+            pickMenu=CreateFrame("Frame",nil,panel)
+            pickMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+            pickMenu:SetFrameLevel(panel:GetFrameLevel()+60)
+            local bg=pickMenu:CreateTexture(nil,"BACKGROUND")
+            bg:SetAllPoints();UI.ApplyWindowBackground(bg,.98);UI.ApplyBorder(pickMenu)
+            pickMenu:SetScript("OnShow",function(menu)
+                menu:SetScript("OnUpdate",function()
+                    if IsMouseButtonDown and IsMouseButtonDown() and not menu:IsMouseOver() and not (menu.anchor and menu.anchor:IsMouseOver()) then menu:Hide() end
+                end)
+            end)
+            panel:HookScript("OnHide",function() pickMenu:Hide() end)
+        end
+        if pickMenu:IsShown() and pickMenu.anchor==anchor then pickMenu:Hide();return end
+        pickMenu.anchor=anchor
+        local w=math.max(anchor:GetWidth(),170)
+        for i,item in ipairs(items) do
+            local row=pickRows[i]
+            if not row then
+                row=CreateFrame("Button",nil,pickMenu)
+                row:SetHeight(24);row:SetPoint("TOPLEFT",8,-8-(i-1)*24);row:SetPoint("RIGHT",-8,0)
+                row.label=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.label:SetPoint("LEFT",8,0);row.label:SetPoint("RIGHT",-34,0);row.label:SetJustifyH("LEFT");row.label:SetWordWrap(false)
+                row.count=row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                row.count:SetPoint("RIGHT",-6,0);UI.ApplyMutedText(row.count)
+                row.mark=row:CreateTexture(nil,"ARTWORK")
+                row.mark:SetPoint("TOPLEFT",0,-3);row.mark:SetPoint("BOTTOMLEFT",0,3);row.mark:SetWidth(2)
+                row.mark:SetColorTexture(.85,.70,.42,1)
+                local hl=row:CreateTexture(nil,"HIGHLIGHT");hl:SetAllPoints();hl:SetColorTexture(1,1,1,.12)
+                row:SetScript("OnClick",function(self) pickMenu:Hide();self.onPick(self.value) end)
+                pickRows[i]=row
+            end
+            row.value,row.onPick=item.value,onPick
+            row.label:SetText(item.label)
+            if item.current then row.label:SetTextColor(.91,.80,.57) else row.label:SetTextColor(1,1,1) end
+            row.mark:SetShown(item.current and true or false)
+            row.count:SetText(item.count or "")
+            row:Show()
+        end
+        for i=#items+1,#pickRows do pickRows[i]:Hide() end
+        pickMenu:SetSize(w,#items*24+16)
+        pickMenu:ClearAllPoints();pickMenu:SetPoint("TOPLEFT",anchor,"BOTTOMLEFT",0,-2)
+        pickMenu:Show()
+    end
+    local function CountIn(key) local n=0;for _ in pairs(GetSkillDB()[key] or {}) do n=n+1 end;return n end
+
+    -- Sous-catégorie affichée (onglet États seulement).
+    local subBtn=UI.CreatePanelButton(panel,LIST_W,24,"")
+    subBtn:SetPoint("TOPLEFT",newBtn,"BOTTOMLEFT",0,-6)
+    local subText=subBtn:GetFontString()
+    subText:ClearAllPoints();subText:SetPoint("LEFT",10,0);subText:SetPoint("RIGHT",-24,0);subText:SetJustifyH("LEFT")
+    local subArrow=subBtn:CreateTexture(nil,"OVERLAY")
+    subArrow:SetSize(12,12);subArrow:SetPoint("RIGHT",-8,0)
+    subArrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+    subBtn:Hide()
+    subBtn:SetScript("OnClick",function()
+        local parentKey=activeCat.parent or activeCat.key
+        local items={}
+        for _,child in ipairs(ChildCategories(parentKey)) do
+            items[#items+1]={label=child.tag,value=child,count=CountIn(child.key),current=child==activeCat}
+        end
+        -- Les états d'avant les sous-catégories, tant qu'il en reste.
+        local unsorted=CountIn(parentKey)
+        if unsorted>0 or activeCat.key==parentKey then
+            items[#items+1]={label="Non classés",value=FindCategory(parentKey),count=unsorted,current=activeCat.key==parentKey}
+        end
+        OpenPickMenu(subBtn,items,function(cat) SelectTab(cat) end)
+    end)
+
+    -- Onglet États : le sélecteur de sous-catégorie s'intercale sous
+    -- « + Nouvelle » et la liste raccourcit d'autant.
+    local function LayoutFamily(cat)
+        local family=cat.parent~=nil or #ChildCategories(cat.key)>0
+        subBtn:SetShown(family)
+        subText:SetText(cat.parent and cat.tag or "Non classés")
+        searchEB:ClearAllPoints()
+        searchEB:SetPoint("TOPLEFT",family and subBtn or newBtn,"BOTTOMLEFT",0,-22)
+        listViewport:SetHeight(PANEL_H-198-(family and 30 or 0))
+    end
+    -- Ranger un état dans une autre sous-catégorie (onglet États).
+    local moveBtn = UI.CreatePanelButton(panel.form, 150, 22, "Déplacer vers…")
+    moveBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 8, 0)
+    moveBtn:SetScript("OnClick", function()
+        if C:IsSkillLibraryReadOnly() then ShowStatus("Lecture seule : seuls le créateur et ses éditeurs peuvent modifier",true);return end
+        if not editingName then ShowStatus("Enregistrez d'abord l'entrée", true); return end
+        local items={}
+        for _,child in ipairs(ChildCategories(activeCat.parent or activeCat.key)) do
+            if child~=activeCat then items[#items+1]={label=child.tag,value=child} end
+        end
+        OpenPickMenu(moveBtn,items,function(target)
+            local name=editingName
+            local ok,err=C:MoveSkill(activeCat.key,target.key,name)
+            if not ok then ShowStatus(err,true);return end
+            local skill=C:GetSkill(target.key,name)
+            SelectTab(target)
+            if skill then LoadIntoForm(skill) end
+            ShowStatus("Déplacé dans « "..target.tag.." »")
+        end)
+    end)
+    OnTabSelected=function(cat)
+        LayoutFamily(cat)
+        moveBtn:SetShown(cat.parent~=nil or #ChildCategories(cat.key)>0)
+    end
+end
+
 local function Build()
     if panel then return panel end
 
@@ -1881,7 +2063,7 @@ local function Build()
             if cat.key==key then tabOrder[#tabOrder+1]=cat;break end
         end
     end
-    for _,cat in ipairs(CATEGORIES) do if cat.hidden then tabOrder[#tabOrder+1]=cat end end
+    for _,cat in ipairs(CATEGORIES) do if cat.hidden and not cat.parent then tabOrder[#tabOrder+1]=cat end end
     local tabW = (PANEL_W - 20) / #tabOrder
     local tabX, reach = 10, 0
     for i, cat in ipairs(tabOrder) do
@@ -2651,6 +2833,7 @@ local function Build()
     for _, region in ipairs({ panel:GetRegions() }) do
         if not existingRegions[region] then region:SetParent(formFrame) end
     end
+    BuildFamilyControls(panel, newBtn, deleteBtn)
     formHint = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     formHint:SetPoint("CENTER", panel, "TOPLEFT", formX + formW / 2, -PANEL_H / 2)
     formHint:SetWidth(formW - 40); formHint:SetJustifyH("CENTER")

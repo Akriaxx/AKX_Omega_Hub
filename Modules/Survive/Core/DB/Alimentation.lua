@@ -34,7 +34,7 @@ local alimentationPanel = nil
 local function GetOrCreateAlimentationPanel()
     if alimentationPanel then return alimentationPanel end
 
-    local UI   = OS2.UI or {}
+    local UI   = OS2.SurviveUI or {}
     local PA_W = 320
     local PA_H = 200
 

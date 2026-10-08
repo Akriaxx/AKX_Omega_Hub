@@ -101,9 +101,40 @@ local addBtn = UI.CreateAddButton(panel, function()
 end)
 addBtn:SetPoint("LEFT", listHeader, "RIGHT", 6, 0)
 
+-- Bouton de nettoyage : premier clic → compte + arme, second clic → confirme.
+local cleanBtn = UI.CreatePanelButton(panel, LIST_W, 22, "Purger les modèles")
+cleanBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD + 28)
+cleanBtn:SetScript("OnClick", function(self)
+    if self.armed then
+        local count = ZoneGate.CleanPresetThemes and ZoneGate:CleanPresetThemes() or 0
+        panel:RefreshAll()
+        self.armed = nil
+        self:SetText(count > 0 and (count .. " thème(s) supprimé(s)") or "Bibliothèque propre")
+        C_Timer.After(2.5, function() self:SetText("Purger les modèles") end)
+    else
+        local names = {}
+        for _, p in ipairs(ZoneGate.StudioPresets or {}) do names[p.name] = true end
+        local db = ZoneGate:GetDB()
+        local count = 0
+        for _, t in pairs(db.themes or {}) do
+            if names[t.name] then count = count + 1 end
+        end
+        if count == 0 then
+            self:SetText("Rien à nettoyer")
+            C_Timer.After(2, function() self:SetText("Purger les modèles") end)
+        else
+            self.armed = true
+            self:SetText("Confirmer (" .. count .. " thèmes)")
+            C_Timer.After(4, function()
+                if self.armed then self.armed = nil; self:SetText("Purger les modèles") end
+            end)
+        end
+    end
+end)
+
 local listScroll = CreateFrame("ScrollFrame", nil, panel)
 listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -(HEADER_H + 28))
-listScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD)
+listScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", PAD, PAD + 56)  -- 56 = bouton 22px + 28px de marge + 6px d'écart
 listScroll:SetWidth(LIST_W)
 listScroll:EnableMouseWheel(true)
 
@@ -594,7 +625,7 @@ end
 -- the only route for individual setting changes.
 panel.studioControls={
     title=titleText,form=form,edit=editForm,placeholder=placeholder,
-    listScroll=listScroll,listContent=listContent,listSep=listSep,listHeader=listHeader,
+    listScroll=listScroll,listContent=listContent,listSep=listSep,listHeader=listHeader,cleanBtn=cleanBtn,
     name=nameEB,delete=deleteBtn,preview=previewBtn,
     fontLabel=fontLabel,colorsLabel=colorsLabel,sepStyleLabel=sepStyleLabel,
     sepColorLbl=sepColorLbl,sepColorSwatch=sepColorSwatch,timingLabel=timingLabel,

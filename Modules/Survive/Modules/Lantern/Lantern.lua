@@ -6,7 +6,7 @@ local isLoggingOut = false
 local panelWasOpened = false
 local pendingRecharge = false
 local emoteEditContext = {}
-local UI = OS2.UI or {}
+local UI = OS2.SurviveUI or {}
 local ModuleRules = OS2.ModuleRules
 
 local DEFAULT_EMOTES = OS2.DefaultLanternEmotes or {
@@ -811,12 +811,12 @@ UI.ApplyWindowBackground(quickToggleBg, 0.92)
 local quickToggleIcon = quickToggleBtn:CreateTexture(nil, "ARTWORK")
 quickToggleIcon:SetPoint("TOPLEFT", quickToggleBtn, "TOPLEFT", 3, -3)
 quickToggleIcon:SetPoint("BOTTOMRIGHT", quickToggleBtn, "BOTTOMRIGHT", -3, 3)
-quickToggleIcon:SetTexture("Interface/Icons/INV_Misc_Lantern_01")
+quickToggleIcon:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/IconLantern")
 quickToggleIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
 local quickToggleBorder = quickToggleBtn:CreateTexture(nil, "OVERLAY")
 quickToggleBorder:SetAllPoints()
-quickToggleBorder:SetTexture("Interface/Buttons/UI-ActionButton-Border")
+quickToggleBorder:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/InitiativeRing.tga")
 quickToggleBorder:SetBlendMode("ADD")
 
 local quickToggleHL = quickToggleBtn:CreateTexture(nil, "HIGHLIGHT")

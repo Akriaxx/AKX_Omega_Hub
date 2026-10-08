@@ -13,7 +13,7 @@ local TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP = 0.60, 1.40, 0.05
 local WINDOW_SCALE_MIN  = 0.60
 local WINDOW_SCALE_MAX  = 1.60
 local WINDOW_SCALE_STEP = 0.05
-local UI = OS2.UI or {}
+local UI = OS2.SurviveUI or {}
 
 local tabBtns    = {}
 local tabContent = {}
@@ -179,7 +179,7 @@ slider:SetValueStep(0.05)
 slider:SetObeyStepOnDrag(true)
 
 local sliderBg = slider:CreateTexture(nil, "BACKGROUND")
-sliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
+sliderBg:SetColorTexture(.035,.05,.07,1)
 sliderBg:SetHeight(8)
 sliderBg:SetPoint("LEFT",  slider)
 sliderBg:SetPoint("RIGHT", slider)
@@ -212,7 +212,7 @@ launcherSizeSlider:SetValueStep(2)
 launcherSizeSlider:SetObeyStepOnDrag(true)
 
 local launcherSizeSliderBg = launcherSizeSlider:CreateTexture(nil, "BACKGROUND")
-launcherSizeSliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
+launcherSizeSliderBg:SetColorTexture(.035,.05,.07,1)
 launcherSizeSliderBg:SetHeight(8)
 launcherSizeSliderBg:SetPoint("LEFT",  launcherSizeSlider)
 launcherSizeSliderBg:SetPoint("RIGHT", launcherSizeSlider)
@@ -248,7 +248,7 @@ textSizeSlider:SetValueStep(TEXT_SCALE_STEP)
 textSizeSlider:SetObeyStepOnDrag(true)
 
 local textSizeSliderBg = textSizeSlider:CreateTexture(nil, "BACKGROUND")
-textSizeSliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
+textSizeSliderBg:SetColorTexture(.035,.05,.07,1)
 textSizeSliderBg:SetHeight(8)
 textSizeSliderBg:SetPoint("LEFT",  textSizeSlider)
 textSizeSliderBg:SetPoint("RIGHT", textSizeSlider)
@@ -280,7 +280,7 @@ iconSizeSlider:SetValueStep(2)
 iconSizeSlider:SetObeyStepOnDrag(true)
 
 local iconSizeSliderBg = iconSizeSlider:CreateTexture(nil, "BACKGROUND")
-iconSizeSliderBg:SetTexture("Interface/Buttons/UI-SliderBar-Background")
+iconSizeSliderBg:SetColorTexture(.035,.05,.07,1)
 iconSizeSliderBg:SetHeight(8)
 iconSizeSliderBg:SetPoint("LEFT",  iconSizeSlider)
 iconSizeSliderBg:SetPoint("RIGHT", iconSizeSlider)
@@ -427,14 +427,12 @@ for i, opt in ipairs(MENU_TYPE_OPTIONS) do
     local btn = CreatePanelButton(affichage, HALF_BTN_W, 22, opt.label)
     btn:SetPoint("TOPLEFT", affichage, "TOPLEFT", xOff, yOff)
 
-    -- Indicateur de sélection active : ligne colorée en bas du bouton
-    local activeLine = btn:CreateTexture(nil, "OVERLAY")
-    activeLine:SetHeight(2)
-    activeLine:SetPoint("BOTTOMLEFT",  btn, "BOTTOMLEFT",  2, 1)
-    activeLine:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
-    activeLine:SetColorTexture(unpack(UI.colors.tabLine))
-    activeLine:Hide()
-    btn.activeLine = activeLine
+    local activeFill = btn:CreateTexture(nil, "ARTWORK")
+    activeFill:SetPoint("TOPLEFT", btn, "TOPLEFT", 7, -5)
+    activeFill:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -7, 5)
+    activeFill:SetColorTexture(.65, .48, .19, .32)
+    activeFill:Hide()
+    btn.activeFill = activeFill
 
     btn.menuKey = opt.key
     btn:SetScript("OnClick", function()
@@ -448,7 +446,8 @@ OS2.RefreshMenuTypeButtons = function()
     local current = OS2.GetMenuType and OS2.GetMenuType() or "bas"
     for _, btn in ipairs(menuTypeButtons) do
         local active = (btn.menuKey == current)
-        btn.activeLine:SetShown(active)
+        btn.activeFill:SetShown(active)
+        btn:GetFontString():SetTextColor(active and 1 or .78, active and .89 or .75, active and .63 or .67, 1)
         btn.bgN:SetColorTexture(
             active and 0.18 or 0.10,
             active and 0.15 or 0.10,

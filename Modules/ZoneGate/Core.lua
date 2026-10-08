@@ -335,6 +335,8 @@ function ZG:CreateSubZone(zoneId, name)
         regionReady = false,     -- polygone "fermé" (voir FinishRegion) — inerte tant que faux
         forwardEnabled  = true,  -- bannière en entrant
         backwardEnabled = true,  -- bannière en sortant
+        forwardName     = "",    -- nom affiché à l'entrée
+        backwardName    = "",    -- nom affiché à la sortie
         actionMessage = "",           -- texte imprimé localement (jamais visible d'autrui)
         actionCommand = "",           -- voir RunCrossingAction — ID d'aura (nombre) ou commande brute
         actionForwardEnabled  = false, -- action en entrant — décoché par défaut (opt-in)
@@ -377,6 +379,7 @@ function ZG:CloneSubZone(id)
         width = sub.width, shape = sub.shape,
         points = points or {}, regionReady = sub.regionReady or false,
         forwardEnabled = sub.forwardEnabled, backwardEnabled = sub.backwardEnabled,
+        forwardName = sub.forwardName or "", backwardName = sub.backwardName or "",
         actionMessage = sub.actionMessage or "", actionCommand = sub.actionCommand or "",
         actionForwardEnabled = sub.actionForwardEnabled or false,
         actionBackwardEnabled = sub.actionBackwardEnabled or false,
@@ -931,13 +934,23 @@ end
 --   4. les deux connus  → "<nom de zone>"  / "<nom de sous-zone>"
 -- L'auteur de la Zone voit toujours tout en clair, quel que soit ce qu'il
 -- s'est débloqué à lui-même (il connaît forcément déjà les deux noms).
-function ZG:ResolveBannerText(sub, zone)
+function ZG:ResolveBannerText(sub, zone, direction)
     if not sub or not zone then return nil end
     local mine = zone.creator == MyName()
     local zoneKnown = mine or ZG:HasLearnedZoneName(zone.id)
     local subKnown  = mine or ZG:HasLearnedSubZoneName(sub.id)
+
     local title    = zoneKnown and zone.name or "Zone inconnue"
-    local subtitle = subKnown  and sub.name  or ZG:MaskText(sub.name)
+
+    -- Utilise forwardName ou backwardName si définis, sinon tombe sur le nom standard
+    local baseSubName = sub.name
+    if direction == "forward" and sub.forwardName and sub.forwardName ~= "" then
+        baseSubName = sub.forwardName
+    elseif direction == "backward" and sub.backwardName and sub.backwardName ~= "" then
+        baseSubName = sub.backwardName
+    end
+
+    local subtitle = subKnown and baseSubName or ZG:MaskText(baseSubName)
     return title, subtitle
 end
 
@@ -1127,7 +1140,7 @@ function ZG:TriggerCrossing(sub, zone, direction)
     local theme = ZG:ResolveTheme(sub, zone)
 
     if (direction == "forward" and sub.forwardEnabled) or (direction == "backward" and sub.backwardEnabled) then
-        local title, subtitle = ZG:ResolveBannerText(sub, zone)
+        local title, subtitle = ZG:ResolveBannerText(sub, zone, direction)
         if title and ZG.ShowBanner then
             ZG:ShowBanner(title, subtitle, theme)
         end
@@ -1226,6 +1239,7 @@ local function PackState()
                     Enc(sub.shape or "line"),
                     sub.forwardEnabled and 1 or 0, sub.backwardEnabled and 1 or 0,
                     sub.regionReady and 1 or 0, PackPoints(sub.points),
+                    Enc(sub.forwardName or ""), Enc(sub.backwardName or ""),
                     Enc(sub.actionMessage or ""), Enc(sub.actionCommand or ""),
                     sub.actionForwardEnabled and 1 or 0, sub.actionBackwardEnabled and 1 or 0,
                     Enc(sub.themeId or ""),
@@ -1280,10 +1294,10 @@ local function ApplyStateLine(line, sender)
         end
     elseif tag == "SUB" then
         local id, zoneId, name, enabled, mapID, x, y, facing, width, shape, fwdEn, backEn, regionReady, pointsStr,
-              actionMessage, actionCommand, actFwdEn, actBackEn, themeId =
+              fwdName, backName, actionMessage, actionCommand, actFwdEn, actBackEn, themeId =
             fields[2], fields[3], fields[4], fields[5], fields[6],
             fields[7], fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
-            fields[14], fields[15], fields[16], fields[17], fields[18], fields[19], fields[20]
+            fields[14], fields[15], fields[16], fields[17], fields[18], fields[19], fields[20], fields[21], fields[22]
         local zone = ZoneGateDB.zones[zoneId]
         if zone and id and id ~= "" then
             zone.subZones[id] = {
@@ -1294,6 +1308,8 @@ local function ApplyStateLine(line, sender)
                 shape = (shape == "circle" and "circle") or (shape == "polygon" and "polygon") or "line",
                 forwardEnabled  = fwdEn == "1",
                 backwardEnabled = backEn == "1",
+                forwardName = fwdName or "",
+                backwardName = backName or "",
                 regionReady = regionReady == "1",
                 points = UnpackPoints(pointsStr),
                 actionMessage = actionMessage or "",
@@ -1621,8 +1637,14 @@ function ZG:Enable()
     SLASH_OZONEGATE1 = "/oche"
     SLASH_OZONEGATE2 = "/ocheck"
     SLASH_OZONEGATE3 = "/crossings"
-    SlashCmdList["OZONEGATE"] = function()
-        if ZoneGatePanel then ZoneGatePanel:Toggle() end
+    SlashCmdList["OZONEGATE"] = function(msg)
+        local arg=(msg or ""):match("^%s*(%S+)") or ""
+        if arg=="clean" then
+            local count=ZG.CleanPresetThemes and ZG:CleanPresetThemes() or 0
+            OmegaHub.Print(count>0 and (count.." thème(s) de galerie supprimé(s).") or "Bibliothèque déjà propre.")
+        else
+            if ZoneGatePanel then ZoneGatePanel:Toggle() end
+        end
     end
 
     ZG:ResetState()

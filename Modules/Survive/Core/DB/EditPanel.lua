@@ -4,7 +4,7 @@ OS2.DB = OS2.DB or {}
 function OS2.DB.CreateEditPanel(deps)
     deps = deps or {}
 
-    local UI = deps.UI or OS2.UI or {}
+    local UI = deps.UI or OS2.SurviveUI or {}
     local DBSchema = deps.DBSchema or {}
     local Trim = deps.Trim or function(text) return text or "" end
     local CreatePanelButton = deps.CreatePanelButton or UI.CreatePanelButton

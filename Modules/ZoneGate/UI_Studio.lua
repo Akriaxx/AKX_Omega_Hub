@@ -27,6 +27,7 @@ fit()
 
 -- Library and contextual settings.
 place(c.listScroll,panel,12,110);c.listScroll:SetHeight(628)
+if c.cleanBtn then c.cleanBtn:Hide() end  -- nettoyage via /crossings clean dans l'Atelier
 place(c.listSep,panel,196,48);c.listSep:SetHeight(696)
 place(c.form,panel,816,80);c.form:SetSize(448,650)
 c.placeholder:SetWidth(420);c.placeholder:SetText("Choisissez un modèle pour ouvrir le builder.\n\nPersonnalisez votre brouillon, puis cliquez sur Créer le thème. Rien n'est ajouté à la bibliothèque avant cette validation.")

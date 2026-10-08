@@ -1,0 +1,8 @@
+## Interface: 90207
+## Title: Grimoire de Craft
+## Version: 2.59.2
+## OptionalDeps: EpsilonLib
+## SavedVariables: GrimoireCraftDB
+ObjectDatabase.lua
+RecipeDatabase.lua
+GrimoireCraft.lua

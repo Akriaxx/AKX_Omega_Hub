@@ -62,6 +62,7 @@ Modules\Survive\Version.lua
 Modules\Survive\Core\MenuItems.lua
 Modules\Survive\Core\DefaultEmotes.lua
 Modules\Survive\Core\UI.lua
+Modules\Survive\Core\Theme.lua
 Modules\Survive\Core\ModuleRules.lua
 Modules\Survive\Core\DB\DatabaseSchema.lua
 Modules\Survive\Core\DB\Lantern_db.lua

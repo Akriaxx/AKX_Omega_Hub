@@ -418,7 +418,7 @@ end
 
 -- ── Général ─────────────────────────────────────────────────────────────
 local function RenderGeneralSection(container, data)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
 
     local lblNom = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -460,7 +460,7 @@ end
 
 -- ── Gourdes ─────────────────────────────────────────────────────────────
 local function BuildGourdeForm(form, item, filtres, Refresh)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = form:GetWidth()
     local y = 0
 
@@ -590,7 +590,7 @@ local function BuildGourdeForm(form, item, filtres, Refresh)
 end
 
 local function RenderGourdesSection(container, data)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
 
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -641,7 +641,7 @@ end
 
 -- ── Effet d'un État : Aura (appliquer/retirer) ou Message ──────────────
 local function RenderEtatActionView(container, action, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
 
     local typeOptions = { "aura", "message" }
@@ -688,7 +688,7 @@ end
 
 -- ── États (bibliothèque commune, utilisée par Filtres et Sources) ──────
 local function RenderEtatsSection(container, data, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
     hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
@@ -808,7 +808,7 @@ end
 
 -- ── Filtres (bibliothèque, équipables sur les Gourdes) ─────────────────
 local function RenderFiltresSection(container, data)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
     hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
@@ -902,7 +902,7 @@ end
 
 -- ── Sources (Types d'eau) ───────────────────────────────────────────────
 local function BuildSourceForm(form, item, Refresh, nav, etats)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = form:GetWidth()
     local y = 0
 
@@ -977,7 +977,7 @@ local function BuildSourceForm(form, item, Refresh, nav, etats)
 end
 
 local function RenderSourcesSection(container, data, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
     hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
@@ -1015,7 +1015,7 @@ end
 
 -- ── Clés ────────────────────────────────────────────────────────────────
 local function RenderClesSection(container, data)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
     hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
@@ -1084,7 +1084,7 @@ end
 local RenderOperandView, RenderActionView, RenderConditionView, BuildActionBranch
 
 RenderOperandView = function(container, op, cles, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
 
     local typeOptions = { "fixed", "cle", "expr" }
@@ -1193,7 +1193,7 @@ RenderOperandView = function(container, op, cles, nav)
 end
 
 RenderActionView = function(container, action, cles, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
 
     local typeOptions = { "formule", "aura", "message" }
@@ -1254,7 +1254,7 @@ RenderActionView = function(container, action, cles, nav)
 end
 
 BuildActionBranch = function(container, y, W, title, actions, cles, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local lbl = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); lbl:SetText(title); UI.ApplyStrongLabel(lbl)
 
@@ -1287,7 +1287,7 @@ BuildActionBranch = function(container, y, W, title, actions, cles, nav)
 end
 
 RenderConditionView = function(container, cond, cles, nav, showLabel)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local W = container:GetWidth()
     local y = 0
 
@@ -1373,7 +1373,7 @@ RenderConditionView = function(container, cond, cles, nav, showLabel)
 end
 
 local function RenderConditionsSection(container, data, nav)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     local hint = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0); hint:SetPoint("TOPRIGHT", container, "TOPRIGHT", -100, 0)
     hint:SetJustifyH("LEFT"); UI.ApplySoftText(hint)
@@ -1410,7 +1410,7 @@ end
 
 -- ── Fonctionnement : Base + Conditions (Capacité / Vitesse) + Paliers ──
 local function RenderFonctionnementSection(container, data)
-    local UI = OS2.UI or {}
+    local UI = OS2.SurviveUI or {}
     data.fonctionnement = data.fonctionnement or {}
     local fonct = data.fonctionnement
     fonct.capacite = fonct.capacite or {}
@@ -1638,7 +1638,7 @@ local builderWindow = nil
 
 local function GetOrCreateHydratationBuilder()
     if builderWindow then return builderWindow end
-    local UI       = OS2.UI or {}
+    local UI       = OS2.SurviveUI or {}
     local WW, WH   = 700, 580
     local PAD      = 14
     local HDR_H    = 36

@@ -48,7 +48,7 @@ ZG.StudioDesigns={classic="Classique",souls="Cendres — dark fantasy",western="
 ZG.StudioMotions={fade="Fondu lent",rise="Élévation",stamp="Impact",split="Déploiement"}
 ZG.StudioPlacements={top="Haut de l'écran",center="Centre",bottom="Bas de l'écran"}
 ZG.StudioPresets={
-    {name="Cendres",caption="Dark fantasy · solennel",design="souls",motion="fade",font="cinzel",color={.88,.85,.77},sub={.60,.58,.53},bg={.12,.11,.09,.9},frame="none",sep="none",size=34,hold=4},
+    {name="Cendres",caption="Dark fantasy · solennel",design="souls",motion="fade",font="cinzel",color={.98,.95,.87},sub={.85,.83,.78},bg={.18,.16,.14,.9},frame="none",sep="none",size=34,hold=4},
     {name="Frontière",caption="Western · encre rouge",design="western",motion="stamp",font="cinzel",color={1,.93,.78},sub={.92,.78,.62},bg={.48,.045,.025,.95},frame="none",sep="none",size=34,hold=3},
     {name="Encre",caption="Samouraï · geste au pinceau",design="sumi",motion="split",font="metamorphous",color={.96,.92,.82},sub={.81,.75,.63},bg={.12,.10,.09,.95},frame="none",sep="none",size=32,hold=3},
     {name="Signal",caption="Science-fiction · terminal",design="scifi",motion="rise",font="cinzel",color={.60,.96,1},sub={.60,.78,.80},bg={.04,.35,.40,.9},frame="none",sep="none",size=28,hold=2.5},
@@ -139,4 +139,17 @@ function ZG:CreateStudioTheme(preset,source)
     snapshot.name=theme.name
     self:RestoreStudioTheme(theme.id,snapshot)
     return theme
+end
+-- Supprime tous les thèmes dont le nom correspond exactement à un preset de galerie.
+-- Retourne le nombre de thèmes supprimés.
+function ZG:CleanPresetThemes()
+    local names={}
+    for _,p in ipairs(self.StudioPresets) do names[p.name]=true end
+    local db=self:GetDB()
+    local count=0
+    for id,t in pairs(db.themes or {}) do
+        if names[t.name] then db.themes[id]=nil;count=count+1 end
+    end
+    if count>0 then self:ScheduleBroadcast() end
+    return count
 end

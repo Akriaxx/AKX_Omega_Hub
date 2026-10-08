@@ -17,7 +17,7 @@ local MEDIA_DIR = "Interface\\AddOns\\Omega_Hub\\Modules\\ZoneGate\\Media\\"
 function ZG.CreateBannerRenderer(parent, name)
 local banner = CreateFrame("Frame", name, parent or UIParent)
 banner:SetSize(600, 90)
-banner:SetPoint("TOP", UIParent, "TOP", 0, -140)
+banner:SetPoint("TOP", UIParent, "TOP", 0, -100)
 banner:SetFrameStrata("HIGH")
 banner:EnableMouse(false)
 banner:SetAlpha(0)
@@ -153,6 +153,14 @@ lineBottom2:SetSize(360, 1)
 -- police introuvable pour une raison ou une autre.
 local DEFAULT_FONT_PATH = title:GetFont() or "Fonts\\FRIZQT__.TTF"
 
+-- ── Décalage vertical du bandeau ───────────────────────────────────────────
+-- Utilisé pour ajuster la position de la bannière sur l'écran.
+local bannerYOffset = -140
+
+function banner:SetYOffset(offset)
+    bannerYOffset = offset or -140
+end
+
 -- ── Animation : fade in → hold → fade out ─────────────────────────────────
 -- Durées reprises depuis le thème à chaque ShowBanner (voir ApplyTheme) —
 -- celles ci-dessous ne sont que les valeurs de secours au tout premier
@@ -212,8 +220,10 @@ local function ApplyTheme(theme)
 
     local tc = theme.titleColor or ZG.DefaultTheme.titleColor
     title:SetTextColor(tc[1], tc[2], tc[3], 1)
+    title:SetShadowOffset(1, -1)
     local sc = theme.subColor or ZG.DefaultTheme.subColor
     sub:SetTextColor(sc[1], sc[2], sc[3], 1)
+    sub:SetShadowOffset(1, -1)
 
     local sep = theme.sepColor or ZG.DefaultTheme.sepColor
     for _, tex in ipairs({ lineTop, lineBottom }) do
@@ -330,9 +340,15 @@ function banner:ShowBanner(zoneName, subName, theme)
     if name=="ZoneGateBanner" then
         self:ClearAllPoints()
         local placement=(theme or ZG.DefaultTheme).placement
-        if placement=="center" then self:SetPoint("CENTER",UIParent,"CENTER",0,0)
-        elseif placement=="bottom" then self:SetPoint("BOTTOM",UIParent,"BOTTOM",0,160)
-        else self:SetPoint("TOP",UIParent,"TOP",0,-140) end
+        local offset = (theme or ZG.DefaultTheme).yOffset or bannerYOffset
+        if placement=="center" then
+            self:SetPoint("CENTER",UIParent,"CENTER",0,0)
+        elseif placement=="bottom" then
+            self:SetPoint("BOTTOM",UIParent,"BOTTOM",0,160)
+        else
+            -- Centrage horizontal + Offset vertical depuis le TOP
+            self:SetPoint("TOP", UIParent, "TOP", 0, offset)
+        end
     end
     local elapsed=0
     self:SetScript("OnUpdate",function(_,dt)

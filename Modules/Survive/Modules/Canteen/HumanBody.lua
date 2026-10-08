@@ -1,6 +1,6 @@
 -- OmegaSurvive 2.0 — Corps Humain v2
 OS2    = OS2    or {}
-OS2.UI = OS2.UI or {}
+OS2.SurviveUI = OS2.SurviveUI or {}
 
 local bodyPanel = nil
 
@@ -17,7 +17,7 @@ local OT      = 2                              -- outline thickness
 
 local function GetOrCreateBodyPanel()
     if bodyPanel then return bodyPanel end
-    local UI = OS2.UI
+    local UI = OS2.SurviveUI
 
     -- Panel
     local PW, PH = 260, 430

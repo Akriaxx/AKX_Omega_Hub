@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(git push *)",
+      "Bash(git remote *)",
+      "Bash(gh pr create --title 'UI polish : gear buttons, tooltips, close button fix, text scale slider removal' --body ' *)",
+      "PowerShell(Get-Command gh -ErrorAction SilentlyContinue)",
+      "Bash(lua -v)",
+      "Bash(lua5.1 -v)",
+      "Bash(grep -n \"^local function\\\\|^function\\\\|^end$\" \"Modules/Survive/Core/DB/Hydratation.lua\")",
+      "Bash(python3 -)",
+      "Bash(grep -n \"^local function GetOrCreateReglesPanel\\\\|^local function OpenReglesPanel\\\\|^end$\" \"Modules/Survive/Core/DB/Hydratation.lua\")",
+      "Bash(apt-cache policy *)",
+      "Bash(command -v apt-get)",
+      "Bash(python3 -c \"import lupa\")",
+      "Bash(sudo apt-get install -y lua5.1)",
+      "Bash(apt-get install *)",
+      "Bash(pip install *)",
+      "Bash(command -v node npx)",
+      "Bash(node -e \"require\\('luaparse'\\)\")",
+      "Read(//tmp/**)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(node -e ' *)",
+      "Bash(grep -n \"p:Show\\(\\); nomEB:SetFocus\\(\\) end$\\\\|p:Show\\(\\)$\" /mnt/e/Games/Epsilon/_retail_/Interface/AddOns/Omega_Hub/Modules/Survive/Core/DB/Hydratation.lua)",
+      "Bash(grep -n \"RefreshCleDropdownText\\(\\)\\\\s*$\" /mnt/e/Games/Epsilon/_retail_/Interface/AddOns/Omega_Hub/Modules/Survive/Core/DB/Hydratation.lua)",
+      "Bash(luac -v)",
+      "Bash(apt list *)",
+      "Bash(python3 -c \"print\\('no lua'\\)\")",
+      "Bash(sudo apt-get install -y lua5.3)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(grep *)"
+    ]
+  }
+}

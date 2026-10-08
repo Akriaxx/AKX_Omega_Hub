@@ -760,17 +760,39 @@ backEnabledCB:SetScript("OnClick", function(self)
     end
 end)
 
+-- ── Noms personnalisés (Entrée / Sortie) ─────────────────────────────
+local nameTitle = subForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+nameTitle:SetPoint("TOPLEFT", sfStatusFS, "BOTTOMLEFT", 0, -10)
+nameTitle:SetText("Noms affichés (Entrée / Sortie) :")
+UI.ApplyLabel(nameTitle)
+
+local sfFwdNameEB = UI.CreateStyledEditBox(subForm, 200, 20, false)
+sfFwdNameEB:SetPoint("TOPLEFT", nameTitle, "BOTTOMLEFT", 2, -6)
+sfFwdNameEB:SetMaxLetters(64)
+sfFwdNameEB:SetScript("OnTextChanged", function(self)
+    if panel.suppressEvents or not panel.selectedSubZoneId then return end
+    local sub, zone = ZG:FindSubZone(panel.selectedSubZoneId)
+    if sub and zone and zone.creator == MyName() then
+        sub.forwardName = self:GetText()
+        ZG:ScheduleBroadcast()
+    end
+end)
+
+local sfBackNameEB = UI.CreateStyledEditBox(subForm, 200, 20, false)
+sfBackNameEB:SetPoint("LEFT", sfFwdNameEB, "RIGHT", 8, 0)
+sfBackNameEB:SetMaxLetters(64)
+sfBackNameEB:SetScript("OnTextChanged", function(self)
+    if panel.suppressEvents or not panel.selectedSubZoneId then return end
+    local sub, zone = ZG:FindSubZone(panel.selectedSubZoneId)
+    if sub and zone and zone.creator == MyName() then
+        sub.backwardName = self:GetText()
+        ZG:ScheduleBroadcast()
+    end
+end)
+
 -- ── Action personnalisée au franchissement (aura / commande / message) ────
--- Indépendante de la bannière ci-dessus (ENTRÉE/RETOUR séparés). Le message
--- s'imprime dans le chat local de QUICONQUE franchit. La commande passe par
--- OS2.ModuleRules.ExecuteServerCommand (même mécanique que les règles
--- d'aura de Lantern/Torch — un ID numérique devient ".aura"/".unaura",
--- sinon la commande est envoyée telle quelle en /raid, /g ou /s). S'applique
--- à TOUT joueur qui franchit, y compris une sous-zone créée par quelqu'un
--- d'autre — volontaire (outil MJ : forcer un message/une aura à un joueur
--- sans qu'il ait à autoriser quoi que ce soit), voir RunCrossingAction.
 local actionTitle = subForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-actionTitle:SetPoint("TOPLEFT", radarRow, "BOTTOMLEFT", 2, -12)
+actionTitle:SetPoint("TOPLEFT", sfFwdNameEB, "BOTTOMLEFT", -2, -12)
 actionTitle:SetText("Action personnalisée au franchissement")
 UI.ApplyLabel(actionTitle)
 
@@ -849,6 +871,11 @@ function panel:RefreshSubZoneForm()
 
     sfActiveCB:SetChecked(sub.enabled)
 
+    panel.suppressEvents = true
+    sfFwdNameEB:SetText(sub.forwardName or "")
+    sfBackNameEB:SetText(sub.backwardName or "")
+    panel.suppressEvents = false
+
     sfThemeLabel:SetShown(mine)
     sfThemeDropdown:SetShown(mine)
     sfEditThemeBtn:SetShown(mine)
@@ -918,6 +945,11 @@ function panel:RefreshSubZoneForm()
     fwdEnabledCB:SetChecked(sub.forwardEnabled)
     backEnabledCB:SetChecked(sub.backwardEnabled)
 
+    panel.suppressEvents = true
+    sfFwdNameEB:SetText(sub.forwardName or "")
+    sfBackNameEB:SetText(sub.backwardName or "")
+    panel.suppressEvents = false
+
     -- Recapturer/Cloner déplacent UN point unique (ligne/cercle) — pas de
     -- sens simple pour une région à N points, donc masqués pour "polygon".
     recaptureBtn:SetShown(mine and not isPolygon)
@@ -929,6 +961,9 @@ function panel:RefreshSubZoneForm()
 
     -- Action personnalisée : édition réservée à l'auteur (comme le reste de
     -- la configuration du checkpoint).
+    nameTitle:SetShown(mine)
+    sfFwdNameEB:SetShown(mine)
+    sfBackNameEB:SetShown(mine)
     actionTitle:SetShown(mine)
     actionMsgLabel:SetShown(mine); actionMsgEB:SetShown(mine)
     actionCmdLabel:SetShown(mine); actionCmdEB:SetShown(mine)

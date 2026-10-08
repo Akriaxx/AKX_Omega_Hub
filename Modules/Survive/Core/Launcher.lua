@@ -3,8 +3,8 @@ local ADDON = "Omega_Hub"
 
 local BTN_SIZE     = 36
 local ICON_SIZE    = 36
-local ICON_GAP     = 8
-local LAUNCHER_ICON_OVERFLOW = 0.48   -- outward overflow fraction for the launcher icon texture
+local ICON_GAP     = 14
+local LAUNCHER_ICON_OVERFLOW = 0.10   -- outward overflow fraction for the launcher icon texture
 local ApplyLauncherIconSize           -- forward declaration (defined near the Launcher button block)
 -- ICON_RADIUS is computed dynamically: launcherSize/2 + gap + iconSize/2,
 -- so icons always clear the launcher edge and scale with both size settings.
@@ -12,7 +12,7 @@ local ApplyLauncherIconSize           -- forward declaration (defined near the L
 local function GetIconRadius()
     local launcherSize = (OS2DB and OS2DB.launcherSize) or BTN_SIZE
     local iconSize     = (OS2DB and OS2DB.iconSize)     or ICON_SIZE
-    return math.floor(launcherSize / 2 + ICON_GAP + iconSize / 2)
+    return math.floor(launcherSize * (0.5 + LAUNCHER_ICON_OVERFLOW) + ICON_GAP + iconSize / 2)
 end
 
 -- Returns the current menu layout type, reading OS2DB directly to avoid EnsureDB forward ref.
@@ -33,7 +33,7 @@ local function GetButtonPos(i, total)
         return radius * math.cos(angle), radius * math.sin(angle)
     else
         -- Linear offset: each icon is one step further from the launcher edge.
-        local offset = math.floor(launcherSize / 2) + ICON_GAP
+        local offset = math.floor(launcherSize * (0.5 + LAUNCHER_ICON_OVERFLOW)) + ICON_GAP
                      + math.floor(iconSize / 2) + (i - 1) * (iconSize + ICON_GAP)
         if menuType == "droite" then return  offset,  0 end
         if menuType == "gauche" then return -offset,  0 end
@@ -46,12 +46,12 @@ local PANEL_GAP  = 8
 local FADE_TIME  = 0.15
 local PANEL_FADE = 0.11
 local SLIDE_TIME = 0.18
-local STAGGER    = 0.04
+local STAGGER    = 0.055
 
 -- Arc animation: the menu icon traces a 3-segment chord approximation of a circular arc.
 -- ARC_ANGLE controls the sweep (CCW, in radians). ARC_DUR is the total per-icon duration.
 local ARC_ANGLE = math.pi * 0.75          -- 135° CW sweep
-local ARC_DUR   = FADE_TIME * 2.0         -- total arc duration (0.30 s at default FADE_TIME)
+local ARC_DUR   = FADE_TIME * 2.6         -- total arc duration (0.30 s at default FADE_TIME)
 local ARC_C1    = math.cos(ARC_ANGLE / 3)
 local ARC_S1    = math.sin(ARC_ANGLE / 3)
 local ARC_C2    = math.cos(ARC_ANGLE * 2 / 3)
@@ -74,7 +74,7 @@ local DEFAULT_LANTERN_EMOTES = OS2.DefaultLanternEmotes or {}
 local DEFAULT_TORCH_EMOTES   = OS2.DefaultTorchEmotes   or {}
 local DEFAULT_MODELS = OS2.Core.Models or {}
 local DEFAULT_CRYSTALS = OS2.Core.Crystals or {}
-local UI = OS2.UI or {}
+local UI = OS2.SurviveUI or {}
 local LEGACY_DEFAULT_PROFILE_NAME = "Personnage"
 local PROFILE_FALLBACK_NAME = "Profil"
 
@@ -1247,13 +1247,13 @@ function OS2.BuildModuleShell(panel, options)
         shell.title = title
 
         local gear = CreateFrame("Button", nil, panel)
-        gear:SetSize(20, 20)
-        gear:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -8)
+        gear:SetSize(24, 24)
+        gear:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -7)
 
         local gearTex = gear:CreateTexture(nil, "ARTWORK")
         gearTex:SetAllPoints()
-        gearTex:SetTexture("Interface/Icons/INV_Misc_Gear_01")
-        gearTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        gearTex:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/IconSettings")
+        gearTex:SetTexCoord(.22,.78,.22,.78)
         shell.gearTex = gearTex
 
         local gearHL = gear:CreateTexture(nil, "HIGHLIGHT")
@@ -1261,6 +1261,14 @@ function OS2.BuildModuleShell(panel, options)
         gearHL:SetAllPoints()
         gearHL:SetBlendMode("ADD")
         shell.gearHL = gearHL
+        gearHL:SetAlpha(.25)
+        gear:SetScript("OnEnter",function(self)
+            gearTex:SetVertexColor(1,1,.8)
+            GameTooltip:SetOwner(self,"ANCHOR_RIGHT");GameTooltip:SetText("Paramètres");GameTooltip:Show()
+        end)
+        gear:SetScript("OnLeave",function()
+            gearTex:SetVertexColor(1,1,1);GameTooltip:Hide()
+        end)
 
         gear:SetScript("OnClick", function()
             if panel.os2OpenSettings then
@@ -1410,26 +1418,92 @@ do
     -- Dedicated rounded-square texture so the launcher background is neither
     -- a harsh square nor a full circle.
     local bg = Launcher:CreateTexture(nil, "BORDER")
-    bg:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Survive\\Core\\Media\\Launcher_bg")
+    bg:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Survive\\Core\\Media\\InitiativeRing.tga")
     bg:SetTexCoord(0, 1, 0, 1)
     Launcher.iconBg = bg
 
     -- ── Icon BLP ──────────────────────────────────────────────────────────────
     local tex = Launcher:CreateTexture(nil, "ARTWORK")
-    tex:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Survive\\Core\\Media\\Launcher_icon")
+    tex:SetTexture("Interface\\AddOns\\Omega_Hub\\Modules\\Survive\\Core\\Media\\IconSurvive")
     tex:SetTexCoord(0, 1, 0, 1)
     Launcher.iconTex = tex
 
     -- ── Highlight (BACKGROUND so it sits behind both bg and icon) ────────────
     -- Manually toggled via OnEnter/OnLeave since the HIGHLIGHT layer always draws on top.
     local hl = Launcher:CreateTexture(nil, "BACKGROUND")
-    hl:SetTexture("Interface/Buttons/ButtonHilight-Square")
-    hl:SetPoint("TOPLEFT",     Launcher, "TOPLEFT",     -3,  3)
-    hl:SetPoint("BOTTOMRIGHT", Launcher, "BOTTOMRIGHT",  3, -3)
+    hl:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/Nexus/NexusGlow")
+    hl:SetPoint("TOPLEFT",     Launcher.iconTex, "TOPLEFT",     -6,  6)
+    hl:SetPoint("BOTTOMRIGHT", Launcher.iconTex, "BOTTOMRIGHT",  6, -6)
+    hl:SetVertexColor(.9, .68, .3, .45)
     hl:SetBlendMode("ADD")
     hl:Hide()
     Launcher:SetScript("OnEnter", function() hl:Show() end)
     Launcher:SetScript("OnLeave", function() hl:Hide() end)
+    Launcher:HookScript("OnHide", function() hl:Hide() end)
+end
+
+-- Subtle breathing halo, orbiting embers on hover, and a short click pulse.
+-- Texture-only motion leaves the button's position and hit area unchanged.
+do
+    local glowPath="Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/Nexus/NexusGlow"
+    local halo=Launcher:CreateTexture(nil,"BACKGROUND")
+    halo:SetTexture(glowPath);halo:SetBlendMode("ADD")
+    halo:SetVertexColor(1,.67,.24,1)
+    halo:SetPoint("TOPLEFT",Launcher.iconTex,"TOPLEFT",-9,9)
+    halo:SetPoint("BOTTOMRIGHT",Launcher.iconTex,"BOTTOMRIGHT",9,-9)
+    halo:SetAlpha(0)
+    local pulseRing=Launcher:CreateTexture(nil,"OVERLAY",nil,7)
+    pulseRing:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/InitiativeRing.tga")
+    pulseRing:SetBlendMode("ADD");pulseRing:SetVertexColor(1,.82,.42,1)
+    pulseRing:SetPoint("CENTER",Launcher,"CENTER",0,-1);pulseRing:Hide()
+    local embers={}
+    for i=1,6 do
+        local spark=Launcher:CreateTexture(nil,"OVERLAY")
+        spark:SetColorTexture(1,.83,.39,1);spark:SetBlendMode("ADD")
+        spark:SetRotation(math.pi/4);spark:SetSize(3,3);spark:Hide()
+        embers[i]=spark
+    end
+    local clock,elapsed,hover,pulse=0,0,false,0
+    local function Reset()
+        elapsed=0;hover=false;pulse=0
+        halo:SetAlpha(0);pulseRing:Hide()
+        for _,spark in ipairs(embers) do spark:Hide() end
+    end
+    Launcher:HookScript("OnEnter",function() hover=true end)
+    Launcher:HookScript("OnLeave",function() hover=false end)
+    Launcher:HookScript("OnMouseUp",function(_,button)
+        if button=="LeftButton" and OS2.AnimationsEnabled() then pulse=1 end
+    end)
+    Launcher:HookScript("OnHide",Reset)
+    local fx=CreateFrame("Frame",nil,Launcher)
+    fx:SetAllPoints();fx:EnableMouse(false)
+    fx:SetScript("OnUpdate",function(_,dt)
+        elapsed=elapsed+dt
+        if elapsed<1/30 then return end
+        local step=elapsed;elapsed=0
+        if not OS2.AnimationsEnabled() then Reset();return end
+        clock=clock+step;pulse=math.max(0,pulse-step/0.7)
+        halo:SetAlpha(.10+.045*(1+math.sin(clock*1.7))+(hover and .08 or 0)+pulse*.35)
+        local radius=Launcher:GetWidth()*(.5+LAUNCHER_ICON_OVERFLOW)
+        pulseRing:SetShown(pulse>0)
+        if pulse>0 then
+            local diameter=radius*2*(1.05+(1-pulse)*.7)
+            pulseRing:SetSize(diameter,diameter)
+            pulseRing:SetAlpha(math.sin(math.pi*pulse)*.95)
+        end
+        for i,spark in ipairs(embers) do
+            local strength=hover and 1 or math.max(.45,pulse)
+            spark:SetShown(strength>0)
+            if strength>0 then
+                local angle=clock*.85+i*math.pi/3
+                spark:ClearAllPoints()
+                spark:SetPoint("CENTER",Launcher,"CENTER",math.cos(angle)*(radius+6+(1-pulse)*pulse*18),math.sin(angle)*(radius+6+(1-pulse)*pulse*18)-1)
+                spark:SetAlpha(strength*(.4+.6*math.sin(clock*2+i)^2))
+                local size=(hover and 3 or 2)+pulse*2
+                spark:SetSize(size,size)
+            end
+        end
+    end)
 end
 
 -- Apply at default size immediately; called again by SetLauncherSize on each resize.
@@ -1740,6 +1814,7 @@ local function EnsureButtonAnimations(btn)
     showAlpha:SetFromAlpha(0)
     showAlpha:SetToAlpha(1)
     showAlpha:SetDuration(ARC_DUR)
+    showAlpha:SetSmoothing("OUT")
     -- Phase 1: center → first arc waypoint
     local showArc1 = showAG:CreateAnimation("Translation")
     showArc1:SetDuration(phase)
@@ -1758,6 +1833,7 @@ local function EnsureButtonAnimations(btn)
     hideAlpha:SetDuration(FADE_TIME)
     local hideTrans = hideAG:CreateAnimation("Translation")
     hideTrans:SetDuration(FADE_TIME)
+    hideTrans:SetSmoothing("IN")
 
     btn.showAG    = showAG
     btn.showAlpha = showAlpha
@@ -1793,9 +1869,9 @@ local function UpdateButtonAnimPos(btn, x, y, index, total)
         btn.showArc3:SetOffset(x   - w2x,   y   - w2y)
     else
         -- Straight line split into 3 equal segments
-        btn.showArc1:SetOffset(x / 3, y / 3)
-        btn.showArc2:SetOffset(x / 3, y / 3)
-        btn.showArc3:SetOffset(x / 3, y / 3)
+        btn.showArc1:SetOffset(x * .65, y * .65)
+        btn.showArc2:SetOffset(x * .39, y * .39)
+        btn.showArc3:SetOffset(-x * .04, -y * .04)
     end
 
     -- Show: three stacked chord offsets that together reach (x, y)
@@ -1918,7 +1994,7 @@ for i, data in ipairs(ITEMS) do
     local tex = btn:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints()
     tex:SetTexture(data.tex)
-    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    tex:SetTexCoord(0, 1, 0, 1)
     SetCircleMask(tex, btn)
 
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -1926,6 +2002,39 @@ for i, data in ipairs(ITEMS) do
     hl:SetAllPoints()
     hl:SetVertexColor(1, 1, 1, 0.2)
 
+    -- A soft halo and a small icon lift respond without moving the hit area.
+    local glow=btn:CreateTexture(nil,"BACKGROUND")
+    glow:SetTexture("Interface/AddOns/Omega_Hub/Modules/Survive/Core/Media/Nexus/NexusGlow")
+    glow:SetPoint("TOPLEFT",-10,10);glow:SetPoint("BOTTOMRIGHT",10,-10)
+    glow:SetBlendMode("ADD");glow:SetVertexColor(.9,.68,.3,1);glow:SetAlpha(0)
+    local hover,amount=false,0
+    local function AnimateHover(self,dt)
+        local target=hover and 1 or 0
+        amount=amount+(target-amount)*math.min(1,dt*14)
+        if math.abs(target-amount)<.01 then amount=target;self:SetScript("OnUpdate",nil) end
+        glow:SetAlpha(amount*.55)
+        tex:ClearAllPoints()
+        tex:SetPoint("TOPLEFT",-amount*2,amount*3)
+        tex:SetPoint("BOTTOMRIGHT",amount*2,-amount)
+    end
+    btn:HookScript("OnEnter",function(self)
+        hover=true
+        if OS2.AnimationsEnabled() then self:SetScript("OnUpdate",AnimateHover)
+        else amount=1;AnimateHover(self,1) end
+        GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+        GameTooltip:SetText(data.label);GameTooltip:Show()
+    end)
+    btn:HookScript("OnLeave",function(self)
+        hover=false;GameTooltip:Hide()
+        if OS2.AnimationsEnabled() then self:SetScript("OnUpdate",AnimateHover)
+        else amount=0;AnimateHover(self,1) end
+    end)
+    btn:HookScript("OnHide",function(self)
+        hover=false;amount=0;glow:SetAlpha(0)
+        tex:ClearAllPoints();tex:SetAllPoints()
+        self:SetScript("OnUpdate",nil)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
     EnsureButtonAnimations(btn)  -- positions assigned later by RefreshLauncherModules
     btn.key = data.key
     btn.panel  = CreatePanel()

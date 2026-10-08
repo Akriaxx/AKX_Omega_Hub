@@ -34,7 +34,7 @@ local subPanel = nil
 
 local function GetOrCreateSubPanel()
     if subPanel then return subPanel end
-    local UI   = OS2.UI or {}
+    local UI   = OS2.SurviveUI or {}
     local SP_W = 280
 
     local p = CreateFrame("Frame", nil, UIParent)
@@ -194,7 +194,7 @@ local systemPanel = nil
 local function GetOrCreateSystemPanel()
     if systemPanel then return systemPanel end
 
-    local UI     = OS2.UI or {}
+    local UI     = OS2.SurviveUI or {}
     local TOT_W  = 490
     local LEFT_W = 210
     local RIGHT_W= 240
@@ -444,7 +444,7 @@ local alimentationPanel = nil
 local function GetOrCreateAlimentationPanel()
     if alimentationPanel then return alimentationPanel end
 
-    local UI   = OS2.UI or {}
+    local UI   = OS2.SurviveUI or {}
     local PA_W = 320
     local PA_H = 200
 

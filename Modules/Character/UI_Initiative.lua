@@ -586,7 +586,7 @@ function roundBox:Refresh()
     outgoingRound:SetText(tostring(previous))
     outgoingRound:SetAlpha(1);PlaceRound(outgoingRound,0);outgoingRound:Show()
     roundValue:SetAlpha(0);PlaceRound(roundValue,24)
-    local elapsed=-.28
+    local elapsed=0
     self:SetScript("OnUpdate",function(_,dt)
         elapsed=elapsed+dt
         if elapsed<0 then return end
@@ -1507,7 +1507,7 @@ function NextNotice()
         phaseNotice:Hide();phaseNotice:SetScript("OnUpdate",nil)
     end
 end
-function PlayNotice(title,detail,fromPhase,sticky,duration)
+function PlayNotice(title,detail,fromPhase,sticky,duration,italic)
     duration=duration or 4
     local current=phaseNotice.current
     if fromPhase and current and current[3] and phaseNotice:IsShown() then table.insert(noticeQueue,1,current) end
@@ -1525,9 +1525,10 @@ function PlayNotice(title,detail,fromPhase,sticky,duration)
         noticeTitle:SetPoint("RIGHT",phaseNotice,"RIGHT",-12,0)
         noticeDetail:Hide()
     end
-    -- États (persistants) : sous-texte en italique (Noto Sans, la police
-    -- du jeu n'ayant pas d'italique) ; annonces de combat : police normale.
-    if sticky then
+    -- États (persistants) et sous-titres de phase : sous-texte en italique
+    -- (Noto Sans, la police du jeu n'ayant pas d'italique) ; autres
+    -- annonces de combat : police normale.
+    if sticky or italic then
         noticeDetail:SetFont("Interface\\AddOns\\Omega_Hub\\Modules\\Character\\Media\\Fonts\\NotoSans-Italic.ttf",13,"")
     else
         noticeDetail:SetFontObject("GameFontNormal")
@@ -1561,6 +1562,8 @@ local function RefreshPhaseNotice()
         return
     end
     local phase=st.phase or "play"
+    -- Le compteur roule sous l'annonce "Début du tour" : on la laisse finir.
+    if phase=="transition" then return end
     local key=tostring(st.round)..":"..phase
     if key==lastNoticeKey then return end
     local first=lastNoticeKey==nil
@@ -1571,9 +1574,10 @@ local function RefreshPhaseNotice()
     elseif phase=="round_end" then
         title="Fin du tour "..st.round;detail=""
     elseif phase=="resolve_start" then
-        title="Phase de résolution d'état";detail=""
+        title="Fin du tour "..st.round;detail="Phase de résolution des états"
     elseif phase=="round_start" then
-        title="Début du tour "..st.round;detail=""
+        -- Annoncé avant que le compteur roule : c'est le tour qui arrive.
+        title="Début du tour "..((st.round or 0)+1);detail=""
     elseif first then
         title="Début du tour "..st.round;detail="Le combat commence"
     else
@@ -1581,8 +1585,8 @@ local function RefreshPhaseNotice()
         if phaseNotice.fromPhase then NextNotice() end
         return
     end
-    local duration=phase=="round_start" and 1 or phase=="round_end" and 1.5 or phase=="resolution_end" and 1.2 or nil
-    PlayNotice(title,detail,true,nil,duration)
+    local duration=phase=="round_start" and 2.5 or phase=="round_end" and 2.5 or phase=="resolution_end" and 1.2 or nil
+    PlayNotice(title,detail,true,nil,duration,phase=="resolve_start")
 end
 
 local function Refresh()

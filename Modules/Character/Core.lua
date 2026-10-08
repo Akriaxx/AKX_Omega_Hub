@@ -712,9 +712,22 @@ end
 -- créatures peuvent porter le même nom (4 « Serena ») : seul le GUID les
 -- distingue. TargetUnit est protégé ; C_Epsilon.RunPrivileged (client
 -- Epsilon, déjà utilisé par Arcanum) permet de l'appeler hors clic.
+-- Dernière erreur renvoyée par le client (affichée si la recherche échoue :
+-- sans elle, un appel refusé ne se voit que comme « introuvable »).
+local lastPrivilegedError
+-- Texte littéral pour un script privilégié : tout caractère hors lettres,
+-- chiffres et espaces devient \ddd (l'apostrophe de « Guerrier d'élite »
+-- ou un accent cassent le script une fois passé par le client Epsilon).
+local function PrivilegedString(text)
+    return '"' .. tostring(text):gsub("[^%w ]", function(ch) return string.format("\\%03d", ch:byte()) end) .. '"'
+end
+local function TargetByNameScript(name) return "TargetUnit(" .. PrivilegedString(name) .. ", true)" end
+
 local function RunPrivileged(script)
     if not (C_Epsilon and type(C_Epsilon.RunPrivileged) == "function") then return false end
-    return (pcall(C_Epsilon.RunPrivileged, script))
+    local ok, err = pcall(C_Epsilon.RunPrivileged, script)
+    if not ok then lastPrivilegedError = tostring(err) end
+    return ok
 end
 
 -- Unités dont le client connaît le GUID : il n'existe pas de « cibler par
@@ -729,27 +742,45 @@ local function FindUnitTokenByGUID(guid)
     end
 end
 
--- Plusieurs créatures peuvent porter le même nom et le MJ observe souvent
--- la scène de loin (en l'air) : le Tab et les nameplates ne portent pas assez
--- loin, alors que le ciblage par nom marche à toute distance d'affichage et
--- passe à l'homonyme suivant à chaque appel. On le répète donc, une fois par
--- frame (enchaîné dans la même frame, le cycle n'avance pas), jusqu'à tomber
--- sur le bon GUID ; puis Tab en complément si le MJ est proche.
+-- Il n'existe pas de « cibler par GUID » : on essaie le nom (portée
+-- d'affichage, utile quand le MJ observe de loin), puis Tab, une fois par
+-- frame, jusqu'à tomber sur le bon GUID. Vérifié en jeu : TargetUnit(nom)
+-- vise toujours l'homonyme le plus proche sans passer au suivant, et les PNJ
+-- de phase n'ont pas de nameplate. Entre homonymes, c'est donc le Tab qui
+-- trouve le bon (il fait défiler les PNJ devant le personnage). Jamais
+-- d'homonyme à sa place.
+-- Tab ennemi puis Tab ami, chacun d'affilée : les alterner relance le cycle
+-- à chaque fois (un PNJ amical proche le ramène sur l'homonyme le plus
+-- proche). Le Tab ne cherche que devant le personnage, à portée limitée.
 local SEARCH_NAME_TRIES, SEARCH_TAB_TRIES = 12, 20
 
 local linkSearch  -- recherche en cours : une nouvelle l'annule
 local linkSearchFrame = CreateFrame("Frame")
 linkSearchFrame:Hide()
 
+-- Créatures du bon nom croisées pendant la recherche (GUID -> true).
+local function NoteHomonym(search)
+    local guid = UnitGUID("target")
+    if guid and search.name and UnitName("target") == search.name and not UnitIsPlayer("target") then
+        if not search.seen[guid] then search.seen[guid] = true; search.seenCount = search.seenCount + 1 end
+    end
+end
+
 local function EndLinkSearch(found)
     local search = linkSearch
     linkSearch = nil
     linkSearchFrame:Hide()
     if not search or found then return end
-    if search.name and search.name ~= "" then
-        RunPrivileged(string.format("TargetUnit(%q, true)", search.name))
+    -- Jamais d'homonyme à la place (ni ciblé, ni relié) : le lien vise SA
+    -- créature (GUID) ou rien. Un PNJ « unclickable » ne peut pas être ciblé.
+    if search.name and UnitName("target") == search.name and UnitGUID("target") ~= search.guid then
+        RunPrivileged("ClearTarget()")
     end
-    OmegaHub.Print("|cffFF4444Character :|r " .. (search.name or "PNJ") .. " lié introuvable — cible par nom.")
+    local why = search.seenCount > 0
+        and " : un autre PNJ porte ce nom. Tournez-vous vers eux et rapprochez-vous (le Tab ne cherche que devant vous), ou donnez-leur des noms distincts."
+        or " : aucun PNJ de ce nom ciblable à portée."
+    OmegaHub.Print("|cffFF4444Character :|r " .. (search.name or "PNJ") .. " lié introuvable" .. why
+        .. (lastPrivilegedError and ("\n  Erreur du client : " .. lastPrivilegedError) or ""))
 end
 
 linkSearchFrame:SetScript("OnUpdate", function()
@@ -765,13 +796,16 @@ linkSearchFrame:SetScript("OnUpdate", function()
 
     search.tries = search.tries + 1
     if search.tries <= SEARCH_NAME_TRIES and search.name and search.name ~= "" then
-        RunPrivileged(string.format("TargetUnit(%q, true)", search.name))
+        RunPrivileged(TargetByNameScript(search.name))
     elseif search.tries <= SEARCH_NAME_TRIES + SEARCH_TAB_TRIES then
-        RunPrivileged(search.tries % 2 == 1 and "TargetNearestFriend()" or "TargetNearestEnemy()")
+        RunPrivileged("TargetNearestEnemy()")
+    elseif search.tries <= SEARCH_NAME_TRIES + SEARCH_TAB_TRIES * 2 then
+        RunPrivileged("TargetNearestFriend()")
     else
         return EndLinkSearch(false)
     end
-    if UnitGUID("target") == search.guid then EndLinkSearch(true) end
+    if UnitGUID("target") == search.guid then return EndLinkSearch(true) end
+    NoteHomonym(search)
 end)
 
 -- Cible la créature liée au PNJ `p` (son GUID exact). Immédiat si le client
@@ -781,6 +815,7 @@ function C:TargetLinkedNPC(p)
     local link = p and p.link
     if not link or not link.guid then return false end
     linkSearch = nil
+    lastPrivilegedError = nil
     if UnitGUID("target") == link.guid then return true end
     if not (C_Epsilon and type(C_Epsilon.RunPrivileged) == "function") then
         OmegaHub.Print("|cffFF4444Character :|r ciblage auto indisponible (C_Epsilon.RunPrivileged absent).")
@@ -793,11 +828,12 @@ function C:TargetLinkedNPC(p)
         if UnitGUID("target") == link.guid then return true end
     end
     if link.name and link.name ~= "" then
-        RunPrivileged(string.format("TargetUnit(%q, true)", link.name))
+        RunPrivileged(TargetByNameScript(link.name))
         if UnitGUID("target") == link.guid then return true end
     end
 
-    linkSearch = { guid = link.guid, name = link.name, tries = 0 }
+    linkSearch = { guid = link.guid, name = link.name, tries = 0, seen = {}, seenCount = 0 }
+    NoteHomonym(linkSearch)
     linkSearchFrame:Show()
     return false
 end
@@ -1375,30 +1411,24 @@ function C:NextTurn()
         BroadcastInitiative()
         if C.OnInitiativeChanged then C.OnInitiativeChanged() end
     end
-    -- Fin de résolution, arrivée du curseur, annonce de fin, compteur, début,
-    -- puis seulement le premier participant. Chaque délai reste annulable.
-    Phase("resolution_end")
-    C_Timer.After(ROUND_STEP_DELAY, function()
+    -- Validation : le curseur glisse d'"États" au compteur sans annonce,
+    -- puis "Début du tour X+1" (2,5 s) ; au bout d'1 s le compteur roule
+    -- vers X+1 (phase "transition", l'annonce ne bouge pas). Enfin le
+    -- premier participant. Chaque délai reste annulable.
+    Phase("counter_focus")
+    C_Timer.After(.3, function()
         if not Valid() then return end
-        Phase("counter_focus")
-        C_Timer.After(.35, function()
+        Phase("round_start")
+        C_Timer.After(1, function()
             if not Valid() then return end
-            Phase("round_end")
-            C_Timer.After(ROUND_STEP_DELAY + .3, function()
+            C.initiative.round = (C.initiative.round or 0) + 1
+            Phase("transition")
+            C_Timer.After(1.5, function()
                 if not Valid() then return end
-                C.initiative.round = (C.initiative.round or 0) + 1
-                Phase("transition")
-                C_Timer.After(ROUND_STEP_DELAY, function()
-                    if not Valid() then return end
-                    Phase("round_start")
-                    C_Timer.After(1, function()
-                        if not Valid() then return end
-                        C.initiative._roundTransition = nil
-                        C.initiative._pendingRound = nil
-                        C.initiative.phase = "play"
-                        ApplyTurnAdvance(nextIdx, ending, true)
-                    end)
-                end)
+                C.initiative._roundTransition = nil
+                C.initiative._pendingRound = nil
+                C.initiative.phase = "play"
+                ApplyTurnAdvance(nextIdx, ending, true)
             end)
         end)
     end)

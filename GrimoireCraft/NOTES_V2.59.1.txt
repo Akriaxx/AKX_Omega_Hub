@@ -1,0 +1,25 @@
+GrimoireCraft V2.59.1 — Correctif Mass Craft Epsilon 9.2.7
+
+Remplace la V2.59.0.
+
+- Envoi prioritaire par EpsilonLib.AddonCommands.Send, sans point initial,
+  avec prise en compte des refus du serveur.
+- Si cette API est absente : SendByChat d'EpsilonLib, sinon le canal GUILD
+  utilisé par EpsilonLib pour ses commandes. Plus d'envoi automatique en SAY.
+- Confirmation des retraits et des ajouts par lecture des emplacements réels
+  des sacs, plutôt que par le seul compteur d'objets susceptible d'être en retard.
+- Lecture compatible avec les API de sacs 9.2 ; les sacs de banque sont exclus.
+- Une commande non confirmée n'est jamais renvoyée automatiquement.
+- Rand = 0, consommation normale, vérification des composants, bouton d'arrêt,
+  Refabriquer et préférences précédentes conservés.
+
+Installation : remplacer Interface/AddOns/GrimoireCraft par le dossier de ce ZIP,
+  puis /reload. Ne pas supprimer les SavedVariables.
+  EpsilonLib est une dépendance facultative ; utiliser celle fournie par Epsilon.
+
+Validation : compilation Lua 5.1 et 20 scénarios simulés, dont transports Epsilon,
+  refus serveur, délai des sacs, ancien compteur non actualisé et API de sacs 9.2.
+  Aucun test connecté sur le serveur Epsilon n'a été effectué ici.
+
+Référence de compatibilité :
+https://github.com/EpsilonRP/PublicAddOns/blob/main/_retail_/Interface/AddOns/EpsilonLib/AddonCommands.lua

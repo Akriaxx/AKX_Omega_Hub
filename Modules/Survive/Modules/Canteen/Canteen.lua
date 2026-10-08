@@ -1,5 +1,5 @@
 -- OmegaSurvive 2.0 — Gourde (gameplay)
-local UI    = OS2.UI or {}
+local UI    = OS2.SurviveUI or {}
 local panel = OS2.panels["gourde"]
 
 local PAD = 14
