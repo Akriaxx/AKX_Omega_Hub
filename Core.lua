@@ -86,6 +86,12 @@ Hub:RegisterModule({
     desc    = "Recettes d'artisanat et transmission de savoir — /grimoire",
 })
 
+Hub:RegisterModule({
+    name    = "GMMaster",
+    title   = "GM Master",
+    desc    = "Commandes MJ en quelques clics — /gmm",
+})
+
 -- Omega_Weather est commenté dans le TOC (usage privé, non chargé)
 -- Hub:RegisterModule({ name = "Omega_Weather", ... })
 

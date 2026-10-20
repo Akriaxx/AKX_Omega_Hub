@@ -2,4 +2,7 @@
     <Binding name="OMEGA_JOURNAL_TOGGLE" header="OMEGA_HUB" category="ADDONS">
         if Quest then Quest:ToggleJournal() end
     </Binding>
+    <Binding name="OMEGA_GMMASTER_TOGGLE" category="ADDONS">
+        if GMMaster then GMMaster:Toggle() end
+    </Binding>
 </Bindings>

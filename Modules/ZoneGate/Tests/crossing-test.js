@@ -19,7 +19,7 @@ ${real}
 function ZG:PlayCrossingSound(_,direction) sounds[#sounds+1]=direction end
 local function tick(x,y) px=x;py=y or 0;ZG:Tick() end
 local function reset() ZG.state={};banners=0;messages=0;actions={};sounds={} end
-for _,shape in ipairs({'polygon','circle'}) do
+for _,shape in ipairs({'polygon'}) do
  sub.shape=shape;reset()
  tick(-8);tick(-5.7);tick(-5.1);tick(-4.9);tick(-5.2)
  assert(banners==0,'boundary jitter is silent')
@@ -37,7 +37,7 @@ local oldTick=tick;tick=function(x,y) oldTick(y or 0,x) end;reset();tick(-5);tic
 sub.actionForwardEnabled=false;sub.actionBackwardEnabled=true
 reset();tick(-5);tick(5);assert(banners==1 and #actions==0,'entry action does not inherit exit toggle')
 tick(-5);assert(#actions==1 and actions[1]=='remove')
-print('OK: slow polygon/circle crossings run banners, sound and actions once; deadband jitter, initial state, disabled/other instance, unfinished contour, line bypass and direction toggles')
+print('OK: slow perimeter crossings run banners, sound and actions once; deadband jitter, initial state, disabled/other instance, unfinished contour, line bypass and direction toggles')
 `;
 const r=cp.spawnSync(process.execPath,[process.argv[2],'-'],{input:code,encoding:'utf8'});
 process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');process.exit(r.status||0);

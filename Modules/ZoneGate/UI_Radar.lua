@@ -26,11 +26,6 @@ function ZG:PlacementTarget(cp,px,py,facing)
         if #pts>0 then tx,ty=pts[1].x,pts[1].y end
         for i=2,#pts do edge(pts[i-1],pts[i]) end
         if cp.regionReady and #pts>=3 then edge(pts[#pts],pts[1]) end
-    elseif cp.shape=="circle" then
-        local dx,dy=px-cp.x,py-cp.y
-        local d=math.sqrt(dx*dx+dy*dy)
-        if d<.001 then dx,dy,d=math.sin(facing or 0),math.cos(facing or 0),1 end
-        tx,ty=cp.x+dx/d*(cp.width or 6),cp.y+dy/d*(cp.width or 6)
     else
         local a,r=cp.facing or 0,(cp.width or 6)/2
         edge({x=cp.x-math.cos(a)*r,y=cp.y+math.sin(a)*r},
@@ -66,9 +61,6 @@ function ZG:PlacementReadout(cp,px,py,facing,mapID)
             distance=math.min(distance,segment(px,py,q,p));j=i
         end
         signed=inside and distance or -distance
-    elseif cp.shape=="circle" then
-        signed=(cp.width or 6)-math.sqrt((px-cp.x)^2+(py-cp.y)^2)
-        distance=math.abs(signed)
     else
         local angle=cp.facing or 0
         local fx,fy=math.sin(angle),math.cos(angle)
@@ -78,7 +70,7 @@ function ZG:PlacementReadout(cp,px,py,facing,mapID)
         distance=math.sqrt(signed*signed+lateral*lateral)
         heading=math.cos((facing or angle)-angle)
     end
-    local line=cp.shape~="circle" and cp.shape~="polygon"
+    local line=cp.shape~="polygon"
     local status,hint
     if line and lateral>1 then
         status="Décalé du passage"
@@ -105,8 +97,6 @@ function ZG:PlacementGeometry(cp,px,py)
     local points={}
     if cp.shape=="polygon" then
         for _,p in ipairs(cp.points or {}) do points[#points+1]={x=p.x,y=p.y} end
-    elseif cp.shape=="circle" then
-        for i=0,47 do local a=i*math.pi/24;points[#points+1]={x=cp.x+math.cos(a)*(cp.width or 6),y=cp.y+math.sin(a)*(cp.width or 6)} end
     else
         local a=cp.facing or 0;local r=(cp.width or 6)/2
         points={{x=cp.x-math.cos(a)*r,y=cp.y+math.sin(a)*r},{x=cp.x+math.cos(a)*r,y=cp.y-math.sin(a)*r}}
@@ -183,7 +173,7 @@ function ZG.CreatePassageGuide(parent,getter)
             end
             if i>1 then local a,b=map(points[i-1].x,points[i-1].y);line(a,b,x,y) end
         end
-        if #points>=3 and (cp.shape=="circle" or cp.regionReady) then
+        if #points>=3 and cp.regionReady then
             local a,b=map(points[#points].x,points[#points].y);local c,d=map(points[1].x,points[1].y);line(a,b,c,d)
         end
         local x,y=map(px,py)

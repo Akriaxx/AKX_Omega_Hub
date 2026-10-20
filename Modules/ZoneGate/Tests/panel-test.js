@@ -54,9 +54,6 @@ assert(ZG:PlacementTarget(gate,10,0,0).instruction=='Tournez à droite')
 assert(ZG:PlacementTarget(gate,-10,0,0).instruction=='Tournez à gauche')
 assert(ZG:PlacementTarget(gate,0,10,0).instruction=='Faites demi-tour')
 assert(ZG:PlacementTarget(gate,0,0,0).instruction=='Passage atteint')
-gate.shape='circle';gate.width=10
-r=ZG:PlacementReadout(gate,0,0,0,1);assert(r.signed==10 and r.distance==10)
-r=ZG:PlacementReadout(gate,15,0,0,1);assert(r.signed==-5 and r.distance==5)
 gate.shape='polygon';gate.regionReady=true
 gate.points={{x=-5,y=-5},{x=5,y=-5},{x=5,y=5},{x=-5,y=5}}
 r=ZG:PlacementReadout(gate,0,0,0,1);assert(r.signed==5 and r.distance==5)
@@ -129,6 +126,7 @@ click('Valider',picker);assert(s.grantedTo.Alice and not s.grantedTo.Bob,'depart
 roster={'Tester'};picker=ZG:OpenDiscoveryPicker('zone',z.id)
 assert(not picker.saveButton.enabled and #picker.members==0);picker:Hide()
 click('Déclenchement');assert(panel.checkpointPages.effects:IsShown() and not panel.checkpointPages.placement:IsShown())
+click('Sort Arcanum');assert(panel.checkpointPages.arcanum:IsShown() and not panel.checkpointPages.effects:IsShown())
 click('Découverte');assert(panel.checkpointPages.discovery:IsShown() and not panel.checkpointPages.effects:IsShown())
 click('Placement');click('Périmètre libre');assert(s.shape=='polygon')
 -- A hidden remote name must not become searchable.

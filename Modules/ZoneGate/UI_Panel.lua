@@ -561,22 +561,14 @@ end)
 local sfStatusFS = subForm:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 sfStatusFS:SetPoint("TOPLEFT", sfThemeDropdown, "BOTTOMLEFT", 16, -10)
 
--- Forme : ligne (porte), cercle (village) ou région (N points, zone fermée)
+-- Forme : ligne (porte) ou région (N points, zone fermée)
 local shapeLineBtn = UI.CreatePanelButton(subForm, 50, 20, "Ligne")
 shapeLineBtn:SetPoint("TOPLEFT", sfStatusFS, "BOTTOMLEFT", -2, -10)
-local shapeCircleBtn = UI.CreatePanelButton(subForm, 50, 20, "Cercle")
-shapeCircleBtn:SetPoint("LEFT", shapeLineBtn, "RIGHT", 4, 0)
 local shapeRegionBtn = UI.CreatePanelButton(subForm, 60, 20, "Région")
-shapeRegionBtn:SetPoint("LEFT", shapeCircleBtn, "RIGHT", 4, 0)
+shapeRegionBtn:SetPoint("LEFT", shapeLineBtn, "RIGHT", 4, 0)
 shapeLineBtn:SetScript("OnClick", function()
     if panel.selectedSubZoneId then
         ZG:SetSubZoneShape(panel.selectedSubZoneId, "line")
-        panel:RefreshSubZoneForm()
-    end
-end)
-shapeCircleBtn:SetScript("OnClick", function()
-    if panel.selectedSubZoneId then
-        ZG:SetSubZoneShape(panel.selectedSubZoneId, "circle")
         panel:RefreshSubZoneForm()
     end
 end)
@@ -903,20 +895,18 @@ function panel:RefreshSubZoneForm()
         sfStatusFS:SetText(state .. string.format("  |cffffffffAperçu : \"%s\" / \"%s\"|r", title, subtitle))
     end
 
-    local isCircle  = sub.shape == "circle"
     local isPolygon = sub.shape == "polygon"
-    shapeLineBtn.accent:SetShown(not isCircle and not isPolygon)
-    shapeCircleBtn.accent:SetShown(isCircle)
+    shapeLineBtn.accent:SetShown(not isPolygon)
     shapeRegionBtn.accent:SetShown(isPolygon)
 
-    -- Largeur/rayon (ligne/cercle) et contrôles de région (polygone) occupent
+    -- Largeur (ligne) et contrôles de région (polygone) occupent
     -- le même emplacement, mutuellement exclusifs.
     widthLabel:SetShown(not isPolygon)
     widthEB:SetShown(not isPolygon)
     sliderTrack:SetShown(not isPolygon)
     sliderHandle:SetShown(not isPolygon)
     if not isPolygon then
-        widthLabel:SetText(isCircle and "Rayon du checkpoint" or "Largeur du checkpoint")
+        widthLabel:SetText("Largeur du checkpoint")
         SetSliderValue(sub.width or 6, true)
     end
 
@@ -950,13 +940,12 @@ function panel:RefreshSubZoneForm()
     sfBackNameEB:SetText(sub.backwardName or "")
     panel.suppressEvents = false
 
-    -- Recapturer/Cloner déplacent UN point unique (ligne/cercle) — pas de
+    -- Recapturer/Cloner déplacent UN point unique (ligne) — pas de
     -- sens simple pour une région à N points, donc masqués pour "polygon".
     recaptureBtn:SetShown(mine and not isPolygon)
     cloneBtn:SetShown(mine and not isPolygon)
     sfDeleteBtn:SetShown(mine)
     shapeLineBtn:SetShown(mine)
-    shapeCircleBtn:SetShown(mine)
     shapeRegionBtn:SetShown(mine)
 
     -- Action personnalisée : édition réservée à l'auteur (comme le reste de
@@ -1100,22 +1089,21 @@ Place(sfActiveCB,subForm,FORM_W-99,32)
 Place(sfStatusFS,subForm,12,66,FORM_W-24,30)
 sfStatusFS:SetJustifyH("LEFT")
 local pages,tabs={},{ }
-for i,entry in ipairs({{"placement","Placement"},{"effects","Déclenchement"},{"discovery","Découverte"}}) do
+for i,entry in ipairs({{"placement","Placement"},{"effects","Déclenchement"},{"arcanum","Sort Arcanum"},{"discovery","Découverte"}}) do
     local key,label=entry[1],entry[2]
     local page=CreateFrame("Frame",nil,subForm)
     Place(page,subForm,0,144,FORM_W,430)
     pages[key]=page
-    local tab=UI.CreatePanelButton(subForm,(FORM_W-32)/3,28,label)
-    Place(tab,subForm,12+(i-1)*(FORM_W-20)/3,108)
+    local tab=UI.CreatePanelButton(subForm,(FORM_W-44)/4,28,label)
+    Place(tab,subForm,12+(i-1)*(FORM_W-20)/4,108)
     tabs[key]=tab
     tab:SetScript("OnClick",function() panel.checkpointTab=key;panel:RefreshForm() end)
 end
 panel.checkpointPages=pages
 panel.checkpointTabs=tabs
 Place(shapeLineBtn,pages.placement,12,8,100,26);shapeLineBtn:SetText("Passage droit")
-Place(shapeCircleBtn,pages.placement,120,8,100,26)
-Place(shapeRegionBtn,pages.placement,228,8,112,26);shapeRegionBtn:SetText("Périmètre libre")
-Caption(pages.placement,"Ligne : sens de votre regard. Cercle / périmètre : intérieur et extérieur.",12,44,FORM_W-24)
+Place(shapeRegionBtn,pages.placement,120,8,112,26);shapeRegionBtn:SetText("Périmètre libre")
+Caption(pages.placement,"Passage droit : sens de votre regard. Périmètre : intérieur et extérieur.",12,44,FORM_W-24)
 Place(radarRow,pages.placement,12,80,FORM_W-24,284)
 Place(recaptureBtn,pages.placement,12,374,190,28);recaptureBtn:SetText("Déplacer à ma position")
 Place(cloneBtn,pages.placement,210,374,110,28);cloneBtn:SetText("Dupliquer ici")
@@ -1150,6 +1138,80 @@ actionFwdLabel:SetText("Action à l'entrée");actionBackLabel:SetText("Action à
 Place(sfGrantFrame,pages.discovery,12,8,FORM_W-24)
 Caption(pages.discovery,"Le nom de la région et celui du checkpoint se révèlent séparément. Les autres joueurs voient des noms masqués tant qu'ils ne les ont pas appris.",12,262,FORM_W-24)
 
+-- Sort Arcanum lié à la région : lancé en entrant, défait en sortant (voir
+-- ArcEnter / ArcLeave dans Core.lua).
+local arc={}
+arc.intro=Caption(pages.arcanum,"Lance un sort Arcanum tant que le joueur est dans la région (périmètre : à l'intérieur ; passage droit : après l'avoir franchi dans le sens de l'entrée). En sortant, le sort de sortie défait l'effet — ciel, brouillard, aura…",12,8,FORM_W-24)
+arc.intro:SetHeight(44)
+arc.readOnly=Caption(pages.arcanum,"Réglé par l'auteur de la région.",12,64,FORM_W-24)
+local function ArcSpellField(y,label,which)
+    local caption=Caption(pages.arcanum,label,12,y,FORM_W-24)
+    local box=UI.CreateStyledEditBox(pages.arcanum,FORM_W-136,26,false)
+    Place(box,pages.arcanum,12,y+18)
+    box:SetMaxLetters(80)
+    local test=UI.CreatePanelButton(pages.arcanum,100,26,"Tester")
+    Place(test,pages.arcanum,FORM_W-112,y+18)
+    local status=Caption(pages.arcanum,"",12,y+50,FORM_W-24)
+    box:SetScript("OnTextChanged",function(self)
+        if panel.suppressEvents or not panel.selectedSubZoneId then return end
+        ZG:SetSubZoneArcSpell(panel.selectedSubZoneId,which,self:GetText())
+        panel:RefreshArcStatus()
+    end)
+    test:SetScript("OnClick",function()
+        local sub=ZG:FindSubZone(panel.selectedSubZoneId)
+        if sub then ZG:CastArcSpell(box:GetText(),sub.arcVault) end
+    end)
+    return {caption=caption,box=box,test=test,status=status}
+end
+arc.enter=ArcSpellField(64,"Sort à l'entrée (ArcSpell ID)","enter")
+arc.exit=ArcSpellField(140,"Sort à la sortie — retire l'effet (facultatif)","exit")
+arc.phaseCB,arc.phaseLabel=UI.CreateStyledCheckbox(pages.arcanum,"Coffre de phase (recommandé : disponible pour tous les joueurs de la phase)")
+Place(arc.phaseCB,pages.arcanum,12,222)
+arc.phaseLabel:SetPoint("LEFT",arc.phaseCB,"RIGHT",4,0)
+arc.phaseCB:SetScript("OnClick",function(self)
+    if not panel.selectedSubZoneId then return end
+    ZG:SetSubZoneArcVault(panel.selectedSubZoneId,self:GetChecked() and "phase" or "personal")
+    panel:RefreshArcStatus()
+end)
+arc.toggleCB,arc.toggleLabel=UI.CreateStyledCheckbox(pages.arcanum,"Le joueur peut retirer puis remettre l'effet sur place")
+Place(arc.toggleCB,pages.arcanum,12,252)
+arc.toggleLabel:SetPoint("LEFT",arc.toggleCB,"RIGHT",4,0)
+arc.toggleCB:SetScript("OnClick",function(self)
+    if panel.selectedSubZoneId then ZG:SetSubZoneArcToggle(panel.selectedSubZoneId,self:GetChecked()) end
+end)
+arc.hint=Caption(pages.arcanum,"Un sort du coffre personnel n'existe que chez vous : les autres joueurs ne le recevront pas. À la sortie, le sort d'entrée encore en cours est interrompu avant le sort de sortie. Sans sort de sortie, l'effet suit sa propre durée.",12,290,FORM_W-24)
+arc.hint:SetHeight(58)
+
+local function ArcStatusText(commID,vault)
+    commID=(commID or ""):match("^%s*(.-)%s*$") or ""
+    if commID=="" then return "" end
+    if type(ARC)~="table" then return "|cffe6c94dArcanum n'est pas chargé.|r" end
+    local spell=ZG:FindArcSpell(commID,vault)
+    if spell then return "|cff66e673Trouvé : "..(spell.fullName or commID).."|r" end
+    return "|cffe6c94dIntrouvable dans le coffre "..(vault=="personal" and "personnel" or "de phase")..".|r"
+end
+function panel:RefreshArcStatus()
+    local sub=self.selectedSubZoneId and ZG:FindSubZone(self.selectedSubZoneId)
+    if not sub then return end
+    arc.enter.status:SetText(ArcStatusText(sub.arcEnterSpell,sub.arcVault))
+    arc.exit.status:SetText(ArcStatusText(sub.arcExitSpell,sub.arcVault))
+end
+function panel:RefreshArcForm(sub,own)
+    for _,field in ipairs({arc.enter,arc.exit}) do
+        for _,control in pairs(field) do control:SetShown(own) end
+    end
+    for _,control in ipairs({arc.phaseCB,arc.phaseLabel,arc.toggleCB,arc.toggleLabel,arc.hint}) do control:SetShown(own) end
+    arc.readOnly:SetShown(not own)
+    if not own then return end
+    self.suppressEvents=true
+    arc.enter.box:SetText(sub.arcEnterSpell or "")
+    arc.exit.box:SetText(sub.arcExitSpell or "")
+    self.suppressEvents=false
+    arc.phaseCB:SetChecked(sub.arcVault~="personal")
+    arc.toggleCB:SetChecked(sub.arcToggle~=false)
+    self:RefreshArcStatus()
+end
+
 local refreshForm=panel.RefreshForm
 function panel:RefreshForm()
     refreshForm(self)
@@ -1163,6 +1225,7 @@ function panel:RefreshForm()
         sfNameEB:SetEnabled(own and true or false);sfActiveCB:SetEnabled(own and true or false)
         widthEB:SetEnabled(own and true or false);sliderHandle:EnableMouse(own and true or false)
         fwdEnabledCB:SetEnabled(own and true or false);backEnabledCB:SetEnabled(own and true or false)
+        if sub then self:RefreshArcForm(sub,own and true or false) end
         local key=self.checkpointTab or "placement"
         for id,page in pairs(pages) do page:SetShown(id==key);tabs[id].accent:SetShown(id==key) end
     end

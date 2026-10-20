@@ -2,10 +2,10 @@
 ## Title: Omega Hub
 ## Notes: Gestionnaire central et conteneur monolithique des addons Omega
 ## Author: Lorkk
-## Version: 1.2.23
+## Version: 1.2.24
 ## OptionalDeps: SpellCreator
-## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB GrimoireCraftDB
-## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB
+## SavedVariables: OmegaHubDB OmegaSpeakDB OS2SharedDB OmegaWeatherDB OmegaSpellDB CharacterDB TechDB ItemCreatorDB ZoneGateDB GrimoireCraftDB GMMasterDB
+## SavedVariablesPerCharacter: OS2DB ZoneGateCharDB GMMasterCharDB
 
 ## -- Hub --
 Core\Registry.lua
@@ -134,6 +134,7 @@ Modules\ZoneGate\UI_Theme.lua
 Modules\ZoneGate\UI_Studio.lua
 Modules\ZoneGate\UI_Discovery.lua
 Modules\ZoneGate\UI_Panel.lua
+Modules\ZoneGate\UI_Arcanum.lua
 
 ## -- Journal de quête --
 Modules\Quest\Version.lua
@@ -156,6 +157,13 @@ Modules\GrimoireCraft\Version.lua
 Modules\GrimoireCraft\ObjectDatabase.lua
 Modules\GrimoireCraft\RecipeDatabase.lua
 Modules\GrimoireCraft\GrimoireCraft.lua
+
+## -- GM Master --
+Modules\GMMaster\Version.lua
+Modules\GMMaster\Abbrev.generated.lua
+Modules\GMMaster\Commands.lua
+Modules\GMMaster\Core.lua
+Modules\GMMaster\UI_Panel.lua
 
 ## -- Omega Weather (désactivé — usage privé) --
 ## Modules\Weather\Version.lua
