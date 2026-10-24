@@ -1,14 +1,15 @@
 -- ============================================================
 --  Zone Gate — Core
---  Une Zone contient des Sous-zones ; chaque Sous-zone EST son
---  propre checkpoint (position/forme/largeur capturées à la
---  création, "ici") — pas de liaison manuelle séparée. La
---  franchir déclenche une bannière avec le nom de la Zone + le
---  nom de la Sous-zone, dans le sens "entrée" et/ou "retour".
---  Deux formes de checkpoint : "line" (porte) et "polygon"
---  (région à N points — voir AddRegionPoint / FinishRegion ; les
---  anciens cercles y sont convertis, voir CircleToPerimeter). Le nom n'est visible que pour l'auteur de la
---  Zone tant qu'il ne l'a pas débloqué pour un joueur donné.
+--  Pays (classeur de rangement) › Région (= Zone) › Lieux.
+--  Une région porte ses lieux (nom, bannière, effets, découverte)
+--  et ses passages (zone.subZones) : de la géométrie seule —
+--  passage droit ("line") ou périmètre ("polygon", voir
+--  AddRegionPoint / FinishRegion ; les anciens cercles y sont
+--  convertis, voir CircleToPerimeter). Un passage mène à un lieu
+--  en entrant et, facultativement, à un autre lieu (de n'importe
+--  quelle région) en sortant : la bannière affiche alors
+--  "Région / Lieu" du lieu atteint. Les noms ne sont visibles que
+--  pour l'auteur tant qu'il ne les a pas débloqués pour un joueur.
 --  Diffusé en groupe/raid, en guilde, ET sur un canal global
 --  "OmegaZoneGate" rejoint discrètement par tout client actif
 --  (SendAddonMessage) — ce canal touche TOUT joueur ayant
@@ -26,7 +27,7 @@ local TICK_INTERVAL = 0.25   -- cohérent avec les tickers de Survive (Lantern/T
 local WIDTH_MARGIN   = 1.0   -- yards de tolérance (pas de poll / bord de la région)
 local DEFAULT_WIDTH   = 6
 local MAX_WIDTH        = 500  -- yards — de quoi couvrir l'entrée d'un village entier
-local MAX_REGION_POINTS = 20  -- de quoi dessiner un contour détaillé sans payload réseau démesuré
+local MAX_REGION_POINTS = 1500 -- grandes régions : jusqu'à ≈ 20 Ko par périmètre, envoyés au rythme toléré (voir PumpSend)
 
 -- ── Thèmes de bannière ──────────────────────────────────────────────────────
 -- Trois polices Blizzard natives ("classique", "abîmé/combat" Skurri,
@@ -213,8 +214,10 @@ local function EnsureDB()
     ZoneGateDB = ZoneGateDB or {}
     ZoneGateDB.zones = ZoneGateDB.zones or {}
     ZoneGateDB.themes = ZoneGateDB.themes or {}
+    ZoneGateDB.countries = ZoneGateDB.countries or {}
     for _, zone in pairs(ZoneGateDB.zones) do
         zone.subZones = zone.subZones or {}
+        zone.places = zone.places or {}
     end
     return ZoneGateDB
 end
@@ -224,10 +227,10 @@ function ZG:GetDB() return EnsureDB() end
 -- Connaissance des joueurs : par personnage, pas par compte (OS2DB sert de
 -- modèle — voir Modules/Survive/Core/Launcher.lua:409-411 pour le même
 -- principe de set "[clé] = true" débloqué au fil du jeu).
--- Deux connaissances INDÉPENDANTES par personnage : le nom de la Zone et le
--- nom de la Sous-zone. Elles se débloquent séparément (voir SendZoneGrant /
--- SendSubZoneGrant) — d'où les 4 combinaisons possibles à l'affichage (voir
--- ResolveBannerText) : aucune, Zone seule, Sous-zone seule, ou les deux.
+-- Deux connaissances INDÉPENDANTES par personnage : le nom de la région et
+-- le nom du lieu (learnedSubZones, clé = id du lieu). Elles se débloquent
+-- séparément (voir SendZoneGrant / SendPlaceGrant) — d'où les 4 combinaisons
+-- possibles à l'affichage (voir ResolveBannerText).
 local function EnsureCharDB()
     ZoneGateCharDB = ZoneGateCharDB or {}
     ZoneGateCharDB.learnedZones    = ZoneGateCharDB.learnedZones or {}
@@ -246,17 +249,65 @@ function ZG:GetPlayerPose()
     return px, py, facing, instanceID
 end
 
--- ── CRUD Zones ───────────────────────────────────────────────────────────────
+-- ── CRUD Pays (classeurs) ─────────────────────────────────────────────────
+-- Un pays sert uniquement à ranger les régions dans le panneau : il
+-- n'apparaît jamais dans la bannière.
 
-function ZG:CreateZone(name)
-    name = (name or ""):match("^%s*(.-)%s*$") or ""
-    if name == "" then name = "Nouvelle zone" end
+local function NewId(prefix) return prefix .. time() .. "_" .. math.random(1000, 9999) end
+local function Clean(s) return (tostring(s or ""):match("^%s*(.-)%s*$")) or "" end
+
+function ZG:CreateCountry(name)
+    name = Clean(name)
+    if name == "" then name = "Nouveau pays" end
+    local db = EnsureDB()
+    local id = NewId("c_")
+    db.countries[id] = { id = id, name = name, creator = MyName() }
+    ZG:ScheduleBroadcast()
+    return db.countries[id]
+end
+
+function ZG:GetCountry(id)
+    return id and EnsureDB().countries[id] or nil
+end
+
+function ZG:GetCountryList()
+    local list = {}
+    for _, country in pairs(EnsureDB().countries) do list[#list + 1] = country end
+    table.sort(list, function(a, b) return (a.name or ""):lower() < (b.name or ""):lower() end)
+    return list
+end
+
+function ZG:RenameCountry(id, name)
+    local country = ZG:GetCountry(id)
+    if not country or country.creator ~= MyName() then return end
+    country.name = name or ""
+    ZG:ScheduleBroadcast()
+end
+
+-- Les régions du pays supprimé restent intactes, simplement sans pays.
+function ZG:RemoveCountry(id)
+    local db = EnsureDB()
+    local country = db.countries[id]
+    if not country or country.creator ~= MyName() then return end
+    db.countries[id] = nil
+    for _, zone in pairs(db.zones) do
+        if zone.countryId == id and zone.creator == MyName() then zone.countryId = nil end
+    end
+    ZG:ScheduleBroadcast()
+end
+
+-- ── CRUD Régions (= Zones) ───────────────────────────────────────────────────
+
+function ZG:CreateZone(name, countryId)
+    name = Clean(name)
+    if name == "" then name = "Nouvelle région" end
 
     local db = EnsureDB()
-    local id = "z_" .. time() .. "_" .. math.random(1000, 9999)
+    local id = NewId("z_")
     db.zones[id] = {
-        id = id, name = name, creator = MyName(), subZones = {},
-        grantedTo = {},   -- [nom du joueur] = true — a appris le NOM DE LA ZONE (local, jamais diffusé)
+        id = id, name = name, creator = MyName(), subZones = {}, places = {},
+        countryId = countryId,
+        grantedTo = {},   -- [nom du joueur] = true — a appris le NOM DE LA RÉGION (local, jamais diffusé)
     }
     ZG:ScheduleBroadcast()
     return db.zones[id]
@@ -267,6 +318,23 @@ function ZG:RemoveZone(id)
     local zone = db.zones[id]
     if not zone or zone.creator ~= MyName() then return end
     db.zones[id] = nil
+    -- Les passages d'autres régions qui menaient vers ses lieux mènent à "aucun".
+    for placeId in pairs(zone.places) do ZG:ForgetPlaceLinks(placeId) end
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:RenameZone(id, name)
+    local zone = ZG:GetZone(id)
+    if not zone or zone.creator ~= MyName() then return end
+    zone.name = name or ""
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetZoneCountry(zoneId, countryId)
+    local zone = ZG:GetZone(zoneId)
+    if not zone or zone.creator ~= MyName() then return end
+    local country = ZG:GetCountry(countryId)
+    zone.countryId = (country and country.creator == MyName()) and countryId or nil
     ZG:ScheduleBroadcast()
 end
 
@@ -282,16 +350,184 @@ function ZG:GetZoneList()
 end
 
 function ZG:GetZone(id)
-    return EnsureDB().zones[id]
+    return id and EnsureDB().zones[id] or nil
 end
 
--- ── CRUD Sous-zones (= checkpoints) ───────────────────────────────────────
--- Une Sous-zone EST son propre checkpoint : position/orientation/forme sont
--- capturées à la création, "ici", comme avant pour un checkpoint seul — plus
--- besoin d'un objet séparé à lier manuellement.
+-- ── CRUD Lieux (= sous-zones) ────────────────────────────────────────────────
+-- Un lieu appartient à une région : nom, bannière (sinon celle de la région),
+-- effets (message / aura, sort Arcanum) et découverte de son nom. Il n'a
+-- aucune géométrie : ce sont les passages qui y mènent.
+
+local function NewPlace(id, zoneId, name)
+    return {
+        id = id, zoneId = zoneId, name = name,
+        aliases = {},            -- anciens ids fusionnés (noms déjà appris par les joueurs)
+        grantedTo = {},          -- [nom du joueur] = true — a appris le NOM DU LIEU (local, jamais diffusé)
+        actionMessage = "",           -- texte imprimé localement (jamais visible d'autrui)
+        actionCommand = "",           -- voir RunPlaceAction — ID d'aura (nombre) ou commande brute
+        actionEnterEnabled = false,   -- action en arrivant dans le lieu (opt-in)
+        actionLeaveEnabled = false,   -- action en quittant le lieu
+        arcEnterSpell = "",      -- ArcSpell ID lancé en arrivant (voir ArcEnter)
+        arcExitSpell  = "",      -- ArcSpell ID lancé en partant, pour défaire l'effet
+        arcVault      = "phase", -- "phase" (partagé par la phase) ou "personal"
+        arcToggle     = true,    -- le joueur peut retirer / remettre l'effet sur place
+    }
+end
+
+-- Renvoie place, zone — cherche dans toutes les régions connues localement.
+function ZG:FindPlace(placeId)
+    if not placeId then return nil end
+    for _, zone in pairs(EnsureDB().zones) do
+        local place = zone.places and zone.places[placeId]
+        if place then return place, zone end
+    end
+    return nil
+end
+
+local function MyPlace(id)
+    local place, zone = ZG:FindPlace(id)
+    if place and zone.creator == MyName() then return place, zone end
+end
+
+function ZG:GetPlaceList(zoneId)
+    local zone = ZG:GetZone(zoneId)
+    local list = {}
+    if not zone then return list end
+    for _, place in pairs(zone.places) do list[#list + 1] = place end
+    table.sort(list, function(a, b)
+        local x, y = (a.name or ""):lower(), (b.name or ""):lower()
+        if x == y then return a.id < b.id end
+        return x < y
+    end)
+    return list
+end
+
+function ZG:CreatePlace(zoneId, name)
+    local zone = ZG:GetZone(zoneId)
+    if not zone or zone.creator ~= MyName() then return nil end
+    name = Clean(name)
+    if name == "" then
+        local n = 0
+        for _ in pairs(zone.places) do n = n + 1 end
+        name = "Lieu " .. (n + 1)
+    end
+    local id = NewId("pl_")
+    zone.places[id] = NewPlace(id, zoneId, name)
+    ZG:ScheduleBroadcast()
+    return zone.places[id]
+end
+
+function ZG:RenamePlace(id, name)
+    local place = MyPlace(id)
+    if not place then return end
+    place.name = name or ""
+    ZG:ScheduleBroadcast()
+end
+
+-- Retire un lieu des passages qui y menaient (mes régions uniquement).
+function ZG:ForgetPlaceLinks(placeId)
+    for _, zone in pairs(EnsureDB().zones) do
+        if zone.creator == MyName() then
+            for _, sub in pairs(zone.subZones) do
+                if sub.enterPlace == placeId then sub.enterPlace = nil end
+                if sub.leavePlace == placeId then sub.leavePlace = nil end
+            end
+        end
+    end
+end
+
+function ZG:RemovePlace(id)
+    local place, zone = MyPlace(id)
+    if not place then return end
+    zone.places[id] = nil
+    ZG:ForgetPlaceLinks(id)
+    ZG:ScheduleBroadcast()
+end
+
+-- Range un lieu dans une autre de mes régions. Son id ne change pas : les
+-- passages qui y mènent et les noms déjà appris restent valables.
+function ZG:MovePlace(id, targetZoneId)
+    local place, zone = MyPlace(id)
+    local target = ZG:GetZone(targetZoneId)
+    if not place or not target or target.creator ~= MyName() or target.id == zone.id then return false end
+    zone.places[id] = nil
+    place.zoneId = target.id
+    target.places[id] = place
+    ZG:ScheduleBroadcast()
+    return true
+end
+
+-- Passages (toutes régions) qui mènent à ce lieu : { sub, zone, which }.
+function ZG:GetPlacePassages(placeId)
+    local list = {}
+    for _, zone in pairs(EnsureDB().zones) do
+        for _, sub in pairs(zone.subZones) do
+            if sub.enterPlace == placeId then list[#list + 1] = { sub = sub, zone = zone, which = "enter" } end
+            if sub.leavePlace == placeId then list[#list + 1] = { sub = sub, zone = zone, which = "leave" } end
+        end
+    end
+    table.sort(list, function(a, b) return a.sub.id < b.sub.id end)
+    return list
+end
+
+-- ── Action au passage (aura / commande / message) ──────────────────────────
+-- Portée par le lieu : jouée en y arrivant et / ou en le quittant, quel que
+-- soit le passage emprunté — voir RunPlaceAction.
+
+function ZG:SetPlaceActionMessage(id, text)
+    local place = MyPlace(id)
+    if not place then return end
+    place.actionMessage = text or ""
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetPlaceActionCommand(id, text)
+    local place = MyPlace(id)
+    if not place then return end
+    place.actionCommand = text or ""
+    ZG:ScheduleBroadcast()
+end
+
+-- which = "enter" | "leave"
+function ZG:SetPlaceActionEnabled(id, which, enabled)
+    local place = MyPlace(id)
+    if not place then return end
+    if which == "leave" then place.actionLeaveEnabled = enabled and true or false
+    else place.actionEnterEnabled = enabled and true or false end
+    ZG:ScheduleBroadcast()
+end
+
+-- ── Sort Arcanum lié au lieu (voir ArcEnter / ArcLeave) ──────────────────
+-- which = "enter" | "exit". Espaces retirés : un ArcSpell ID n'en contient pas.
+function ZG:SetPlaceArcSpell(id, which, commID)
+    local place = MyPlace(id)
+    if not place then return end
+    local field = (which == "exit") and "arcExitSpell" or "arcEnterSpell"
+    place[field] = Clean(commID)
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetPlaceArcVault(id, vault)
+    local place = MyPlace(id)
+    if not place then return end
+    place.arcVault = (vault == "personal") and "personal" or "phase"
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:SetPlaceArcToggle(id, enabled)
+    local place = MyPlace(id)
+    if not place then return end
+    place.arcToggle = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+-- ── CRUD Passages (= checkpoints, stockés dans zone.subZones) ────────────
+-- Un passage n'est que de la géométrie (passage droit ou périmètre) posée
+-- dans une région. Il mène à un lieu en entrant (côté vert / intérieur) et,
+-- facultativement, à un autre lieu en sortant — de n'importe quelle région.
 
 -- Renvoie sub, zone (ou rien si introuvable) — cherche dans toutes les
--- zones connues localement (les miennes + celles reçues par sync).
+-- régions connues localement (les miennes + celles reçues par sync).
 function ZG:FindSubZone(subZoneId)
     if not subZoneId then return nil end
     local db = EnsureDB()
@@ -307,7 +543,22 @@ function ZG:GetSubZone(id)
     return sub
 end
 
-function ZG:CreateSubZone(zoneId, name)
+local function MyPassage(id)
+    local sub, zone = ZG:FindSubZone(id)
+    if sub and zone.creator == MyName() then return sub, zone end
+end
+
+function ZG:GetPassageList(zoneId)
+    local zone = ZG:GetZone(zoneId)
+    local list = {}
+    if not zone then return list end
+    for _, sub in pairs(zone.subZones) do list[#list + 1] = sub end
+    table.sort(list, function(a, b) return a.id < b.id end)
+    return list
+end
+
+-- enterPlace (facultatif) : lieu proposé d'office en entrant.
+function ZG:CreateSubZone(zoneId, name, enterPlace)
     local zone = ZG:GetZone(zoneId)
     if not zone or zone.creator ~= MyName() then return nil end
 
@@ -317,47 +568,35 @@ function ZG:CreateSubZone(zoneId, name)
         return nil
     end
 
-    name = (name or ""):match("^%s*(.-)%s*$") or ""
+    name = Clean(name)
     if name == "" then
         local n = 0
         for _ in pairs(zone.subZones) do n = n + 1 end
-        name = "Checkpoint " .. (n + 1)
+        name = "Passage " .. (n + 1)
     end
 
-    local id = "sz_" .. time() .. "_" .. math.random(1000, 9999)
+    local id = NewId("sz_")
     zone.subZones[id] = {
         id = id, zoneId = zoneId, name = name, creator = MyName(),
+        passage = true,
         enabled = true,
         mapID = instanceID, x = px, y = py, facing = facing,
         width = DEFAULT_WIDTH,   -- largeur de porte (line), en yards
         shape = "line",
         points = {},             -- [i] = {x=,y=} — uniquement pour shape="polygon", voir AddRegionPoint
         regionReady = false,     -- polygone "fermé" (voir FinishRegion) — inerte tant que faux
-        forwardEnabled  = true,  -- bannière en entrant
-        backwardEnabled = true,  -- bannière en sortant
-        forwardName     = "",    -- nom affiché à l'entrée
-        backwardName    = "",    -- nom affiché à la sortie
-        actionMessage = "",           -- texte imprimé localement (jamais visible d'autrui)
-        actionCommand = "",           -- voir RunCrossingAction — ID d'aura (nombre) ou commande brute
-        actionForwardEnabled  = false, -- action en entrant — décoché par défaut (opt-in)
-        actionBackwardEnabled = false, -- action en sortant
-        arcEnterSpell = "",      -- ArcSpell ID lancé en entrant (voir ArcEnter)
-        arcExitSpell  = "",      -- ArcSpell ID lancé en sortant, pour défaire l'effet
-        arcVault      = "phase", -- "phase" (partagé par la phase) ou "personal"
-        arcToggle     = true,    -- le joueur peut retirer / remettre l'effet sur place
-        grantedTo = {},          -- [nom du joueur] = true — a appris le NOM DE LA SOUS-ZONE (local, jamais diffusé)
+        enterPlace = enterPlace, -- lieu atteint en entrant (côté vert / intérieur)
+        leavePlace = nil,        -- lieu atteint en sortant, ou aucun
     }
     ZG:ScheduleBroadcast()
     return zone.subZones[id]
 end
 
--- Clone une sous-zone existante (même nom/largeur/forme) à la
--- position/orientation ACTUELLES du joueur, dans la MÊME zone — pratique
--- pour poser plusieurs entrées d'un même village qui déclenchent toutes la
--- même bannière.
+-- Clone un passage (mêmes lieux, largeur, forme) à la position / orientation
+-- ACTUELLES du joueur — pratique pour les entrées multiples d'un village.
 function ZG:CloneSubZone(id)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return nil end
+    local sub, zone = MyPassage(id)
+    if not sub then return nil end
 
     local px, py, facing, instanceID = ZG:GetPlayerPose()
     if not px then
@@ -365,49 +604,54 @@ function ZG:CloneSubZone(id)
         return nil
     end
 
-    -- Pour une région (polygon), cloner "ici" n'a pas de sens géométrique
-    -- simple (ce n'est pas UN point) — les points sont recopiés tels quels
-    -- (mêmes coordonnées absolues), pas recentrés sur px/py. Pas exposé dans
-    -- l'UI pour ce shape (voir cloneBtn:SetShown dans UI_Panel.lua).
-    local points = nil
-    if sub.points then
-        points = {}
-        for i, p in ipairs(sub.points) do points[i] = { x = p.x, y = p.y } end
-    end
+    -- Un périmètre n'est pas UN point : ses points sont recopiés tels quels
+    -- (non exposé dans l'UI pour cette forme).
+    local points = {}
+    for i, p in ipairs(sub.points or {}) do points[i] = { x = p.x, y = p.y } end
 
-    local newId = "sz_" .. time() .. "_" .. math.random(1000, 9999)
+    local newId = NewId("sz_")
     zone.subZones[newId] = {
         id = newId, zoneId = zone.id, name = sub.name, creator = MyName(),
-        enabled = true,
+        passage = true, enabled = true,
         mapID = instanceID, x = px, y = py, facing = facing,
         width = sub.width, shape = sub.shape,
-        points = points or {}, regionReady = sub.regionReady or false,
-        forwardEnabled = sub.forwardEnabled, backwardEnabled = sub.backwardEnabled,
-        forwardName = sub.forwardName or "", backwardName = sub.backwardName or "",
-        actionMessage = sub.actionMessage or "", actionCommand = sub.actionCommand or "",
-        actionForwardEnabled = sub.actionForwardEnabled or false,
-        actionBackwardEnabled = sub.actionBackwardEnabled or false,
-        arcEnterSpell = sub.arcEnterSpell or "", arcExitSpell = sub.arcExitSpell or "",
-        arcVault = sub.arcVault or "phase", arcToggle = sub.arcToggle ~= false,
-        grantedTo = {},   -- nouvelle sous-zone (nouvel id) : déblocages à refaire
+        points = points, regionReady = sub.regionReady or false,
+        enterPlace = sub.enterPlace, leavePlace = sub.leavePlace,
     }
     ZG:ScheduleBroadcast()
     return zone.subZones[newId]
 end
 
 function ZG:RemoveSubZone(id)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
+    local sub, zone = MyPassage(id)
+    if not sub then return end
     zone.subZones[id] = nil
     ZG.state[id] = nil
+    ZG:ScheduleBroadcast()
+end
+
+function ZG:RenameSubZone(id, name)
+    local sub = MyPassage(id)
+    if not sub then return end
+    sub.name = name or ""
+    ZG:ScheduleBroadcast()
+end
+
+-- which = "enter" | "leave" ; placeId nil = aucun lieu. Seuls mes lieux
+-- sont acceptés (n'importe laquelle de mes régions).
+function ZG:SetPassagePlace(id, which, placeId)
+    local sub = MyPassage(id)
+    if not sub then return end
+    if placeId and not MyPlace(placeId) then return end
+    if which == "leave" then sub.leavePlace = placeId else sub.enterPlace = placeId end
     ZG:ScheduleBroadcast()
 end
 
 -- Recapture la position/orientation/instance courantes (déplace la porte là
 -- où se trouve le joueur, sans toucher au reste).
 function ZG:RecaptureSubZone(id)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return false end
+    local sub = MyPassage(id)
+    if not sub then return false end
 
     local px, py, facing, instanceID = ZG:GetPlayerPose()
     if not px then
@@ -422,21 +666,20 @@ function ZG:RecaptureSubZone(id)
 end
 
 function ZG:SetSubZoneWidth(id, width)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
+    local sub = MyPassage(id)
+    if not sub then return end
     sub.width = math.max(1, math.min(MAX_WIDTH, tonumber(width) or DEFAULT_WIDTH))
     ZG:ScheduleBroadcast()
 end
 
 function ZG:SetSubZoneShape(id, shape)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
+    local sub = MyPassage(id)
+    if not sub then return end
     local newShape = (shape == "polygon") and "polygon" or "line"
     if newShape == "polygon" and sub.shape ~= "polygon" then
-        -- Nouvelle région : le point de départ, c'est "ici" — la position déjà
-        -- capturée pour ce checkpoint (création ou dernière recapture). Les
-        -- points suivants s'ajoutent avec AddRegionPoint.
-        sub.points = { { x = sub.x, y = sub.y } }
+        -- Nouveau périmètre : il démarre vide. Le premier point est posé avec
+        -- AddRegionPoint, ou repris d'une frontière voisine (AddBorderPath).
+        sub.points = {}
         sub.regionReady = false
     end
     sub.shape = newShape
@@ -444,11 +687,9 @@ function ZG:SetSubZoneShape(id, shape)
     ZG:ScheduleBroadcast()
 end
 
--- ── Région (shape="polygon") : N points posés autour du joueur ───────────
+-- ── Périmètre (shape="polygon") : N points posés autour du joueur ─────────
 -- Le polygone est TOUJOURS traité comme fermé (dernier point relié au
--- premier) dès qu'il a au moins 3 points ET que regionReady est vrai —
--- FinishRegion se contente de lever ce drapeau, rien d'autre à stocker pour
--- "relier" le dernier point au point de départ.
+-- premier) dès qu'il a au moins 3 points ET que regionReady est vrai.
 
 local function RecomputeRegionCenter(sub)
     local points = sub.points
@@ -458,13 +699,11 @@ local function RecomputeRegionCenter(sub)
     sub.x, sub.y = sx / #points, sy / #points
 end
 
--- Ajoute un point à la position actuelle du joueur. Le premier point d'une
--- région fixe aussi son instance (mapID) — les suivants doivent rester dans
--- la MÊME instance, sinon rejetés (une région ne peut pas enjamber un
--- changement de carte).
+-- Ajoute un point à la position actuelle du joueur. Le premier point fixe
+-- aussi l'instance (mapID) — les suivants doivent rester dans la MÊME instance.
 function ZG:AddRegionPoint(subZoneId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() or sub.shape ~= "polygon" then return false end
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" then return false end
 
     local px, py, _, instanceID = ZG:GetPlayerPose()
     if not px then
@@ -476,27 +715,137 @@ function ZG:AddRegionPoint(subZoneId)
     if #sub.points == 0 then
         sub.mapID = instanceID
     elseif sub.mapID ~= instanceID then
-        OmegaHub.Print("Crossings : restez dans la même zone/instance pour cette région.")
+        OmegaHub.Print("Crossings : restez dans la même zone/instance pour ce périmètre.")
         return false
     elseif #sub.points >= MAX_REGION_POINTS then
-        OmegaHub.Print("Crossings : maximum " .. MAX_REGION_POINTS .. " points par région.")
+        OmegaHub.Print("Crossings : maximum " .. MAX_REGION_POINTS .. " points par périmètre.")
         return false
     end
 
     table.insert(sub.points, { x = px, y = py })
     RecomputeRegionCenter(sub)
-    sub.regionReady = false   -- toute modif des points rouvre la région (on rerevalide avec Valider)
+    sub.regionReady = false   -- toute modif des points rouvre le périmètre
     ZG.state[subZoneId] = nil
     ZG:ScheduleBroadcast()
     return true
 end
 
-function ZG:RemoveLastRegionPoint(subZoneId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() or sub.shape ~= "polygon" then return false end
-    if not sub.points or #sub.points == 0 then return false end
+-- Frontières déclarées dont un point n'existe plus : retirées.
+local function PruneBorders(sub)
+    if not sub.borders then return end
+    local n = sub.points and #sub.points or 0
+    for i = #sub.borders, 1, -1 do
+        local b = sub.borders[i]
+        if b.from > n or b.to > n then table.remove(sub.borders, i) end
+    end
+end
 
+function ZG:RemoveLastRegionPoint(subZoneId)
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" or not sub.points or #sub.points == 0 then return false end
     table.remove(sub.points)
+    PruneBorders(sub)
+    RecomputeRegionCenter(sub)
+    sub.regionReady = false
+    ZG.state[subZoneId] = nil
+    ZG:ScheduleBroadcast()
+    return true
+end
+
+-- ── Points de frontière ──────────────────────────────────────────────────
+-- Tout sommet d'un périmètre est un point de frontière ; il peut porter un
+-- nom (« Gué du Nord ») pour être retrouvé. Reprendre une frontière recopie
+-- deux points d'un périmètre voisin aux coordonnées exactes : les deux
+-- contours se touchent sans trou ni chevauchement.
+
+local function CleanPointName(name)
+    return (Clean(name):gsub("[;,:|\n\r]", " "))
+end
+
+function ZG:SetRegionPointName(subZoneId, index, name)
+    local sub = MyPassage(subZoneId)
+    local point = sub and sub.points and sub.points[index]
+    if not point then return end
+    name = CleanPointName(name)
+    point.name = name ~= "" and name or nil
+    ZG:ScheduleBroadcast()
+end
+
+-- Nom affiché d'un sommet : son nom, sinon « Point 4 de <passage> ».
+function ZG:RegionPointLabel(sub, index)
+    local point = sub.points and sub.points[index]
+    if not point then return "" end
+    return point.name or ("Point " .. index .. " de " .. (sub.name or "?"))
+end
+
+-- Mes autres périmètres de la même instance, sources d'une frontière à reprendre.
+-- Contour encore vide : l'instance est celle où se trouve le joueur.
+function ZG:GetBorderSources(subZoneId)
+    local sub = MyPassage(subZoneId)
+    local list = {}
+    if not sub then return list end
+    local mapID = sub.mapID
+    if not sub.points or #sub.points == 0 then
+        local _, _, _, instanceID = ZG:GetPlayerPose()
+        mapID = instanceID or mapID
+    end
+    for _, zone in pairs(EnsureDB().zones) do
+        if zone.creator == MyName() then
+            for _, other in pairs(zone.subZones) do
+                if other.id ~= sub.id and other.shape == "polygon" and other.mapID == mapID and other.points and #other.points >= 2 then
+                    list[#list + 1] = { sub = other, zone = zone }
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.sub.id < b.sub.id end)
+    return list
+end
+
+-- Sommets parcourus de "from" à "to" en suivant le contour, dans un sens ou
+-- dans l'autre, y compris par la fermeture (47 → 1 → … → 6). nil si le
+-- chemin n'existe pas.
+function ZG:BorderPath(source, from, to, forward)
+    local points = source.points or {}
+    local n = #points
+    if not points[from] or not points[to] or from == to then return nil end
+    -- Un contour en cours sera refermé du dernier point au premier : dès 3
+    -- points, on peut déjà passer par cette fermeture.
+    local closed = n >= 3
+    local path, i = {}, from
+    while true do
+        path[#path + 1] = i
+        if i == to then return path end
+        i = i + (forward and 1 or -1)
+        if i > n or i < 1 then
+            if not closed then return nil end
+            i = (i > n) and 1 or n
+        end
+    end
+end
+
+-- Ajoute à la suite du contour en cours la frontière d'un périmètre voisin,
+-- du point "from" au point "to", avec les noms des sommets.
+function ZG:AddBorderPath(subZoneId, sourceId, from, to, forward)
+    local sub = MyPassage(subZoneId)
+    local source = MyPassage(sourceId)
+    if not sub or not source or sub.shape ~= "polygon" or source.shape ~= "polygon" then return false end
+    local path = ZG:BorderPath(source, from, to, forward)
+    if not path then return false end
+    sub.points = sub.points or {}
+    if #sub.points == 0 then sub.mapID = source.mapID end
+    if sub.mapID ~= source.mapID then
+        OmegaHub.Print("Crossings : cette frontière est dans une autre zone/instance.")
+        return false
+    end
+    if #sub.points + #path > MAX_REGION_POINTS then
+        OmegaHub.Print("Crossings : maximum " .. MAX_REGION_POINTS .. " points par périmètre.")
+        return false
+    end
+    for _, index in ipairs(path) do
+        local p = source.points[index]
+        table.insert(sub.points, { x = p.x, y = p.y, name = p.name })
+    end
     RecomputeRegionCenter(sub)
     sub.regionReady = false
     ZG.state[subZoneId] = nil
@@ -505,19 +854,65 @@ function ZG:RemoveLastRegionPoint(subZoneId)
 end
 
 function ZG:ClearRegionPoints(subZoneId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() or sub.shape ~= "polygon" then return end
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" then return end
     sub.points = {}
+    PruneBorders(sub)
     sub.regionReady = false
     ZG.state[subZoneId] = nil
     ZG:ScheduleBroadcast()
 end
 
--- "Valide" la région : au moins 3 points nécessaires (aire non nulle).
+-- ── Frontières déclarées ──────────────────────────────────────────────────
+-- Un tronçon nommé de son propre contour (« Frontière Nord », du point 47 au
+-- point 6), déclaré avant même qu'un voisin existe : le périmètre voisin le
+-- reprendra ensuite tel quel (voir AddBorderPath).
+function ZG:DeclareBorder(subZoneId, name, from, to, forward)
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" then return false end
+    name = CleanPointName(name)
+    if name == "" or not ZG:BorderPath(sub, from, to, forward) then return false end
+    sub.borders = sub.borders or {}
+    table.insert(sub.borders, { name = name, from = from, to = to, forward = forward and true or false })
+    ZG:ScheduleBroadcast()
+    return true
+end
+
+function ZG:UpdateBorder(subZoneId, index, name, from, to, forward)
+    local sub = MyPassage(subZoneId)
+    local border = sub and sub.borders and sub.borders[index]
+    if not border then return false end
+    name = CleanPointName(name)
+    if name == "" or not ZG:BorderPath(sub, from, to, forward) then return false end
+    border.name, border.from, border.to, border.forward = name, from, to, forward and true or false
+    ZG:ScheduleBroadcast()
+    return true
+end
+
+function ZG:RemoveBorder(subZoneId, index)
+    local sub = MyPassage(subZoneId)
+    if not sub or not sub.borders or not sub.borders[index] then return end
+    table.remove(sub.borders, index)
+    ZG:ScheduleBroadcast()
+end
+
+-- Frontières déclarées sur mes autres périmètres de la même instance.
+function ZG:GetDeclaredBorders(subZoneId)
+    local list = {}
+    for _, entry in ipairs(ZG:GetBorderSources(subZoneId)) do
+        for _, border in ipairs(entry.sub.borders or {}) do
+            if ZG:BorderPath(entry.sub, border.from, border.to, border.forward) then
+                list[#list + 1] = { sub = entry.sub, zone = entry.zone, border = border }
+            end
+        end
+    end
+    return list
+end
+
+-- "Valide" le périmètre : au moins 3 points nécessaires (aire non nulle).
 function ZG:FinishRegion(subZoneId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() or sub.shape ~= "polygon" then return false end
-    if not sub.points or #sub.points < 3 then return false end
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" or not sub.points or #sub.points < 3 then return false end
     sub.regionReady = true
     ZG.state[subZoneId] = nil
     ZG:ScheduleBroadcast()
@@ -526,83 +921,17 @@ end
 
 -- Rouvre l'édition (ajouter/retirer des points) sans perdre ceux déjà posés.
 function ZG:ReopenRegion(subZoneId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() or sub.shape ~= "polygon" then return end
+    local sub = MyPassage(subZoneId)
+    if not sub or sub.shape ~= "polygon" then return end
     sub.regionReady = false
     ZG.state[subZoneId] = nil
     ZG:ScheduleBroadcast()
 end
 
 function ZG:SetSubZoneEnabled(id, enabled)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
+    local sub = MyPassage(id)
+    if not sub then return end
     sub.enabled = enabled and true or false
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:SetSubZoneDirectionEnabled(id, direction, enabled)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    if direction == "forward" then sub.forwardEnabled = enabled and true or false
-    else sub.backwardEnabled = enabled and true or false end
-    ZG:ScheduleBroadcast()
-end
-
--- ── Action personnalisée au franchissement (aura / commande / message) ────
--- Indépendante de la bannière (SetSubZoneDirectionEnabled ci-dessus) : une
--- sous-zone peut avoir une bannière sans action, une action sans bannière,
--- ou les deux — voir RunCrossingAction pour ce qui se passe vraiment.
-
-function ZG:SetSubZoneActionMessage(id, text)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.actionMessage = text or ""
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:SetSubZoneActionCommand(id, text)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.actionCommand = text or ""
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:SetSubZoneActionDirectionEnabled(id, direction, enabled)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    if direction == "forward" then sub.actionForwardEnabled = enabled and true or false
-    else sub.actionBackwardEnabled = enabled and true or false end
-    ZG:ScheduleBroadcast()
-end
-
--- ── Sort Arcanum lié à la région (voir ArcEnter / ArcLeave) ──────────────
--- which = "enter" | "exit". Espaces retirés : un ArcSpell ID n'en contient pas.
-function ZG:SetSubZoneArcSpell(id, which, commID)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    local field = (which == "exit") and "arcExitSpell" or "arcEnterSpell"
-    sub[field] = (commID or ""):match("^%s*(.-)%s*$") or ""
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:SetSubZoneArcVault(id, vault)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.arcVault = (vault == "personal") and "personal" or "phase"
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:SetSubZoneArcToggle(id, enabled)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.arcToggle = enabled and true or false
-    ZG:ScheduleBroadcast()
-end
-
-function ZG:RenameSubZone(id, name)
-    local sub, zone = ZG:FindSubZone(id)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.name = name
     ZG:ScheduleBroadcast()
 end
 
@@ -792,19 +1121,18 @@ function ZG:SetZoneTheme(zoneId, themeId)
     ZG:ScheduleBroadcast()
 end
 
-function ZG:SetSubZoneTheme(subZoneId, themeId)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() then return end
-    sub.themeId = (themeId ~= "" and themeId) or nil
+function ZG:SetPlaceTheme(placeId, themeId)
+    local place, zone = ZG:FindPlace(placeId)
+    if not place or zone.creator ~= MyName() then return end
+    place.themeId = (themeId ~= "" and themeId) or nil
     ZG:ScheduleBroadcast()
 end
 
--- Résout le thème effectif d'un franchissement : la Sous-zone l'emporte si
--- elle a choisi le sien, sinon celui de la Zone (tous ses enfants en
--- héritent), sinon le thème par défaut (comportement d'avant les thèmes).
-function ZG:ResolveTheme(sub, zone)
-    if sub and sub.themeId then
-        local t = ZG:GetTheme(sub.themeId)
+-- Résout le thème effectif d'un lieu : le sien s'il en a choisi un, sinon
+-- celui de sa région (tous ses lieux en héritent), sinon le thème par défaut.
+function ZG:ResolveTheme(place, zone)
+    if place and place.themeId then
+        local t = ZG:GetTheme(place.themeId)
         if t then return t end
     end
     if zone and zone.themeId then
@@ -840,6 +1168,72 @@ end
 local function MigrateCircles()
     for _, zone in pairs(EnsureDB().zones) do
         for _, sub in pairs(zone.subZones) do CircleToPerimeter(sub) end
+    end
+end
+
+-- Ancien modèle : chaque checkpoint portait lui-même son nom, ses noms
+-- d'entrée / de sortie, sa bannière et ses effets. Il devient un passage
+-- qui mène à un lieu (nom d'entrée, sinon son nom) et, si un nom de sortie
+-- était rempli, à un second lieu en sortant. Les checkpoints d'un même
+-- village (même nom, même bannière) partagent un seul lieu ; les anciens
+-- ids restent des alias pour ne pas perdre les noms déjà appris.
+local function Filled(s) return (tostring(s or ""):match("^%s*(.-)%s*$") or "") ~= "" end
+
+local function LegacyPlace(zone, id, name, themeId, grantedTo)
+    for _, place in pairs(zone.places) do
+        if place.name == name and place.themeId == themeId then
+            if place.id ~= id then place.aliases[id] = true end
+            for who in pairs(grantedTo or {}) do place.grantedTo[who] = true end
+            return place
+        end
+    end
+    local place = NewPlace(id, zone.id, name)
+    place.themeId = themeId
+    for who in pairs(grantedTo or {}) do place.grantedTo[who] = true end
+    zone.places[id] = place
+    return place
+end
+
+local function ConvertLegacySub(zone, sub)
+    if sub.passage then return end
+    zone.places = zone.places or {}
+    local enterName = Filled(sub.forwardName) and sub.forwardName or (Filled(sub.name) and sub.name or "Lieu")
+    local enter = LegacyPlace(zone, sub.id, enterName, sub.themeId, sub.grantedTo)
+    if not Filled(enter.actionMessage) and not Filled(enter.actionCommand) then
+        enter.actionMessage, enter.actionCommand = sub.actionMessage or "", sub.actionCommand or ""
+        enter.actionEnterEnabled = sub.actionForwardEnabled or false
+        enter.actionLeaveEnabled = sub.actionBackwardEnabled or false
+    end
+    if not Filled(enter.arcEnterSpell) and Filled(sub.arcEnterSpell) then
+        enter.arcEnterSpell, enter.arcExitSpell = sub.arcEnterSpell, sub.arcExitSpell or ""
+        enter.arcVault, enter.arcToggle = sub.arcVault or "phase", sub.arcToggle ~= false
+    end
+    local leave = Filled(sub.backwardName) and LegacyPlace(zone, sub.id .. "_b", sub.backwardName, sub.themeId) or nil
+    sub.enterPlace, sub.leavePlace = enter.id, leave and leave.id or nil
+    sub.name = "Passage vers " .. enter.name
+    for _, key in ipairs({ "forwardName", "backwardName", "forwardEnabled", "backwardEnabled", "themeId", "grantedTo",
+        "actionMessage", "actionCommand", "actionForwardEnabled", "actionBackwardEnabled",
+        "arcEnterSpell", "arcExitSpell", "arcVault", "arcToggle" }) do sub[key] = nil end
+    sub.passage = true
+end
+
+local function MigratePlaces()
+    for _, zone in pairs(EnsureDB().zones) do
+        local ids = {}
+        for id in pairs(zone.subZones) do ids[#ids + 1] = id end
+        table.sort(ids)   -- ordre stable : le plus ancien checkpoint donne son id au lieu
+        for _, id in ipairs(ids) do ConvertLegacySub(zone, zone.subZones[id]) end
+    end
+end
+
+-- Les modèles de l'Atelier imposaient "center" : les bannières déjà créées
+-- remontent en haut de l'écran, une seule fois (l'auteur peut rechoisir ensuite).
+local function MigrateBannerPlacement()
+    local db = EnsureDB()
+    if db.placementTopMigrated then return end
+    db.placementTopMigrated = true
+    for _, theme in pairs(db.themes) do
+        if theme.placement == "center" and theme.creator == UnitName("player") then theme.placement = "top" end
     end
 end
 
@@ -978,32 +1372,31 @@ function ZG:MarkLearnedSubZoneName(subZoneId)
     EnsureCharDB().learnedSubZones[subZoneId] = true
 end
 
+-- Un lieu fusionné garde ses anciens ids : un nom appris sous l'un d'eux reste connu.
+function ZG:KnowsPlaceName(place)
+    if not place then return false end
+    if ZG:HasLearnedSubZoneName(place.id) then return true end
+    for alias in pairs(place.aliases or {}) do
+        if ZG:HasLearnedSubZoneName(alias) then return true end
+    end
+    return false
+end
+
 -- Renvoie title, subtitle prêts pour la bannière (et pour l'affichage dans
 -- le panneau). Les deux noms sont débloqués INDÉPENDAMMENT l'un de l'autre
--- (voir SendZoneGrant / SendSubZoneGrant), d'où 4 combinaisons possibles :
+-- (voir SendZoneGrant / SendPlaceGrant), d'où 4 combinaisons possibles :
 --   1. aucun connu      → "Zone inconnue"  / "?????"
---   2. Zone seule       → "<nom de zone>"  / "??????"
---   3. Sous-zone seule  → "Zone inconnue"  / "<nom de sous-zone>"
---   4. les deux connus  → "<nom de zone>"  / "<nom de sous-zone>"
--- L'auteur de la Zone voit toujours tout en clair, quel que soit ce qu'il
--- s'est débloqué à lui-même (il connaît forcément déjà les deux noms).
-function ZG:ResolveBannerText(sub, zone, direction)
-    if not sub or not zone then return nil end
+--   2. Région seule     → "<région>"       / "??????"
+--   3. Lieu seul        → "Zone inconnue"  / "<lieu>"
+--   4. les deux connus  → "<région>"       / "<lieu>"
+-- L'auteur de la région voit toujours tout en clair.
+function ZG:ResolveBannerText(place, zone)
+    if not place or not zone then return nil end
     local mine = zone.creator == MyName()
     local zoneKnown = mine or ZG:HasLearnedZoneName(zone.id)
-    local subKnown  = mine or ZG:HasLearnedSubZoneName(sub.id)
-
-    local title    = zoneKnown and zone.name or "Zone inconnue"
-
-    -- Utilise forwardName ou backwardName si définis, sinon tombe sur le nom standard
-    local baseSubName = sub.name
-    if direction == "forward" and sub.forwardName and sub.forwardName ~= "" then
-        baseSubName = sub.forwardName
-    elseif direction == "backward" and sub.backwardName and sub.backwardName ~= "" then
-        baseSubName = sub.backwardName
-    end
-
-    local subtitle = subKnown and baseSubName or ZG:MaskText(baseSubName)
+    local placeKnown = mine or ZG:KnowsPlaceName(place)
+    local title = zoneKnown and zone.name or "Zone inconnue"
+    local subtitle = placeKnown and place.name or ZG:MaskText(place.name)
     return title, subtitle
 end
 
@@ -1011,8 +1404,12 @@ end
 
 ZG.state = ZG.state or {}   -- [subZoneId] = -1 | 1 | nil (côté courant)
 
+-- Après un écran de chargement, la position se rétablit en silence quelques secondes.
+local QUIET_AFTER_LOADING = 5
+
 function ZG:ResetState()
     wipe(ZG.state)
+    ZG.quietUntil = GetTime() + QUIET_AFTER_LOADING
 end
 
 -- Ligne : distance signée le long de "facing" (along) + latérale (across).
@@ -1098,25 +1495,59 @@ function ZG:GetCheckpointStatus(sub)
     return true, (side == 1) and "forward" or "backward"
 end
 
--- ── Sort Arcanum lié à la région ──────────────────────────────────────────
--- Tant que le joueur est DANS la région, son sort d'entrée est actif ; en
--- sortant, le sort de sortie le défait. Arcanum n'a pas d'annulation
--- générique (ARC:STOP coupe aussi les reverts sans les jouer), d'où un sort
--- de sortie explicite. "Dedans" : périmètre fermé = intérieur, même
--- en arrivant déjà dedans (connexion, /reload) ; ligne = après un passage
--- dans le sens de l'entrée. Indépendant de la bannière et de l'action.
--- ZG.arc[subId] = { sub, active (voulu), applied (lancé), name }.
+-- /crossings debug : ce que la détection voit à la position du joueur.
+function ZG:DebugPosition()
+    local px, py, _, instanceID = ZG:GetPlayerPose()
+    if not px then OmegaHub.Print("Crossings : position indisponible."); return end
+    OmegaHub.Print(string.format("Crossings : x %.1f, y %.1f, instance %s", px, py, tostring(instanceID)))
+    local function name(placeId)
+        local place = ZG:FindPlace(placeId)
+        return place and place.name or "aucun"
+    end
+    local count = 0
+    for _, zone in pairs(EnsureDB().zones) do
+        for id, sub in pairs(zone.subZones) do
+            if sub.mapID == instanceID then
+                count = count + 1
+                local side = ClassifySide(sub, px, py)
+                OmegaHub.Print(string.format("  %s (%s, %s%s) : %s · mémorisé %s · entrée %s · sortie %s",
+                    sub.name or id, sub.shape == "polygon" and "périmètre" or "passage droit",
+                    sub.enabled and "actif" or "inactif",
+                    sub.shape == "polygon" and (sub.regionReady and ", validé" or ", NON validé") or "",
+                    side == 1 and "dedans" or side == -1 and "dehors" or "au bord",
+                    tostring(ZG.state[id]), name(sub.enterPlace), name(sub.leavePlace)))
+            end
+        end
+    end
+    if count == 0 then OmegaHub.Print("  Aucun passage dans cette instance.") end
+    local here = {}
+    for placeId in pairs(ZG.here) do here[#here + 1] = name(placeId) end
+    OmegaHub.Print("  Lieux actuels : " .. (#here > 0 and table.concat(here, ", ") or "aucun"))
+end
 
+-- ── Lieux où se trouve le joueur + sort Arcanum lié au lieu ──────────────
+-- ZG.here[placeId] = id du passage qui y a mené. Un franchissement quitte le
+-- lieu de départ et entre dans celui d'arrivée ; un périmètre fermé place
+-- aussi le joueur dans son lieu s'il s'y trouve déjà (connexion, /reload).
+-- Un passage désactivé, supprimé ou d'une autre instance libère ses lieux.
+--
+-- Tant que le joueur est DANS un lieu, son sort d'entrée est actif ; en le
+-- quittant, le sort de sortie le défait. Arcanum n'a pas d'annulation
+-- générique (ARC:STOP coupe aussi les reverts sans les jouer), d'où un sort
+-- de sortie explicite. Indépendant de la bannière et de l'action.
+-- ZG.arc[placeId] = { place, active (voulu), applied (lancé), name }.
+
+ZG.here = ZG.here or {}
 ZG.arc = ZG.arc or {}
 
 local function Trim(s) return (tostring(s or ""):match("^%s*(.-)%s*$")) or "" end
 
-local function HasArc(sub)
-    return sub ~= nil and Trim(sub.arcEnterSpell) ~= ""
+local function HasArc(place)
+    return place ~= nil and Trim(place.arcEnterSpell) ~= ""
 end
 
 -- Sort introuvable ou coffre de phase encore en chargement : nil (pas de
--- message, UpdateArc réessaie au tick suivant).
+-- message, SyncArc réessaie au tick suivant).
 local function FindArcSpell(commID, vault)
     commID = Trim(commID)
     if commID == "" or type(ARC) ~= "table" or type(ARC.XAPI) ~= "table" or type(ARC.XAPI.GetArcSpell) ~= "function" then return nil end
@@ -1146,38 +1577,38 @@ local function NotifyArc()
 end
 
 local function ApplyArc(entry)
-    local sub = entry.sub
-    local spell = FindArcSpell(sub.arcEnterSpell, sub.arcVault)
+    local place = entry.place
+    local spell = FindArcSpell(place.arcEnterSpell, place.arcVault)
     if not spell then return end
     entry.found = true   -- une seule tentative : un refus (conditions, recharge) n'est pas réessayé
-    entry.name = Trim(spell.fullName) ~= "" and spell.fullName or Trim(sub.arcEnterSpell)
-    entry.applied = CastArc(sub.arcEnterSpell, sub.arcVault)
+    entry.name = Trim(spell.fullName) ~= "" and spell.fullName or Trim(place.arcEnterSpell)
+    entry.applied = CastArc(place.arcEnterSpell, place.arcVault)
 end
 
 -- Défait l'effet : interrompt le sort d'entrée encore en cours (boucles,
 -- délais) puis lance le sort de sortie. Sans sort de sortie, rien n'est
 -- interrompu : l'effet suit sa propre durée / ses reverts.
 local function RemoveArc(entry)
-    local sub = entry.sub
-    if not entry.applied or Trim(sub.arcExitSpell) == "" then return end
+    local place = entry.place
+    if not entry.applied or Trim(place.arcExitSpell) == "" then return end
     if type(ARC) == "table" and type(ARC.STOP) == "function" then
-        pcall(ARC.STOP, ARC, Trim(sub.arcEnterSpell))
+        pcall(ARC.STOP, ARC, Trim(place.arcEnterSpell))
     end
-    CastArc(sub.arcExitSpell, sub.arcVault)
+    CastArc(place.arcExitSpell, place.arcVault)
 end
 
-function ZG:ArcEnter(sub)
-    if ZG.arc[sub.id] or not HasArc(sub) then return end
-    local entry = { sub = sub, active = true, applied = false, name = Trim(sub.arcEnterSpell) }
-    ZG.arc[sub.id] = entry
+function ZG:ArcEnter(place)
+    if ZG.arc[place.id] or not HasArc(place) then return end
+    local entry = { place = place, active = true, applied = false, name = Trim(place.arcEnterSpell) }
+    ZG.arc[place.id] = entry
     ApplyArc(entry)
     NotifyArc()
 end
 
-function ZG:ArcLeave(subId)
-    local entry = ZG.arc[subId]
+function ZG:ArcLeave(placeId)
+    local entry = ZG.arc[placeId]
     if not entry then return end
-    ZG.arc[subId] = nil
+    ZG.arc[placeId] = nil
     if entry.active then RemoveArc(entry) end
     NotifyArc()
 end
@@ -1188,9 +1619,9 @@ end
 
 -- Choix du joueur sur place (voir UI_Arcanum.lua) : retirer l'effet, ou le
 -- remettre. "Remettre" relance aussi un effet retiré par d'autres moyens.
-function ZG:ArcSetActive(subId, active)
-    local entry = ZG.arc[subId]
-    if not entry or entry.sub.arcToggle == false then return end
+function ZG:ArcSetActive(placeId, active)
+    local entry = ZG.arc[placeId]
+    if not entry or entry.place.arcToggle == false then return end
     if active then
         entry.active = true
         ApplyArc(entry)
@@ -1206,71 +1637,89 @@ function ZG:GetArcEffects()
     for id, entry in pairs(ZG.arc) do
         list[#list + 1] = {
             id = id, name = entry.name, active = entry.active, applied = entry.applied,
-            canToggle = entry.sub.arcToggle ~= false,
-            canRemove = Trim(entry.sub.arcExitSpell) ~= "",
+            canToggle = entry.place.arcToggle ~= false,
+            canRemove = Trim(entry.place.arcExitSpell) ~= "",
         }
     end
     table.sort(list, function(a, b) return a.id < b.id end)
     return list
 end
 
-local function IsClosed(sub)
-    return sub.shape == "polygon" and sub.regionReady and sub.points and #sub.points >= 3
-end
-
--- side : résultat de ClassifySide (nil = marge) ; crossed : "forward" /
--- "backward" si un franchissement vient d'avoir lieu à ce tick.
-local function UpdateArc(sub, side, crossed)
-    local entry = ZG.arc[sub.id]
-    local inside = entry ~= nil
-    if IsClosed(sub) then
-        if side == 1 then inside = true elseif side == -1 then inside = false end
-    elseif crossed then
-        inside = crossed == "forward"
-    end
-
-    if inside and not entry then
-        ZG:ArcEnter(sub)
-    elseif not inside and entry then
-        ZG:ArcLeave(sub.id)
-    elseif entry then
-        entry.sub = sub   -- la synchro remplace la table de la sous-zone
-        -- Sort encore introuvable à l'entrée (coffre de phase en chargement,
-        -- ID en cours de saisie) : on réessaie tant que l'effet est voulu.
-        if entry.active and not entry.found then
-            ApplyArc(entry)
-            if entry.applied then NotifyArc() end
+-- Aligne les effets Arcanum sur ZG.here.
+local function SyncArc()
+    for placeId in pairs(ZG.here) do
+        local place = ZG:FindPlace(placeId)
+        local entry = ZG.arc[placeId]
+        if place and HasArc(place) then
+            if not entry then
+                ZG:ArcEnter(place)
+            else
+                entry.place = place   -- la synchro remplace la table du lieu
+                -- Sort encore introuvable à l'entrée (coffre de phase en
+                -- chargement, ID en cours de saisie) : on réessaie tant que voulu.
+                if entry.active and not entry.found then
+                    ApplyArc(entry)
+                    if entry.applied then NotifyArc() end
+                end
+            end
         end
     end
+    for id in pairs(ZG.arc) do
+        if not ZG.here[id] or not HasArc(ZG:FindPlace(id)) then ZG:ArcLeave(id) end
+    end
+end
+
+-- Lieux où se trouve le joueur, pour l'éditeur.
+function ZG:IsInPlace(placeId)
+    return ZG.here[placeId] ~= nil
+end
+
+local function IsClosed(sub)
+    return sub.shape == "polygon" and sub.regionReady and sub.points and #sub.points >= 3
 end
 
 function ZG:Tick()
     local px, py, _, instanceID = ZG:GetPlayerPose()
     if not px then return end
 
-    local db = EnsureDB()
-    local arcSeen = {}
-    for _, zone in pairs(db.zones) do
+    local live, crossings = {}, {}
+    for _, zone in pairs(EnsureDB().zones) do
         for id, sub in pairs(zone.subZones) do
             if sub.enabled and sub.mapID == instanceID then
+                live[id] = true
                 local side = ClassifySide(sub, px, py)
-                local crossed
                 if side then
                     local prev = ZG.state[id]
                     if prev and prev ~= side then
-                        crossed = (prev < 0 and side > 0) and "forward" or "backward"
-                        ZG:TriggerCrossing(sub, zone, crossed)
+                        -- Vers le côté vert / l'intérieur : on quitte le lieu de
+                        -- sortie pour celui d'entrée ; l'inverse en revenant.
+                        -- (pas de "a and b or c" : un lieu de sortie vide est un cas normal)
+                        -- Périmètre : en sortir ne mène nulle part par lui-même ; le
+                        -- lieu d'arrivée vient du périmètre voisin (frontière commune).
+                        local from, to = sub.enterPlace, sub.shape ~= "polygon" and sub.leavePlace or nil
+                        if prev < 0 and side > 0 then from, to = to, from end
+                        if from and from ~= to then ZG.here[from] = nil end
+                        if to then ZG.here[to] = id end
+                        crossings[#crossings + 1] = { sub = sub, from = from, to = to }
+                    elseif not prev and IsClosed(sub) and sub.enterPlace then
+                        -- Se découvrir dedans (périmètre tout juste validé, survol) affiche
+                        -- la bannière ; juste après un chargement ou une connexion, non.
+                        if side > 0 then
+                            local fresh = ZG.here[sub.enterPlace] == nil
+                            ZG.here[sub.enterPlace] = id
+                            if fresh and GetTime() > (ZG.quietUntil or 0) then
+                                crossings[#crossings + 1] = { sub = sub, to = sub.enterPlace }
+                            end
+                        elseif ZG.here[sub.enterPlace] == id then
+                            ZG.here[sub.enterPlace] = nil
+                        end
                     end
                     ZG.state[id] = side
-                else
+                elseif not IsClosed(sub) then
                     -- Keep the last stable side through the boundary deadband.
                     -- Otherwise slow crossings lose their origin before reaching
                     -- the opposite side and never trigger their effects.
-                    if not IsClosed(sub) then ZG.state[id] = nil end
-                end
-                if HasArc(sub) then
-                    arcSeen[id] = true
-                    UpdateArc(sub, side, crossed)
+                    ZG.state[id] = nil
                 end
             else
                 ZG.state[id] = nil
@@ -1278,45 +1727,58 @@ function ZG:Tick()
         end
     end
 
-    -- Checkpoint désactivé, supprimé, sort délié ou autre instance : le
-    -- joueur n'est plus dans la région.
-    for id in pairs(ZG.arc) do
-        if not arcSeen[id] then ZG:ArcLeave(id) end
+    -- Frontière commune : sortir de A « vers rien » et entrer dans B « depuis
+    -- rien » au même instant, c'est un seul passage direct A → B.
+    local exits, entries = {}, {}
+    for _, c in ipairs(crossings) do
+        if c.from and not c.to then exits[#exits + 1] = c
+        elseif c.to and not c.from then entries[#entries + 1] = c end
     end
+    for i = 1, math.min(#exits, #entries) do
+        local exit, entry = exits[i], entries[i]
+        exit.merged, entry.merged = true, true
+        ZG:TriggerCrossing(entry.sub, exit.from, entry.to)
+    end
+    for _, c in ipairs(crossings) do
+        if not c.merged then ZG:TriggerCrossing(c.sub, c.from, c.to) end
+    end
+
+    for placeId, source in pairs(ZG.here) do
+        if not live[source] then ZG.here[placeId] = nil end
+    end
+    SyncArc()
 end
 
--- Action personnalisée d'une sous-zone au franchissement : un message local
--- (texte imprimé dans VOTRE chat) et/ou une commande (aura ou brute — gérée
--- via OS2.ModuleRules.ExecuteServerCommand comme les règles d'aura de
+-- Action d'un lieu au passage : un message local (texte imprimé dans VOTRE
+-- chat) et/ou une commande (aura ou brute — gérée via
+-- OS2.ModuleRules.ExecuteServerCommand comme les règles d'aura de
 -- Lantern/Torch : ça n'exécute pas de code, juste un message envoyé au
 -- serveur qui décide seul quoi en faire). Inconditionnel pour TOUT joueur
--- qui franchit, y compris une sous-zone créée par quelqu'un d'autre —
--- volontaire, pour qu'un MJ puisse forcer un message/une aura à un joueur
--- sans que celui-ci ait à autoriser quoi que ce soit ; au créateur de la
--- zone de ne pas se planter dans sa config.
-function ZG:RunCrossingAction(sub, zone, direction)
-    local enabled = (direction == "forward" and sub.actionForwardEnabled) or (direction == "backward" and sub.actionBackwardEnabled)
+-- qui passe, y compris dans un lieu créé par quelqu'un d'autre — volontaire,
+-- pour qu'un MJ puisse forcer un message/une aura à un joueur sans que
+-- celui-ci ait à autoriser quoi que ce soit.
+-- mode = "enter" (arrivée dans le lieu) | "leave" (départ du lieu).
+function ZG:RunPlaceAction(place, mode)
+    local enabled = (mode == "enter" and place.actionEnterEnabled) or (mode == "leave" and place.actionLeaveEnabled)
     if not enabled then return end
 
-    if sub.actionMessage and sub.actionMessage ~= "" then
-        OmegaHub.Print(sub.actionMessage)
+    if place.actionMessage and place.actionMessage ~= "" then
+        OmegaHub.Print(place.actionMessage)
     end
 
-    if sub.actionCommand and sub.actionCommand ~= "" and OS2 and OS2.ModuleRules and OS2.ModuleRules.ExecuteServerCommand then
-        -- Un ID numérique = raccourci "aura" : appliquée en entrant, retirée
-        -- en sortant (mêmes conventions que les règles d'aura de Lantern —
-        -- ExecuteServerCommand préfixe .aura/.unaura tout seul si la
-        -- commande n'est qu'un nombre).
-        local auraMode = (direction == "forward") and "apply" or "remove"
-        OS2.ModuleRules.ExecuteServerCommand(sub.actionCommand, auraMode)
+    if place.actionCommand and place.actionCommand ~= "" and OS2 and OS2.ModuleRules and OS2.ModuleRules.ExecuteServerCommand then
+        -- Un ID numérique = raccourci "aura" : appliquée en arrivant, retirée
+        -- en partant (ExecuteServerCommand préfixe .aura/.unaura tout seul si
+        -- la commande n'est qu'un nombre).
+        OS2.ModuleRules.ExecuteServerCommand(place.actionCommand, (mode == "enter") and "apply" or "remove")
     end
 end
 
--- Son de franchissement : value est soit un ID SoundKit Blizzard (nombre),
--- soit un chemin de fichier ("Sound\..." natif ou un .ogg/.mp3 déposé par
--- vous dans le dossier de l'addon) — testé dans cet ordre, silencieux si
--- vide ou si rien ne joue. Toujours protégé (pcall) : un chemin invalide ne
--- doit jamais casser le franchissement.
+-- Son de passage : value est soit un ID SoundKit Blizzard (nombre), soit un
+-- chemin de fichier ("Sound\..." natif ou un .ogg/.mp3 déposé par vous dans
+-- le dossier de l'addon) — testé dans cet ordre, silencieux si vide ou si
+-- rien ne joue. Toujours protégé (pcall) : un chemin invalide ne doit jamais
+-- casser le passage.
 local function ResolveSoundValue(value)
     value = (value or ""):match("^%s*(.-)%s*$") or ""
     if value == "" then return end
@@ -1331,24 +1793,32 @@ local function ResolveSoundValue(value)
     end
 end
 
+-- direction = "forward" (arrivée : son d'entrée) | "backward" (départ : son de sortie).
 function ZG:PlayCrossingSound(theme, direction)
     if not theme then return end
     local value = (direction == "forward") and theme.soundEnter or theme.soundExit
     ResolveSoundValue(value)
 end
 
-function ZG:TriggerCrossing(sub, zone, direction)
-    local theme = ZG:ResolveTheme(sub, zone)
+-- Bannière et son du lieu d'arrivée ; sans lieu d'arrivée, seulement le son
+-- de sortie du lieu quitté. Puis les actions : départ, ensuite arrivée.
+function ZG:TriggerCrossing(sub, fromId, toId)
+    local from, fromZone = ZG:FindPlace(fromId)
+    local to, toZone = ZG:FindPlace(toId)
 
-    if (direction == "forward" and sub.forwardEnabled) or (direction == "backward" and sub.backwardEnabled) then
-        local title, subtitle = ZG:ResolveBannerText(sub, zone, direction)
+    if to then
+        local theme = ZG:ResolveTheme(to, toZone)
+        local title, subtitle = ZG:ResolveBannerText(to, toZone)
         if title and ZG.ShowBanner then
             ZG:ShowBanner(title, subtitle, theme)
         end
-        ZG:PlayCrossingSound(theme, direction)
+        ZG:PlayCrossingSound(theme, "forward")
+    elseif from then
+        ZG:PlayCrossingSound(ZG:ResolveTheme(from, fromZone), "backward")
     end
 
-    ZG:RunCrossingAction(sub, zone, direction)
+    if from and from ~= to then ZG:RunPlaceAction(from, "leave") end
+    if to and to ~= from then ZG:RunPlaceAction(to, "enter") end
 end
 
 -- ── Réseau : diffusion de l'état + rattrapage + octroi ────────────────────
@@ -1363,18 +1833,37 @@ local function PackPoints(points)
     if not points or #points == 0 then return "" end
     local parts = {}
     for _, p in ipairs(points) do
-        table.insert(parts, string.format("%.2f,%.2f", p.x, p.y))
+        local name = p.name and (p.name:gsub("[;,:|\n\r]", " ")) or nil
+        table.insert(parts, string.format("%.1f,%.1f", p.x, p.y) .. (name and name ~= "" and ("," .. name) or ""))
     end
     return table.concat(parts, ";")
+end
+
+-- Frontières déclarées : "nom~de~à~sens;…" (noms sans ; ~ : ,).
+local function PackBorders(borders)
+    local parts = {}
+    for _, b in ipairs(borders or {}) do
+        parts[#parts + 1] = table.concat({ (b.name:gsub("[;~:,|]", " ")), b.from, b.to, b.forward and 1 or 0 }, "~")
+    end
+    return table.concat(parts, ";")
+end
+
+local function UnpackBorders(str)
+    local borders = {}
+    for chunk in (str or ""):gmatch("[^;]+") do
+        local name, from, to, forward = chunk:match("^(.-)~(%d+)~(%d+)~([01])$")
+        if name then borders[#borders + 1] = { name = name, from = tonumber(from), to = tonumber(to), forward = forward == "1" } end
+    end
+    return borders
 end
 
 local function UnpackPoints(str)
     local points = {}
     if not str or str == "" then return points end
     for chunk in str:gmatch("[^;]+") do
-        local x, y = chunk:match("^(%-?[%d.]+),(%-?[%d.]+)$")
+        local x, y, name = chunk:match("^(%-?[%d.]+),(%-?[%d.]+),?(.*)$")
         if x and y then
-            table.insert(points, { x = tonumber(x), y = tonumber(y) })
+            table.insert(points, { x = tonumber(x), y = tonumber(y), name = name ~= "" and name or nil })
         end
     end
     return points
@@ -1430,22 +1919,35 @@ local function PackState()
         end
     end
 
+    for cid, country in pairs(db.countries) do
+        if country.creator == me then
+            table.insert(lines, table.concat({ "COUNTRY", Enc(cid), Enc(country.name) }, SEP))
+        end
+    end
+
+    -- Ordre : la région, ses lieux, puis ses passages (qui les référencent).
     for zid, zone in pairs(db.zones) do
         if zone.creator == me then
-            table.insert(lines, table.concat({ "ZONE", Enc(zid), Enc(zone.name), Enc(zone.themeId or "") }, SEP))
+            table.insert(lines, table.concat({ "ZONE", Enc(zid), Enc(zone.name), Enc(zone.themeId or ""), Enc(zone.countryId or "") }, SEP))
+            for pid, place in pairs(zone.places) do
+                local aliases = {}
+                for alias in pairs(place.aliases or {}) do aliases[#aliases + 1] = Enc(alias) end
+                table.sort(aliases)
+                table.insert(lines, table.concat({
+                    "PLACE", Enc(pid), Enc(zid), Enc(place.name), Enc(place.themeId or ""),
+                    Enc(place.actionMessage or ""), Enc(place.actionCommand or ""),
+                    place.actionEnterEnabled and 1 or 0, place.actionLeaveEnabled and 1 or 0,
+                    Enc(place.arcEnterSpell or ""), Enc(place.arcExitSpell or ""),
+                    Enc(place.arcVault or "phase"), (place.arcToggle == false) and 0 or 1,
+                    table.concat(aliases, ","),
+                }, SEP))
+            end
             for sid, sub in pairs(zone.subZones) do
                 table.insert(lines, table.concat({
-                    "SUB", Enc(sid), Enc(zid), Enc(sub.name), sub.enabled and 1 or 0,
+                    "PASS", Enc(sid), Enc(zid), Enc(sub.name), sub.enabled and 1 or 0,
                     sub.mapID or 0, sub.x or 0, sub.y or 0, sub.facing or 0, sub.width or DEFAULT_WIDTH,
-                    Enc(sub.shape or "line"),
-                    sub.forwardEnabled and 1 or 0, sub.backwardEnabled and 1 or 0,
-                    sub.regionReady and 1 or 0, PackPoints(sub.points),
-                    Enc(sub.forwardName or ""), Enc(sub.backwardName or ""),
-                    Enc(sub.actionMessage or ""), Enc(sub.actionCommand or ""),
-                    sub.actionForwardEnabled and 1 or 0, sub.actionBackwardEnabled and 1 or 0,
-                    Enc(sub.themeId or ""),
-                    Enc(sub.arcEnterSpell or ""), Enc(sub.arcExitSpell or ""),
-                    Enc(sub.arcVault or "phase"), (sub.arcToggle == false) and 0 or 1,
+                    Enc(sub.shape or "line"), sub.regionReady and 1 or 0, PackPoints(sub.points),
+                    Enc(sub.enterPlace or ""), Enc(sub.leavePlace or ""), PackBorders(sub.borders),
                 }, SEP))
             end
         end
@@ -1483,19 +1985,59 @@ local function ApplyStateLine(line, sender)
                 bannerWidth = math.max(400,math.min(900,tonumber(fields[27]) or 600)),
             }
         end
+    elseif tag == "COUNTRY" then
+        local id, name = fields[2], fields[3]
+        if id and id ~= "" then
+            ZoneGateDB.countries = ZoneGateDB.countries or {}
+            ZoneGateDB.countries[id] = { id = id, name = name or "", creator = sender }
+        end
     elseif tag == "ZONE" then
-        local id, name, themeId = fields[2], fields[3], fields[4]
+        local id, name, themeId, countryId = fields[2], fields[3], fields[4], fields[5]
         if id and id ~= "" then
             local zone = ZoneGateDB.zones[id]
             if not zone then
-                zone = { id = id, subZones = {} }
+                zone = { id = id, subZones = {}, places = {} }
                 ZoneGateDB.zones[id] = zone
             end
             zone.name, zone.creator = name, sender
             zone.themeId = (themeId and themeId ~= "") and themeId or nil
+            zone.countryId = (countryId and countryId ~= "") and countryId or nil
             zone.subZones = zone.subZones or {}
+            zone.places = zone.places or {}
+        end
+    elseif tag == "PLACE" then
+        local id, zoneId = fields[2], fields[3]
+        local zone = ZoneGateDB.zones[zoneId]
+        if zone and id and id ~= "" then
+            local place = NewPlace(id, zoneId, fields[4] or "")
+            place.themeId = (fields[5] and fields[5] ~= "") and fields[5] or nil
+            place.actionMessage, place.actionCommand = fields[6] or "", fields[7] or ""
+            place.actionEnterEnabled, place.actionLeaveEnabled = fields[8] == "1", fields[9] == "1"
+            place.arcEnterSpell, place.arcExitSpell = fields[10] or "", fields[11] or ""
+            place.arcVault = (fields[12] == "personal") and "personal" or "phase"
+            place.arcToggle = fields[13] ~= "0"
+            for alias in (fields[14] or ""):gmatch("[^,]+") do place.aliases[alias] = true end
+            zone.places[id] = place
+        end
+    elseif tag == "PASS" then
+        local id, zoneId = fields[2], fields[3]
+        local zone = ZoneGateDB.zones[zoneId]
+        if zone and id and id ~= "" then
+            zone.subZones[id] = {
+                id = id, zoneId = zoneId, name = fields[4] or "", creator = sender, passage = true,
+                enabled = fields[5] == "1",
+                mapID = tonumber(fields[6]), x = tonumber(fields[7]), y = tonumber(fields[8]),
+                facing = tonumber(fields[9]), width = tonumber(fields[10]),
+                shape = (fields[11] == "polygon") and "polygon" or "line",
+                regionReady = fields[12] == "1",
+                points = UnpackPoints(fields[13]),
+                enterPlace = (fields[14] and fields[14] ~= "") and fields[14] or nil,
+                leavePlace = (fields[15] and fields[15] ~= "") and fields[15] or nil,
+                borders = UnpackBorders(fields[16]),
+            }
         end
     elseif tag == "SUB" then
+        -- Auteur avec une version antérieure aux lieux : converti à la volée.
         local id, zoneId, name, enabled, mapID, x, y, facing, width, shape, fwdEn, backEn, regionReady, pointsStr,
               fwdName, backName, actionMessage, actionCommand, actFwdEn, actBackEn, themeId,
               arcEnter, arcExit, arcVault, arcToggle =
@@ -1529,6 +2071,8 @@ local function ApplyStateLine(line, sender)
                 arcToggle = arcToggle ~= "0",
             }
             CircleToPerimeter(zone.subZones[id])
+            zone.places = zone.places or {}
+            ConvertLegacySub(zone, zone.subZones[id])
         end
     end
 end
@@ -1544,6 +2088,9 @@ local function ApplyState(payload, sender)
     for thid, theme in pairs(db.themes) do
         if theme.creator == sender then db.themes[thid] = nil end
     end
+    for cid, country in pairs(db.countries) do
+        if country.creator == sender then db.countries[cid] = nil end
+    end
     for line in payload:gmatch("[^\n]+") do
         ApplyStateLine(line, sender)
     end
@@ -1554,6 +2101,45 @@ end
 
 local stateMsgSeq = 0
 
+-- File d'envoi : le jeu limite le débit des messages d'extension (une
+-- dizaine d'un coup, puis environ un par seconde). Un grand périmètre fait
+-- une centaine de morceaux : on les expédie un par un, on réessaie un
+-- morceau refusé, et un nouvel état remplace celui encore en attente pour
+-- le même destinataire (inutile d'envoyer une version déjà dépassée).
+local SEND_INTERVAL = 0.2
+local SEND_RETRY    = 1.0
+local sendQueue = {}   -- { key, channel, target, packets, part, failures }
+local sendFrame, sendWait = nil, 0
+
+local function Sent(result)
+    if result == true or result == 0 then return true end
+    return Enum and Enum.SendAddonMessageResult and result == Enum.SendAddonMessageResult.Success or false
+end
+
+local function PumpSend(_, elapsed)
+    sendWait = sendWait - elapsed
+    if sendWait > 0 then return end
+    local job = sendQueue[1]
+    if not job then sendFrame:SetScript("OnUpdate", nil); return end
+    if Sent(SendAddon(job.packets[job.part], job.channel, job.target)) then
+        job.part, job.failures, sendWait = job.part + 1, 0, SEND_INTERVAL
+        if job.part > #job.packets then table.remove(sendQueue, 1) end
+    else
+        job.failures, sendWait = job.failures + 1, SEND_RETRY
+        if job.failures >= 20 then table.remove(sendQueue, 1) end
+    end
+end
+
+local function QueueSend(channel, target, packets)
+    local key = channel .. ":" .. tostring(target or "")
+    for i, job in ipairs(sendQueue) do
+        if job.key == key then table.remove(sendQueue, i); break end
+    end
+    sendQueue[#sendQueue + 1] = { key = key, channel = channel, target = target, packets = packets, part = 1, failures = 0 }
+    sendFrame = sendFrame or CreateFrame("Frame")
+    sendFrame:SetScript("OnUpdate", PumpSend)
+end
+
 local function SendChunkedState(channel, target)
     if not channel then return end
     local payload = PackState()
@@ -1562,10 +2148,12 @@ local function SendChunkedState(channel, target)
     stateMsgSeq = stateMsgSeq + 1
     local msgId = stateMsgSeq
     local total = math.max(1, math.ceil(#payload / CHUNK_SIZE))
+    local packets = {}
     for i = 1, total do
         local chunk = payload:sub((i - 1) * CHUNK_SIZE + 1, i * CHUNK_SIZE)
-        SendAddon(string.format("Z|%d|%d|%d|%s", msgId, i, total, chunk), channel, target)
+        packets[i] = string.format("Z|%d|%d|%d|%s", msgId, i, total, chunk)
     end
+    QueueSend(channel, target, packets)
 end
 
 -- Diffusion débouncée (0.45s) pour ne pas spammer le groupe pendant qu'on
@@ -1667,11 +2255,11 @@ function ZG:SendZoneGrant(zoneId, targetName)
     return sent
 end
 
-function ZG:SendSubZoneGrant(subZoneId, targetName)
+function ZG:SendPlaceGrant(placeId, targetName)
     targetName = (targetName or ""):match("^%s*(.-)%s*$") or ""
-    if targetName == "" or not subZoneId or subZoneId == "" then return false end
+    if targetName == "" or not placeId or placeId == "" then return false end
 
-    local payload = "G|S|" .. Enc(subZoneId) .. "|" .. Enc(targetName)
+    local payload = "G|S|" .. Enc(placeId) .. "|" .. Enc(targetName)
     local sentWhisper = SendAddon(payload, "WHISPER", targetName)
     local sentOther = false
     for _, ct in ipairs(BroadcastChannels()) do
@@ -1680,10 +2268,10 @@ function ZG:SendSubZoneGrant(subZoneId, targetName)
     local sent = sentWhisper or sentOther or false
 
     if sent then
-        local sub = ZG:FindSubZone(subZoneId)
-        if sub then
-            sub.grantedTo = sub.grantedTo or {}
-            sub.grantedTo[StripRealm(targetName)] = true
+        local place = ZG:FindPlace(placeId)
+        if place then
+            place.grantedTo = place.grantedTo or {}
+            place.grantedTo[StripRealm(targetName)] = true
         end
     end
 
@@ -1691,13 +2279,12 @@ function ZG:SendSubZoneGrant(subZoneId, targetName)
 end
 
 -- Liste triée ({name=...}) des joueurs à qui CE personnage a débloqué le nom
--- de cette sous-zone (enregistrement local, jamais diffusé — voir
--- SendSubZoneGrant ci-dessus).
-function ZG:GetGrantedList(subZoneId)
-    local sub = ZG:FindSubZone(subZoneId)
-    if not sub or not sub.grantedTo then return {} end
+-- de ce lieu (enregistrement local, jamais diffusé — voir SendPlaceGrant).
+function ZG:GetPlaceGrantedList(placeId)
+    local place = ZG:FindPlace(placeId)
+    if not place or not place.grantedTo then return {} end
     local list = {}
-    for name in pairs(sub.grantedTo) do table.insert(list, { name = name }) end
+    for name in pairs(place.grantedTo) do table.insert(list, { name = name }) end
     table.sort(list, function(a, b) return a.name < b.name end)
     return list
 end
@@ -1715,14 +2302,14 @@ end
 
 -- Révoque : retire l'entrée locale + prévient le client visé pour qu'il
 -- oublie sa propre connaissance de ce nom. Protocole symétrique de
--- SendZoneGrant/SendSubZoneGrant : "U|<scope>|<id>|<cible>".
-function ZG:RevokeGrant(subZoneId, targetName)
-    local sub, zone = ZG:FindSubZone(subZoneId)
-    if not sub or not zone or zone.creator ~= MyName() then return false end
+-- SendZoneGrant/SendPlaceGrant : "U|<scope>|<id>|<cible>".
+function ZG:RevokePlaceGrant(placeId, targetName)
+    local place, zone = ZG:FindPlace(placeId)
+    if not place or zone.creator ~= MyName() then return false end
 
-    if sub.grantedTo then sub.grantedTo[StripRealm(targetName)] = nil end
+    if place.grantedTo then place.grantedTo[StripRealm(targetName)] = nil end
 
-    local payload = "U|S|" .. Enc(subZoneId) .. "|" .. Enc(targetName)
+    local payload = "U|S|" .. Enc(placeId) .. "|" .. Enc(targetName)
     local sentWhisper = SendAddon(payload, "WHISPER", targetName)
     local sentOther = false
     for _, ct in ipairs(BroadcastChannels()) do
@@ -1850,7 +2437,9 @@ function ZG:Enable()
     SLASH_OZONEGATE3 = "/crossings"
     SlashCmdList["OZONEGATE"] = function(msg)
         local arg=(msg or ""):match("^%s*(%S+)") or ""
-        if arg=="clean" then
+        if arg=="debug" then
+            ZG:DebugPosition()
+        elseif arg=="clean" then
             local count=ZG.CleanPresetThemes and ZG:CleanPresetThemes() or 0
             OmegaHub.Print(count>0 and (count.." thème(s) de galerie supprimé(s).") or "Bibliothèque déjà propre.")
         else
@@ -1913,7 +2502,7 @@ f:SetScript("OnEvent", function()
     OmegaHub:RegisterModule({
         name    = "ZoneGate",
         title   = "Crossings",
-        desc    = "Checkpoints d’entrée et de sortie de région",
+        desc    = "Pays, régions, lieux et passages",
         version = ZONEGATE_VERSION,
         module  = ZG,
     })
@@ -1921,6 +2510,8 @@ f:SetScript("OnEvent", function()
     EnsureCharDB()
     MigrateOldCheckpoints()
     MigrateCircles()
+    MigrateBannerPlacement()
+    MigratePlaces()
     if OmegaHub:IsModuleEnabled("ZoneGate") then ZG:Enable() end
     f:UnregisterAllEvents()
 end)

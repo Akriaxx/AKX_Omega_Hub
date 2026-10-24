@@ -388,6 +388,8 @@ return banner
 end
 
 local liveBanner=ZG.CreateBannerRenderer(UIParent,"ZoneGateBanner")
+-- Below the editor windows (HIGH): never interleaved with the Crossings panel.
+liveBanner:SetFrameStrata("MEDIUM")
 function ZG:ShowBanner(zoneName,subName,theme) liveBanner:ShowBanner(zoneName,subName,theme) end
 function ZG:HideBanner() liveBanner:HideBanner() end
 

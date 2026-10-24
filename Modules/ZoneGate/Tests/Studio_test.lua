@@ -36,7 +36,9 @@ function M:SetValue(v) self.value=v;if self.scripts.OnValueChanged then self.scr
 function M:GetVerticalScrollRange() return 0 end
 function M:GetVerticalScroll() return 0 end
 function M:HasFocus() return false end
-for _,key in ipairs({"SetFrameStrata","SetFrameLevel","EnableMouse","SetTexture","SetColorTexture","SetVertexColor","SetTextColor","SetTexCoord","SetAllPoints","ClearAllPoints","SetDuration","SetOrder","SetFromAlpha","SetToAlpha","Stop","Play","SetMovable","RegisterForDrag","SetBackdrop","SetBackdropColor","SetBackdropBorderColor","SetClampedToScreen","RegisterEvent","SetScale","SetJustifyH","SetMaxLetters","SetScrollChild","EnableMouseWheel","SetMinMaxValues","SetValueStep","SetColor","SetChecked","ClearFocus","SetVerticalScroll"}) do M[key]=function() end end
+for _,key in ipairs({"SetFrameStrata","SetDrawLayer","RegisterForClicks","SetFrameLevel","EnableMouse","SetTexture","SetColorTexture","SetVertexColor","SetTextColor","SetTexCoord","SetAllPoints","ClearAllPoints","SetDuration","SetOrder","SetFromAlpha","SetToAlpha","Stop","Play","SetMovable","RegisterForDrag","SetBackdrop","SetBackdropColor","SetBackdropBorderColor","SetClampedToScreen","RegisterEvent","SetScale","SetJustifyH","SetMaxLetters","SetScrollChild","EnableMouseWheel","SetMinMaxValues","SetValueStep","SetColor","SetChecked","ClearFocus","SetVerticalScroll"}) do M[key]=function() end end
+function M:GetFrameLevel() return self.frameLevel or 1 end
+function M:GetFrameStrata() return self.strata or "MEDIUM" end
 UIParent=obj("Frame");UIParent:SetSize(1920,1080)
 OS2={UI={colors=setmetatable({}, {__index=function() return {1,1,1,1} end})}}
 local UI=OS2.UI

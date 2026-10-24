@@ -4,7 +4,7 @@ local picker
 local function short(name) return (name or ""):match("^([^%-]+)") end
 local function source(scope,id)
     if scope=="zone" then local z=ZG:GetZone(id);return z,z end
-    return ZG:FindSubZone(id)
+    return ZG:FindPlace(id)
 end
 function ZG:DiscoveryRoster()
     local members,seen={},{}
@@ -92,7 +92,7 @@ function ZG:OpenDiscoveryPicker(scope,id,onSaved)
                 local before=current.grantedTo and current.grantedTo[member.key] and true or false
                 local wanted=picker.selection[member.name]
                 if before~=wanted then
-                    local method=wanted and (picker.scope=="zone" and "SendZoneGrant" or "SendSubZoneGrant") or (picker.scope=="zone" and "RevokeZoneGrant" or "RevokeGrant")
+                    local method=wanted and (picker.scope=="zone" and "SendZoneGrant" or "SendPlaceGrant") or (picker.scope=="zone" and "RevokeZoneGrant" or "RevokePlaceGrant")
                     if not ZG[method](ZG,picker.itemId,member.name) then
                         failures=failures+1
                         if before then current.grantedTo=current.grantedTo or {};current.grantedTo[member.key]=true end
@@ -111,7 +111,7 @@ function ZG:OpenDiscoveryPicker(scope,id,onSaved)
     end
     picker.scope,picker.itemId,picker.onSaved=scope,id,onSaved
     picker.selection={};picker.scroll:SetVerticalScroll(0)
-    picker.title:SetText(scope=="zone" and "Débloquer le nom de la région pour…" or "Débloquer le nom du checkpoint pour…")
+    picker.title:SetText(scope=="zone" and "Débloquer le nom de la région pour…" or "Débloquer le nom du lieu pour…")
     picker:Show();picker:Refresh()
     return picker
 end

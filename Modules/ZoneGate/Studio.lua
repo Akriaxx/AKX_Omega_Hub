@@ -112,7 +112,7 @@ function ZG:StudioPresetTheme(preset)
     t.frameColor={unpack(preset.color)};t.frameColor[4]=.8
     t.bgColor=copy(preset.bg);t.bgEnabled=true;t.frameStyle=preset.frame;t.sepStyle=preset.sep
     t.titleSize=preset.size;t.fadeIn=.8;t.hold=preset.hold;t.fadeOut=1.2
-    t.design=preset.design;t.motion=preset.motion;t.placement="center";t.bannerWidth=600
+    t.design=preset.design;t.motion=preset.motion;t.placement="top";t.bannerWidth=600
     t.outline=false;t.uppercase=false;t.letterSpacing=false;t.midSepEnabled=false
     return t
 end
