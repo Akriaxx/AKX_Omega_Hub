@@ -12,7 +12,30 @@ const text = fs.readFileSync(src, 'utf8');
 // parseCommand("npc spawn", [==[Syntax: ...]==], ...) : un nœud par commande ;
 // une syntaxe vide signale un simple groupe (il faut un sous-mot).
 const root = { sub: {} };
-const re = /parseCommand\("([^"]+)",\s*\[==\[(.*?)\]==\],\s*\[==\[(.*?)\]==\]/gs;
+const re = /parseCommand\("([^"]+)",\s*\[==\[(.*?)\]==\],\s*\[==\[(.*?)\]==\],?(.*?)\)\s*$/gms;
+
+// Arguments obligatoires, avec la même règle qu'EpsilonLib (parseInputs) :
+// « [ » ouvre un optionnel qui se prolonge jusqu'au « ] » correspondant.
+function requiredCount(rawArgs) {
+    const inputs = [...rawArgs.matchAll(/\[==\[(.*?)\]==\]/gs)].map(x => x[1].replace(/[{}\\]/g, ''));
+    let open = 0, required = 0;
+    for (let input of inputs) {
+        let optional = open > 0;
+        const opened = input.startsWith('[');
+        if (opened) { optional = true; input = input.slice(1); }
+        let closes = 0;
+        while (input.endsWith(']')) { input = input.slice(0, -1); closes++; }
+        if (closes === 0) { if (opened) open++; } else open -= closes;
+        open = Math.max(0, open);
+        // « #x/[#y] » : un des choix est facultatif, l'argument aussi.
+        if (/\[/.test(input)) optional = true;
+        // « ... » : répétition facultative des arguments précédents.
+        if (input.trim() === '...' || input.trim() === '') optional = true;
+        if (!optional) required++;
+    }
+    return required;
+}
+
 let m, count = 0;
 while ((m = re.exec(text))) {
     let node = root;
@@ -22,13 +45,16 @@ while ((m = re.exec(text))) {
     }
     node.syntax = node.syntax || m[2].trim() !== '';
     node.desc = node.desc || m[3].trim() !== '';
+    const syn = m[2].replace(/^Syntax:\s*/i, '').replace(/[\x00-\x1f]/g, ' ').trim();
+    if (syn) { node.syn = syn; node.req = requiredCount(m[4]); }
     count++;
 }
-// Exécutable : une syntaxe documentée, ou une feuille décrite (ex. « outfit
-// add », sans ligne Syntax). Un groupe sans syntaxe exige un sous-mot.
+// Exécutable : une syntaxe documentée, ou une feuille (ex. « outfit add »
+// ou « waypoints start », documentées sans ligne Syntax). Seul un groupe
+// sans syntaxe ET avec des sous-commandes exige un sous-mot.
 (function mark(node) {
     for (const child of Object.values(node.sub)) {
-        child.runnable = child.syntax || (child.desc && Object.keys(child.sub).length === 0);
+        child.runnable = child.syntax || Object.keys(child.sub).length === 0;
         mark(child);
     }
 })(root);
@@ -50,6 +76,8 @@ function emit(node, indent) {
         const kids = Object.keys(child.sub).length;
         let line = `${indent}[${JSON.stringify(name)}] = { s = ${JSON.stringify(short)}`;
         if (child.runnable) line += ', run = true';
+        if (child.syn) line += `, syn = ${JSON.stringify(child.syn)}`;
+        if (child.req) line += `, req = ${child.req}`;
         if (kids) line += ', sub = {\n' + emit(child, indent + '    ') + `\n${indent}} },`;
         else line += ' },';
         lines.push(line);
@@ -62,7 +90,8 @@ const out = `-- ============================================================
 --  Ne pas modifier à la main : relancer Tools/build-abbrev.js.
 --  Source : EpsilonLib/CommandDefinitions/init.lua (${count} commandes).
 --  s = abréviation sans ambiguïté parmi les commandes sœurs ;
---  run = la commande s'exécute à ce niveau (sinon il faut un sous-mot).
+--  run = la commande s'exécute à ce niveau (sinon il faut un sous-mot) ;
+--  syn = syntaxe documentée ; req = nombre d'arguments obligatoires.
 -- ============================================================
 
 GMMaster = GMMaster or {}

@@ -62,6 +62,31 @@ UI.ApplyMutedText(version)
 
 UI.CreateCloseButton(panel, function() panel:Hide() end)
 
+local barToggle = UI.CreatePanelButton(panel, 96, 20, "Barre MJ")
+barToggle:SetPoint("TOPRIGHT", -32, -10)
+barToggle:SetScript("OnClick", function() GM:ToggleBar() end)
+barToggle:SetScript("OnEnter", function(self)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("Barre MJ", 1, 1, 1)
+    GameTooltip:AddLine("Afficher / masquer la barre de macros techniques (/gmm barre).", 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine("Clic droit sur une action de cette fenêtre : l'ajouter à la barre.", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+end)
+barToggle:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
+local bankToggle = UI.CreatePanelButton(panel, 110, 20, "Banque d'auras")
+bankToggle:SetPoint("RIGHT", barToggle, "LEFT", -6, 0)
+bankToggle:SetScript("OnClick", function() GM:ToggleAuraBank() end)
+bankToggle:SetScript("OnEnter", function(self)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("Banque d'auras", 1, 1, 1)
+    GameTooltip:AddLine("Vos auras favorites, à poser, retirer ou placer dans la barre MJ (/gmm auras).", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+end)
+bankToggle:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
 local sepTop = panel:CreateTexture(nil, "ARTWORK")
 sepTop:SetPoint("TOPLEFT", 4, -HEADER_H)
 sepTop:SetPoint("TOPRIGHT", -4, -HEADER_H)
@@ -121,12 +146,14 @@ UI.ApplyBodyText(lastLabel)
 
 local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 hint:SetPoint("BOTTOMRIGHT", -PAD - 2, 13)
-hint:SetText("Entrée dans un champ : lance son action  ·  Survol : commande envoyée")
+hint:SetText("Entrée : lance l'action du champ  ·  Clic droit sur une action : l'ajouter à la barre MJ")
 UI.ApplySoftText(hint)
 
 local function UpdateFooter()
     if GM.lastError then
         lastLabel:SetText("|cffdd5555" .. GM.lastError .. "|r")
+    elseif GM.lastNotice then
+        lastLabel:SetText("|cff66dd66" .. GM.lastNotice .. "|r")
     elseif GM.lastCommand then
         lastLabel:SetText("Envoyée :  |cffffffff" .. GM.lastCommand .. "|r")
     else
@@ -368,8 +395,13 @@ local function BuildPage(domain)
         local row = math.floor((i - 1) / ACTION_COLS)
         local btn = UI.CreatePanelButton(page, ACTION_W, ACTION_H, action.label)
         btn:SetPoint("TOPLEFT", col * (ACTION_W + 6), y - row * (ACTION_H + 6))
-        btn:SetScript("OnClick", function()
-            GM:RunAction(domain, action, values)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:SetScript("OnClick", function(_, button)
+            if button == "RightButton" then
+                GM:AddActionToBar(domain, action, values)
+            else
+                GM:RunAction(domain, action, values)
+            end
         end)
         btn:SetScript("OnEnter", function(self)
             local templates = type(action.cmd) == "table" and action.cmd or { action.cmd }
@@ -380,6 +412,7 @@ local function BuildPage(domain)
             end
             if action.toggle then lines[#lines + 1] = "Applique, ou retire si déjà appliquée." end
             if action.tip then lines[#lines + 1] = action.tip end
+            lines[#lines + 1] = "|cffAAAAAAClic droit : ajouter à la barre MJ avec les valeurs saisies|r"
             ShowTooltip(self, lines)
         end)
         btn:SetScript("OnLeave", HideTooltip)

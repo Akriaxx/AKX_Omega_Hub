@@ -617,6 +617,7 @@ function ZG:CloneSubZone(id)
         width = sub.width, shape = sub.shape,
         points = points, regionReady = sub.regionReady or false,
         enterPlace = sub.enterPlace, leavePlace = sub.leavePlace,
+        auras = CopyTable(sub.auras or {}),
     }
     ZG:ScheduleBroadcast()
     return zone.subZones[newId]
@@ -932,6 +933,37 @@ function ZG:SetSubZoneEnabled(id, enabled)
     local sub = MyPassage(id)
     if not sub then return end
     sub.enabled = enabled and true or false
+    ZG:ScheduleBroadcast()
+end
+
+-- ── Auras imposées par un passage ─────────────────────────────────────────
+-- sub.auras = { {id = spellID, source = "personal" | "phase" | "manual"} }.
+-- source ne sert qu'à l'affichage : d'où vient l'aura dans Aura Manager.
+
+function ZG:GetPassageAuras(id)
+    local sub = ZG:FindSubZone(id)
+    return sub and sub.auras or {}
+end
+
+function ZG:AddPassageAura(id, spellID, source)
+    local sub = MyPassage(id)
+    spellID = tonumber(spellID)
+    if not sub or not spellID or spellID <= 0 then return false end
+    sub.auras = sub.auras or {}
+    for _, aura in ipairs(sub.auras) do
+        if aura.id == spellID then return false end
+    end
+    sub.auras[#sub.auras + 1] = { id = spellID, source = source or "manual" }
+    ZG:ScheduleBroadcast()
+    return true
+end
+
+function ZG:RemovePassageAura(id, spellID)
+    local sub = MyPassage(id)
+    if not sub or not sub.auras then return end
+    for i, aura in ipairs(sub.auras) do
+        if aura.id == spellID then table.remove(sub.auras, i); break end
+    end
     ZG:ScheduleBroadcast()
 end
 
@@ -1385,9 +1417,9 @@ end
 -- Renvoie title, subtitle prêts pour la bannière (et pour l'affichage dans
 -- le panneau). Les deux noms sont débloqués INDÉPENDAMMENT l'un de l'autre
 -- (voir SendZoneGrant / SendPlaceGrant), d'où 4 combinaisons possibles :
---   1. aucun connu      → "Zone inconnue"  / "?????"
+--   1. aucun connu      → "?????"          / "?????"
 --   2. Région seule     → "<région>"       / "??????"
---   3. Lieu seul        → "Zone inconnue"  / "<lieu>"
+--   3. Lieu seul        → "?????"          / "<lieu>"
 --   4. les deux connus  → "<région>"       / "<lieu>"
 -- L'auteur de la région voit toujours tout en clair.
 function ZG:ResolveBannerText(place, zone)
@@ -1395,7 +1427,7 @@ function ZG:ResolveBannerText(place, zone)
     local mine = zone.creator == MyName()
     local zoneKnown = mine or ZG:HasLearnedZoneName(zone.id)
     local placeKnown = mine or ZG:KnowsPlaceName(place)
-    local title = zoneKnown and zone.name or "Zone inconnue"
+    local title = zoneKnown and zone.name or ZG:MaskText(zone.name)
     local subtitle = placeKnown and place.name or ZG:MaskText(place.name)
     return title, subtitle
 end
@@ -1678,6 +1710,116 @@ local function IsClosed(sub)
     return sub.shape == "polygon" and sub.regionReady and sub.points and #sub.points >= 3
 end
 
+-- ── Auras imposées ────────────────────────────────────────────────────────
+-- Tant que le joueur est dans un passage, ses auras sont posées et reposées
+-- si elles disparaissent (retirées à la main, mort, connexion). Dehors,
+-- celles que Crossings a posées sont retirées. La liste de ce qui a été
+-- posé est gardée par personnage : une déconnexion dans la zone puis une
+-- reconnexion ailleurs retire bien les auras restées sur le personnage.
+local AURA_RETRY = 4       -- secondes entre deux tentatives pour la même aura
+local AURA_DELAY = 3       -- attente après un chargement avant la première commande
+local auraSent = {}        -- [spellID] = GetTime() du dernier envoi
+local auraReadyAt = 0
+
+local function ForcedAuras()
+    ZoneGateCharDB = ZoneGateCharDB or {}
+    ZoneGateCharDB.forcedAuras = ZoneGateCharDB.forcedAuras or {}
+    return ZoneGateCharDB.forcedAuras
+end
+
+local function HasPlayerAura(spellID)
+    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        return C_UnitAuras.GetPlayerAuraBySpellID(spellID) ~= nil
+    end
+    for i = 1, 255 do
+        local name, _, _, _, _, _, _, _, _, id = UnitAura("player", i, "HELPFUL")
+        if not name then break end
+        if id == spellID then return true end
+    end
+    for i = 1, 255 do
+        local name, _, _, _, _, _, _, _, _, id = UnitAura("player", i, "HARMFUL")
+        if not name then break end
+        if id == spellID then return true end
+    end
+    return false
+end
+
+local function SendAuraCommand(command)
+    if OS2 and OS2.ModuleRules and OS2.ModuleRules.ExecuteServerCommand then
+        return OS2.ModuleRules.ExecuteServerCommand(command)
+    end
+    return pcall(SendChatMessage, command, "GUILD")
+end
+
+-- Dedans : périmètre fermé dont le dernier côté stable est l'intérieur, ou
+-- passage droit franchi vers son lieu d'entrée.
+local function IsInsidePassage(sub)
+    if IsClosed(sub) then return ZG.state[sub.id] == 1 end
+    return sub.enterPlace ~= nil and ZG.here[sub.enterPlace] == sub.id
+end
+
+function ZG:IsInsidePassage(id)
+    local sub = ZG:FindSubZone(id)
+    return sub ~= nil and IsInsidePassage(sub)
+end
+
+-- Interrupteur général, par personnage (/oche auras, ou bouton du panneau) :
+-- coupé, plus rien n'est imposé et les auras déjà posées sont retirées.
+-- Pratique pour cartographier une région assombrie par une aura.
+function ZG:AurasEnabled()
+    return not (ZoneGateCharDB and ZoneGateCharDB.aurasOff)
+end
+
+function ZG:SetAurasEnabled(enabled)
+    ZoneGateCharDB = ZoneGateCharDB or {}
+    ZoneGateCharDB.aurasOff = not enabled or nil
+    wipe(auraSent)
+    OmegaHub.Print(enabled and "Crossings : auras des passages |cff66e673activées|r." or "Crossings : auras des passages |cffe6c94ddésactivées|r.")
+    if ZoneGatePanel and ZoneGatePanel.RefreshAuraToggle then ZoneGatePanel:RefreshAuraToggle() end
+end
+
+function ZG:HoldAuras()
+    auraReadyAt = GetTime() + AURA_DELAY
+    wipe(auraSent)
+end
+
+local function SyncAuras(instanceID)
+    if GetTime() < auraReadyAt then return end
+    local wanted = {}
+    for _, zone in pairs(ZG:AurasEnabled() and EnsureDB().zones or {}) do
+        for _, sub in pairs(zone.subZones) do
+            if sub.enabled and sub.auras and #sub.auras > 0 and sub.mapID == instanceID and IsInsidePassage(sub) then
+                for _, aura in ipairs(sub.auras) do wanted[aura.id] = true end
+            end
+        end
+    end
+    local forced, now = ForcedAuras(), GetTime()
+    for spellID in pairs(wanted) do
+        if not HasPlayerAura(spellID) and now - (auraSent[spellID] or 0) >= AURA_RETRY then
+            auraSent[spellID] = now
+            SendAuraCommand(".aura " .. spellID .. " self")
+        end
+        forced[spellID] = true
+    end
+    for spellID in pairs(forced) do
+        if not wanted[spellID] then
+            forced[spellID] = nil
+            auraSent[spellID] = nil
+            if HasPlayerAura(spellID) then SendAuraCommand(".unaura " .. spellID .. " self") end
+        end
+    end
+end
+
+-- Module coupé : plus rien n'est imposé.
+function ZG:ReleaseAuras()
+    local forced = ForcedAuras()
+    for spellID in pairs(forced) do
+        if HasPlayerAura(spellID) then SendAuraCommand(".unaura " .. spellID .. " self") end
+        forced[spellID] = nil
+    end
+    wipe(auraSent)
+end
+
 function ZG:Tick()
     local px, py, _, instanceID = ZG:GetPlayerPose()
     if not px then return end
@@ -1747,6 +1889,7 @@ function ZG:Tick()
         if not live[source] then ZG.here[placeId] = nil end
     end
     SyncArc()
+    SyncAuras(instanceID)
 end
 
 -- Action d'un lieu au passage : un message local (texte imprimé dans VOTRE
@@ -1857,6 +2000,21 @@ local function UnpackBorders(str)
     return borders
 end
 
+-- Auras imposées : "id~source;…" (absentes chez un auteur plus ancien).
+local function PackAuras(auras)
+    local parts = {}
+    for _, aura in ipairs(auras or {}) do parts[#parts + 1] = aura.id .. "~" .. (aura.source or "manual") end
+    return table.concat(parts, ";")
+end
+
+local function UnpackAuras(str)
+    local auras = {}
+    for id, source in (str or ""):gmatch("(%d+)~(%a+)") do
+        auras[#auras + 1] = { id = tonumber(id), source = source }
+    end
+    return auras
+end
+
 local function UnpackPoints(str)
     local points = {}
     if not str or str == "" then return points end
@@ -1948,6 +2106,7 @@ local function PackState()
                     sub.mapID or 0, sub.x or 0, sub.y or 0, sub.facing or 0, sub.width or DEFAULT_WIDTH,
                     Enc(sub.shape or "line"), sub.regionReady and 1 or 0, PackPoints(sub.points),
                     Enc(sub.enterPlace or ""), Enc(sub.leavePlace or ""), PackBorders(sub.borders),
+                    PackAuras(sub.auras),
                 }, SEP))
             end
         end
@@ -2034,6 +2193,7 @@ local function ApplyStateLine(line, sender)
                 enterPlace = (fields[14] and fields[14] ~= "") and fields[14] or nil,
                 leavePlace = (fields[15] and fields[15] ~= "") and fields[15] or nil,
                 borders = UnpackBorders(fields[16]),
+                auras = UnpackAuras(fields[17]),
             }
         end
     elseif tag == "SUB" then
@@ -2439,6 +2599,12 @@ function ZG:Enable()
         local arg=(msg or ""):match("^%s*(%S+)") or ""
         if arg=="debug" then
             ZG:DebugPosition()
+        elseif arg=="carte" then
+            if ZG.ToggleRegionMap then ZG:ToggleRegionMap() end
+        elseif arg=="savoir" or arg=="connaissances" then
+            if ZG.ToggleKnowledge then ZG:ToggleKnowledge() end
+        elseif arg=="auras" then
+            ZG:SetAurasEnabled(not ZG:AurasEnabled())
         elseif arg=="clean" then
             local count=ZG.CleanPresetThemes and ZG:CleanPresetThemes() or 0
             OmegaHub.Print(count>0 and (count.." thème(s) de galerie supprimé(s).") or "Bibliothèque déjà propre.")
@@ -2450,6 +2616,7 @@ function ZG:Enable()
     ZG:ResetState()
     ZG:StartTicker()
     ZG:RegisterNetwork()
+    if ZG.BindMapKey then ZG:BindMapKey() end
     -- Dès la connexion : je demande l'état de ceux déjà en ligne (SYNC,
     -- diffusé groupe + guilde + canal global — donc TOUT joueur avec
     -- l'addon actif) ET je pousse le mien (utile si c'est MOI le créateur
@@ -2476,6 +2643,8 @@ function ZG:Disable()
 
     ZG:StopTicker()
     ZG:ArcLeaveAll()
+    ZG:ReleaseAuras()
+    if ZG.UnbindMapKey then ZG:UnbindMapKey() end
     ZG:UnregisterNetwork()
     ZG:ResetState()
     if ZoneGatePanel then ZoneGatePanel:Hide() end
@@ -2492,6 +2661,7 @@ local resetFrame = CreateFrame("Frame")
 resetFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 resetFrame:SetScript("OnEvent", function()
     ZG:ResetState()
+    ZG:HoldAuras()
 end)
 
 -- ── Init ─────────────────────────────────────────────────────────────────────

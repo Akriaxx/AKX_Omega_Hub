@@ -47,6 +47,19 @@ local function Button(parent, label, x, y, w, h)
     Place(b, parent, x, y); return b
 end
 
+-- Suppression : bouton rouge, en bas à droite de la fiche.
+local function DangerButton(parent, label, w)
+    local b = UI.CreatePanelButton(parent, w, FIELD_H, label)
+    b:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -M, 8)
+    if b.bgN then b.bgN:SetColorTexture(.30, .05, .05, .95) end
+    if b.bgP then b.bgP:SetColorTexture(.45, .08, .08, 1) end
+    if b.highlight then b.highlight:SetColorTexture(1, .25, .25, .12) end
+    if b.accent then b.accent:SetColorTexture(.90, .30, .30, 1) end
+    local fs = b:GetFontString()
+    if fs then fs:SetTextColor(1, .62, .58) end
+    return b
+end
+
 local function EditBox(parent, x, y, w, h, maxLetters)
     local box = UI.CreateStyledEditBox(parent, w, h or FIELD_H, false)
     Place(box, parent, x, y); box:SetMaxLetters(maxLetters or 64)
@@ -143,6 +156,28 @@ themesBtn:SetScript("OnClick", function()
     if ZoneGateThemePanel then ZoneGateThemePanel:Toggle() end
 end)
 
+-- Panneau Connaissances : apprendre des noms par lots (aussi : /oche savoir).
+local knowledgeBtn = UI.CreatePanelButton(header, 150, 22, "Connaissances")
+knowledgeBtn:SetScript("OnClick", function() ZG:ToggleKnowledge() end)
+
+-- Interrupteur général des auras imposées (aussi : /oche auras).
+local auraToggleBtn = UI.CreatePanelButton(header, 174, 22, "")
+auraToggleBtn:SetPoint("RIGHT", themesBtn, "LEFT", -10, 0)
+auraToggleBtn:SetScript("OnClick", function() ZG:SetAurasEnabled(not ZG:AurasEnabled()) end)
+auraToggleBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine("Auras des passages")
+    GameTooltip:AddLine("Coupées, aucun passage ne vous impose d'aura et celles déjà posées sont retirées. Réglage propre à ce personnage. Commande : /oche auras", 1, 1, 1, true)
+    GameTooltip:Show()
+end)
+auraToggleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+function panel:RefreshAuraToggle()
+    auraToggleBtn:SetText(ZG:AurasEnabled() and "Auras : actives" or "|cffe6c94dAuras : coupées|r")
+end
+knowledgeBtn:SetPoint("RIGHT", auraToggleBtn, "LEFT", -10, 0)
+panel:HookScript("OnShow", function() panel:RefreshAuraToggle() end)
+panel:RefreshAuraToggle()
+
 UI.CreateCloseButton(panel, function() panel:Hide() end)
 
 local sep1 = panel:CreateTexture(nil, "ARTWORK")
@@ -209,7 +244,7 @@ end
 
 local function ZoneKnown(zone) return zone.creator == MyName() or ZG:HasLearnedZoneName(zone.id) end
 local function PlaceKnown(place, zone) return zone.creator == MyName() or ZG:KnowsPlaceName(place) end
-local function ZoneTitle(zone) return ZoneKnown(zone) and (zone.name or "") or "Région inconnue" end
+local function ZoneTitle(zone) return ZoneKnown(zone) and (zone.name or "") or ZG:MaskText(zone.name or "") end
 local function PlaceTitle(place, zone) return PlaceKnown(place, zone) and (place.name or "") or ZG:MaskText(place.name) end
 
 -- ── Création : toujours confirmée, avec le nom à saisir ──────────────────
@@ -699,63 +734,16 @@ function panel:RefreshTree()
 end
 panel.RefreshZoneTree = panel.RefreshTree
 
--- ── Cadre de découverte (réutilisé par la région et le lieu) ─────────────
+-- ── Découverte : résumé et accès au tableau « Qui connaît quoi » ─────────
 
-local MAX_GRANT_ROWS = 5
-
-local function BuildGrantFrame(parent, width, titleText)
-    local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    frame:SetSize(width, 232)
-    frame:SetBackdrop({
-        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 10,
-        insets   = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    frame:SetBackdropColor(0.025, 0.038, 0.052, 0.95)
-    frame:SetBackdropBorderColor(unpack(UI.colors.separatorSoft))
-
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    title:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -8)
-    title:SetText(titleText)
-    UI.ApplyLabel(title)
-
-    frame.confirmBtn = UI.CreatePanelButton(frame, 220, 26, "Débloquer pour…")
-    frame.confirmBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -32)
-
-    local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -68)
-    hint:SetText("Sélectionnez les joueurs du raid, puis validez.")
-    UI.ApplyMutedText(hint)
-
-    frame.listLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    frame.listLabel:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -2, -10)
-    UI.ApplyLabel(frame.listLabel)
-
-    frame.listRows = {}
-    local anchor = frame.listLabel
-    for i = 1, MAX_GRANT_ROWS do
-        local row = CreateFrame("Frame", nil, frame)
-        row:SetSize(width - 16, 18)
-        row:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", (i == 1) and 2 or 0, -4)
-        row.fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.fs:SetPoint("LEFT", row, "LEFT", 0, 0)
-        UI.ApplyBodyText(row.fs)
-        row:Hide()
-        frame.listRows[i] = row
-        anchor = row
-    end
+local function BuildDiscovery(parent, y, titleText)
+    local frame = CreateFrame("Frame", nil, parent)
+    Place(frame, parent, M, y, FORM_W - 2 * M, 110)
+    Label(frame, titleText, 0, 0, FORM_W - 2 * M)
+    frame.summary = Caption(frame, "", 0, 20, FORM_W - 2 * M)
+    frame.summary:SetHeight(30)
+    frame.openBtn = Button(frame, "Gérer les connaissances…", 0, 56, 260)
     return frame
-end
-
-local function RefreshGrantList(frame, list)
-    for i = 1, MAX_GRANT_ROWS do
-        local row, entry = frame.listRows[i], list[i]
-        if entry then row.fs:SetText(entry.name); row:Show() else row:Hide() end
-    end
-    frame.listLabel:SetText(#list == 0
-        and "Ont appris : personne pour l'instant"
-        or string.format("Ont appris : %d joueur(s)%s", #list, #list > MAX_GRANT_ROWS and " — cinq premiers noms affichés" or ""))
 end
 
 -- ── Onglets ──────────────────────────────────────────────────────────────
@@ -960,7 +948,7 @@ end)
 local countryInfo = Caption(countryForm, "", M + 2, 74, FORM_W - 2 * M)
 local countryAdd = Button(countryForm, "+ Nouvelle région dans ce pays", M, 140, 300)
 countryAdd:SetScript("OnClick", function() CreateRegion(panel.countryId) end)
-local countryDelete = Button(countryForm, "Supprimer le pays", M, 196, 200)
+local countryDelete = DangerButton(countryForm, "Supprimer le pays", 220)
 countryDelete:SetScript("OnClick", function() panel:DeleteCountry(panel.countryId) end)
 
 local function RefreshCountryForm()
@@ -1267,18 +1255,79 @@ local function Reset(level)
     info:SetText("")
 end
 
-sourcePick.items = function()
-    local items = {}
-    local declared = ZG:GetDeclaredBorders(panel.passageId)
-    if #declared > 0 then
-        items[#items + 1] = { text = "Frontières déclarées", title = true }
-        for _, entry in ipairs(declared) do
-            items[#items + 1] = { text = string.format("%s  (%s > %s)", entry.border.name, entry.zone.name or "", entry.sub.name or ""), value = entry }
+-- Régions voisines : un de leurs périmètres passe à moins de NEAR yards du
+-- contour en cours (ou du joueur, si le contour est vide).
+local NEAR = 200
+local function Sample(points, max)
+    local step = math.max(1, math.floor(#points / max))
+    local out = {}
+    for i = 1, #points, step do out[#out + 1] = points[i] end
+    return out
+end
+local function Distance(from, points)
+    local best
+    for _, a in ipairs(from) do
+        for _, b in ipairs(Sample(points, 200)) do
+            local d = (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2
+            if not best or d < best then best = d end
         end
-        items[#items + 1] = { text = "Périmètres entiers", title = true }
+    end
+    return best and math.sqrt(best) or math.huge
+end
+
+-- Par région : celle du passage d'abord, puis les voisines (les plus proches
+-- d'abord), puis les autres. Dans chaque région, les frontières déclarées
+-- avant les périmètres entiers.
+sourcePick.items = function()
+    local current, currentZone = ZG:FindSubZone(panel.passageId)
+    local from = {}
+    if current and current.points and #current.points > 0 then
+        from = Sample(current.points, 60)
+    else
+        local px, py = ZG:GetPlayerPose()
+        if px then from = { { x = px, y = py } } end
+    end
+    local groups, order = {}, {}
+    local function Group(zone)
+        if not groups[zone.id] then
+            groups[zone.id] = { zone = zone, borders = {}, perimeters = {}, distance = math.huge }
+            order[#order + 1] = groups[zone.id]
+        end
+        return groups[zone.id]
     end
     for _, entry in ipairs(ZG:GetBorderSources(panel.passageId)) do
-        items[#items + 1] = { text = string.format("%s > %s  (%d points)", entry.zone.name or "", entry.sub.name or "", #entry.sub.points), value = entry.sub }
+        local g = Group(entry.zone)
+        g.perimeters[#g.perimeters + 1] = entry
+        g.distance = math.min(g.distance, Distance(from, entry.sub.points))
+    end
+    for _, entry in ipairs(ZG:GetDeclaredBorders(panel.passageId)) do
+        local g = Group(entry.zone)
+        g.borders[#g.borders + 1] = entry
+    end
+    local function Rank(g)
+        if currentZone and g.zone.id == currentZone.id then return 0 end
+        return g.distance <= NEAR and 1 or 2
+    end
+    table.sort(order, function(a, b)
+        if Rank(a) ~= Rank(b) then return Rank(a) < Rank(b) end
+        if Rank(a) == 1 and a.distance ~= b.distance then return a.distance < b.distance end
+        return (a.zone.name or "") < (b.zone.name or "")
+    end)
+    local items = {}
+    for _, g in ipairs(order) do
+        local rank = Rank(g)
+        local tag = (rank == 0 and "cette région")
+            or (rank == 1 and string.format("région voisine · à %d yd", math.floor(g.distance + .5)))
+            or "plus loin"
+        items[#items + 1] = { text = string.format("%s  (%s)", g.zone.name or "", tag), title = true }
+        table.sort(g.borders, function(a, b) return a.border.name < b.border.name end)
+        for _, entry in ipairs(g.borders) do
+            items[#items + 1] = { text = string.format("Frontière : %s  (%s)", entry.border.name, entry.sub.name or ""), value = entry }
+        end
+        table.sort(g.perimeters, function(a, b) return (a.sub.name or "") < (b.sub.name or "") end)
+        for _, entry in ipairs(g.perimeters) do
+            items[#items + 1] = { text = string.format("Périmètre entier : %s  (%d points)", entry.sub.name or "", #entry.sub.points), value = entry.sub }
+        end
     end
     if #items == 0 then items[1] = { text = "Aucun autre de vos périmètres dans cette instance", title = true } end
     return items
@@ -1362,7 +1411,9 @@ borderBtn:SetScript("OnClick", function()
         info:SetText("Aucun autre de vos périmètres dans cette instance pour l'instant.")
     elseif #sources == 1 then
         sourcePick.onSelect(sources[1].sub)
-        sourcePick:SetText(sourcePick.items()[1].text)
+        for _, item in ipairs(sourcePick.items()) do
+            if item.value == sources[1].sub then sourcePick:SetText(item.text) end
+        end
     end
     border:Show()
 end)
@@ -1498,6 +1549,211 @@ function panel:OpenDeclareBorder()
 end
 end
 
+-- ── Auras imposées par le passage ───────────────────────────────────────────
+-- À gauche : les auras que le passage impose tant qu'on est dedans. À droite :
+-- les auras d'Epsilon Aura Manager (onglets Personnel et Phase), un clic les
+-- ajoute ; un ID de sort peut aussi être saisi à la main.
+local auraWin = CreateFrame("Frame", "ZoneGateAuraManager", UIParent)
+do
+local AW, AH, HEAD = 720, 514, 56
+local COL = (AW - 3 * M) / 2
+local LIST_Y, LIST_H, ROW = 136, 270, 30
+auraWin:SetSize(AW, AH); auraWin:SetPoint("CENTER"); auraWin:SetFrameStrata("DIALOG")
+auraWin:EnableMouse(true); auraWin:SetClampedToScreen(true); auraWin:SetMovable(true)
+UI.Surface(auraWin); auraWin:Hide()
+-- Fond opaque : le panneau de Crossings ne doit pas transparaître.
+if auraWin.surfaceBg then UI.ApplyWindowBackground(auraWin.surfaceBg, 1) end
+
+-- En-tête, comme celui du panneau principal ; on déplace la fenêtre en le saisissant.
+local head = CreateFrame("Frame", nil, auraWin)
+head:SetPoint("TOPLEFT", 1, -1); head:SetPoint("TOPRIGHT", -1, -1); head:SetHeight(HEAD)
+head:EnableMouse(true); head:RegisterForDrag("LeftButton")
+head:SetScript("OnDragStart", function() auraWin:StartMoving() end)
+head:SetScript("OnDragStop", function() auraWin:StopMovingOrSizing() end)
+local headBg = head:CreateTexture(nil, "BACKGROUND"); headBg:SetAllPoints()
+UI.ApplyWindowBackground(headBg, 0.70)
+local headAccent = head:CreateTexture(nil, "ARTWORK"); headAccent:SetWidth(3)
+headAccent:SetPoint("TOPLEFT"); headAccent:SetPoint("BOTTOMLEFT")
+headAccent:SetColorTexture(unpack(UI.colors.tabLine))
+local headTitle = head:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+headTitle:SetPoint("TOPLEFT", head, "TOPLEFT", 16, -9)
+headTitle:SetText("Auras imposées"); UI.ApplyTitle(headTitle)
+auraWin.title = Caption(head, "", 16, 33, AW - 80)
+local headSep = auraWin:CreateTexture(nil, "ARTWORK")
+headSep:SetPoint("TOPLEFT", 1, -(HEAD + 1)); headSep:SetPoint("TOPRIGHT", -1, -(HEAD + 1)); headSep:SetHeight(1)
+UI.ApplySeparator(headSep)
+UI.CreateCloseButton(head, function() auraWin:Hide() end)
+
+local hint = Caption(auraWin, "Tant qu'un joueur se trouve dans ce passage, ces auras lui sont posées, et reposées si elles disparaissent, y compris juste après sa connexion. Elles sont retirées dès qu'il en sort.", M, HEAD + 12, AW - 2 * M)
+hint:SetHeight(30)
+
+local function Sub() return ZG:FindSubZone(panel.passageId) end
+local function AuraText(spellID)
+    local name, _, icon = GetSpellInfo(spellID)
+    return string.format("|T%s:16|t %s  |cff888888%d|r", icon or 136243, name or "Sort inconnu", spellID)
+end
+local function ShowSpellTooltip(owner, spellID)
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:SetSpellByID(spellID)
+    GameTooltip:Show()
+end
+-- Texte des rangées aligné à gauche, comme une liste.
+local function LeftText(button, right)
+    local fs = button:GetFontString()
+    if fs then
+        fs:SetJustifyH("LEFT"); fs:SetWordWrap(false); fs:ClearAllPoints()
+        fs:SetPoint("LEFT", 8, 0); fs:SetPoint("RIGHT", -(right or 8), 0)
+    end
+end
+
+-- Liste défilante : rangées créées à la demande, molette pour défiler.
+local function List(x, w)
+    local scroll = CreateFrame("ScrollFrame", nil, auraWin)
+    scroll:SetPoint("TOPLEFT", x, -LIST_Y); scroll:SetSize(w, LIST_H); scroll:EnableMouseWheel(true)
+    local content = CreateFrame("Frame", nil, scroll); content:SetSize(w, 1); scroll:SetScrollChild(content)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        self:SetVerticalScroll(math.max(0, math.min(math.max(0, content:GetHeight() - LIST_H), self:GetVerticalScroll() - delta * ROW)))
+    end)
+    local empty = Caption(auraWin, "", x, LIST_Y + 8, w)
+    return { scroll = scroll, content = content, rows = {}, empty = empty }
+end
+local function Fill(list, count, build)
+    for i = 1, count do
+        list.rows[i] = list.rows[i] or build()
+        list.rows[i]:ClearAllPoints(); list.rows[i]:SetPoint("TOPLEFT", list.content, "TOPLEFT", 0, -(i - 1) * ROW)
+    end
+    for i = count + 1, #list.rows do list.rows[i]:Hide() end
+    list.content:SetHeight(math.max(1, count * ROW))
+    list.scroll:SetVerticalScroll(math.min(list.scroll:GetVerticalScroll(), math.max(0, count * ROW - LIST_H)))
+end
+
+local status = Caption(auraWin, "", M, AH - 26, AW - 2 * M)
+
+-- Colonne gauche : auras du passage.
+Label(auraWin, "Imposées dans ce passage", M, HEAD + 52, COL)
+local imposed = List(M, COL)
+local function ImposedRow()
+    -- Conteneur : la rangée et son bouton Retirer s'affichent ensemble.
+    local row = CreateFrame("Frame", nil, imposed.content); row:SetSize(COL, ROW - 4)
+    local aura = UI.CreatePanelButton(row, COL - 92, ROW - 4, "")
+    aura:SetPoint("LEFT"); aura.accent:Hide(); LeftText(aura, 54)
+    -- Origine dans Aura Manager, calée à droite sur la même ligne.
+    local origin = aura:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    origin:SetPoint("RIGHT", -8, 0); origin:SetJustifyH("RIGHT")
+    aura:SetScript("OnEnter", function(self) ShowSpellTooltip(self, row.spellID) end)
+    aura:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local remove = UI.CreatePanelButton(row, 84, ROW - 4, "Retirer")
+    remove:SetPoint("RIGHT")
+    remove:SetScript("OnClick", function()
+        ZG:RemovePassageAura(panel.passageId, row.spellID)
+        status:SetText("Retirée : " .. AuraText(row.spellID))
+        auraWin:Refresh(); panel:RefreshForm()
+    end)
+    row.aura, row.origin = aura, origin
+    return row
+end
+Label(auraWin, "ID de sort", M, LIST_Y + LIST_H + 12, COL)
+local idBox = EditBox(auraWin, M, LIST_Y + LIST_H + 30, COL - 128, FIELD_H, 10)
+local addId = Button(auraWin, "Ajouter", M + COL - 120, LIST_Y + LIST_H + 30, 120)
+local function AddAura(spellID, source)
+    if not spellID or spellID <= 0 then return end
+    if not GetSpellInfo(spellID) then status:SetText("|cffe6c94dSort introuvable : " .. spellID .. ".|r"); return end
+    if ZG:AddPassageAura(panel.passageId, spellID, source) then
+        status:SetText("Ajoutée : " .. AuraText(spellID))
+    else
+        status:SetText("|cffe6c94dCette aura est déjà imposée.|r")
+    end
+    auraWin:Refresh(); panel:RefreshForm()
+end
+addId:SetScript("OnClick", function() AddAura(tonumber(idBox:GetText())); idBox:SetText(""); idBox:ClearFocus() end)
+idBox:SetScript("OnEnterPressed", function() addId:Click() end)
+
+-- Colonne droite : listes d'Epsilon Aura Manager, onglets Personnel et Phase.
+local RX = 2 * M + COL
+local tabW = (COL - 8) / 2
+local tabs = {
+    personal = Button(auraWin, "Personnel", RX, HEAD + 46, tabW, 28),
+    phase    = Button(auraWin, "Phase", RX + tabW + 8, HEAD + 46, tabW, 28),
+}
+auraWin.tab = "personal"
+for key, b in pairs(tabs) do b:SetScript("OnClick", function() auraWin.tab = key; auraWin:Refresh() end) end
+local manager = List(RX, COL)
+local function ManagerRow()
+    local row = UI.CreatePanelButton(manager.content, COL, ROW - 4, "")
+    row.accent:Hide(); LeftText(row)
+    row:SetScript("OnEnter", function(self) ShowSpellTooltip(self, self.spellID) end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnClick", function(self) AddAura(self.spellID, auraWin.tab) end)
+    return row
+end
+Caption(auraWin, "Listes d'Aura Manager · clic : imposer l'aura.", RX, LIST_Y + LIST_H + 12, COL)
+local openManager = Button(auraWin, "Ouvrir Aura Manager", RX, LIST_Y + LIST_H + 30, COL)
+openManager:SetScript("OnClick", function()
+    if EpsilonAuraManager_ShowHide then EpsilonAuraManager_ShowHide() end
+end)
+
+-- Liste d'Aura Manager pour un onglet ; nil si l'addon est absent. Aura
+-- Manager choisit sa liste selon isLocal : on le bascule le temps de la lire.
+local function ManagerAuras(tab)
+    if not (Epsilon_AuraManager and Epsilon_AuraManager_GetAurasTable) then return nil end
+    local saved = Epsilon_AuraManager.isLocal
+    Epsilon_AuraManager.isLocal = (tab == "personal")
+    local ok, list = pcall(Epsilon_AuraManager_GetAurasTable)
+    Epsilon_AuraManager.isLocal = saved
+    local auras = {}
+    for _, info in ipairs(ok and list or {}) do
+        local id = tonumber(info.spellID)
+        if id then auras[#auras + 1] = { id = id, name = info.name, icon = info.icon } end
+    end
+    table.sort(auras, function(a, b) return tostring(a.name or "") < tostring(b.name or "") end)
+    return auras
+end
+
+function auraWin:Refresh()
+    local sub = Sub()
+    if not sub or sub.creator ~= MyName() then self:Hide(); return end
+    self.title:SetText("Passage : " .. (sub.name or ""))
+
+    local auras = sub.auras or {}
+    Fill(imposed, #auras, ImposedRow)
+    for i, aura in ipairs(auras) do
+        local row = imposed.rows[i]
+        row.spellID = aura.id
+        row.origin:SetText((aura.source == "personal" and "|cffb08cffPerso|r") or (aura.source == "phase" and "|cff66b3ffPhase|r") or "")
+        row.aura:SetText(AuraText(aura.id)); row:Show()
+    end
+    imposed.empty:SetText(#auras == 0 and "Aucune aura imposée." or "")
+
+    for key, b in pairs(tabs) do b.accent:SetShown(self.tab == key) end
+    local list = ManagerAuras(self.tab)
+    openManager:SetEnabled(EpsilonAuraManager_ShowHide ~= nil)
+    Fill(manager, list and #list or 0, ManagerRow)
+    for i, aura in ipairs(list or {}) do
+        local row = manager.rows[i]
+        row.spellID = aura.id
+        row:SetText(string.format("|T%s:16|t %s  |cff888888%d|r", aura.icon or 136243, aura.name or "?", aura.id)); row:Show()
+    end
+    if not list then
+        manager.empty:SetText("Epsilon Aura Manager n'est pas chargé. Saisissez un ID de sort à gauche.")
+    elseif #list == 0 then
+        manager.empty:SetText(self.tab == "personal" and "Aucune aura dans votre liste personnelle." or "Aucune aura dans la liste de la phase.")
+    else
+        manager.empty:SetText("")
+    end
+    if status:GetText() == nil or status:GetText() == "" then
+        if ZG:IsInsidePassage(sub.id) and #auras > 0 then
+            status:SetText("|cff66e673Vous êtes dans ce passage : ces auras vous sont imposées.|r")
+        end
+    end
+end
+auraWin:SetScript("OnHide", function() status:SetText(""); idBox:SetText("") end)
+UISpecialFrames = UISpecialFrames or {}; table.insert(UISpecialFrames, "ZoneGateAuraManager")
+
+function panel:OpenPassageAuras()
+    auraWin:Show(); auraWin:Refresh()
+end
+end
+
 -- ── Fenêtre de tracé : pendant la construction d'un périmètre, seuls le
 -- tracé et ses commandes restent à l'écran, jusqu'à « Valider le périmètre ».
 do
@@ -1601,6 +1857,8 @@ traceBtn:SetScript("OnClick", function() panel:EnterTrace(panel.passageId) end)
 -- Déclarer une frontière ne touche pas à la géométrie : inutile de rouvrir le périmètre.
 local declareBorderBtn = Button(radarRow, "Gérer les frontières…", SIDE_X, 102, SIDE_W)
 declareBorderBtn:SetScript("OnClick", function() panel:OpenDeclareBorder() end)
+local aurasBtn = Button(radarRow, "Auras imposées…", SIDE_X, 62, SIDE_W)
+aurasBtn:SetScript("OnClick", function() panel:OpenPassageAuras() end)
 
 local recaptureBtn = Button(radarRow, "Déplacer à ma position", SIDE_X, 168, SIDE_W)
 recaptureBtn:SetScript("OnClick", function()
@@ -1631,11 +1889,9 @@ zoneEditTheme:SetScript("OnClick", function()
     if zone then EditTheme(zone.themeId) end
 end)
 Rule(settingsPage, 72)
-local zoneGrant = BuildGrantFrame(settingsPage, FORM_W - 2 * M, "Révéler le nom de la région")
-Place(zoneGrant, settingsPage, M, 88, FORM_W - 2 * M)
-zoneGrant.confirmBtn:SetScript("OnClick", function()
-    local id = panel.zoneId
-    ZG:OpenDiscoveryPicker("zone", id, function() RefreshGrantList(zoneGrant, ZG:GetZoneGrantedList(id)) end)
+local zoneGrant = BuildDiscovery(settingsPage, 88, "Découverte des noms")
+zoneGrant.openBtn:SetScript("OnClick", function()
+    ZG:OpenKnowledge({ zone = panel.zoneId }, function() panel:RefreshForm() end)
 end)
 local zoneDelete = Button(settingsPage, "Supprimer la région", M, 350, 220)
 zoneDelete:SetScript("OnClick", function() panel:DeleteRegion(panel.zoneId) end)
@@ -1685,6 +1941,11 @@ local function RefreshPassageEditor(zone, own)
     traceBtn:SetShown(editing)
     declareBorderBtn:SetShown(isPolygon and own and sub.points ~= nil and #sub.points >= 3)
     finishRegionBtn:SetShown(isPolygon and own)
+    -- Périmètre : place libre sous « Reprendre le tracé » ; passage droit : sous la largeur.
+    aurasBtn:SetShown(own)
+    Place(aurasBtn, radarRow, SIDE_X, isPolygon and 62 or 102)
+    local auraCount = sub.auras and #sub.auras or 0
+    aurasBtn:SetText(auraCount > 0 and string.format("Auras imposées… (%d)", auraCount) or "Auras imposées…")
     -- Nommer un sommet : possible même périmètre fermé (la géométrie ne change pas).
     local count = isPolygon and sub.points and #sub.points or 0
     local naming = isPolygon and own and count > 0
@@ -1752,7 +2013,9 @@ local function RefreshZoneForm()
     SetDropdownEnabled(zoneTheme, own)
     zoneEditTheme:SetShown(own)
     zoneGrant:SetShown(own)
-    if own then RefreshGrantList(zoneGrant, ZG:GetZoneGrantedList(zone.id)) end
+    if own then
+        zoneGrant.summary:SetText(string.format("Nom de la région connu de %d joueur(s). Le panneau Connaissances apprend des régions et des lieux à plusieurs joueurs à la fois.", ZG:DiscoveryCount(zone)))
+    end
     zoneDelete:SetShown(own)
     ShowZoneTab()
 end
@@ -1791,7 +2054,7 @@ Rule(bannerPage, 94)
 Label(bannerPage, "Passages qui mènent ici", M, 110, FORM_W - 2 * M)
 local linkLines = {}
 for i = 1, 8 do linkLines[i] = Caption(bannerPage, "", M + 2, 110 + i * 24, FORM_W - 2 * M) end
-local placeDelete = Button(bannerPage, "Supprimer le lieu", M, 350, 220)
+local placeDelete = DangerButton(placeForm, "Supprimer le lieu", 220)
 placeDelete:SetScript("OnClick", function() panel:DeletePlace(panel.placeId) end)
 
 -- Effets
@@ -1872,13 +2135,11 @@ end
 
 -- Découverte
 local discoveryPage = placePages.discovery
-local placeGrant = BuildGrantFrame(discoveryPage, FORM_W - 2 * M, "Révéler le nom du lieu")
-Place(placeGrant, discoveryPage, M, 0, FORM_W - 2 * M)
-placeGrant.confirmBtn:SetScript("OnClick", function()
-    local id = panel.placeId
-    ZG:OpenDiscoveryPicker("place", id, function() RefreshGrantList(placeGrant, ZG:GetPlaceGrantedList(id)) end)
+local placeGrant = BuildDiscovery(discoveryPage, 0, "Découverte du nom")
+placeGrant.openBtn:SetScript("OnClick", function()
+    if panel.placeId then ZG:OpenKnowledge({ place = panel.placeId }, function() panel:RefreshForm() end) end
 end)
-Caption(discoveryPage, "Le nom de la région et celui du lieu se révèlent séparément. Les autres joueurs voient des noms masqués tant qu'ils ne les ont pas appris.", M, 250, FORM_W - 2 * M)
+Caption(discoveryPage, "Le nom de la région et celui du lieu se révèlent séparément. Les autres joueurs voient des « ????? » tant qu'ils ne les ont pas appris.", M, 130, FORM_W - 2 * M)
 
 local function RefreshPlaceForm()
     local place, zone = ZG:FindPlace(panel.placeId)
@@ -1935,7 +2196,9 @@ local function RefreshPlaceForm()
     end
 
     placeGrant:SetShown(own)
-    if own then RefreshGrantList(placeGrant, ZG:GetPlaceGrantedList(place.id)) end
+    if own then
+        placeGrant.summary:SetText(string.format("Nom du lieu connu de %d joueur(s), nom de la région de %d joueur(s).", ZG:DiscoveryCount(place), ZG:DiscoveryCount(zone)))
+    end
     ShowPlaceTab()
 end
 

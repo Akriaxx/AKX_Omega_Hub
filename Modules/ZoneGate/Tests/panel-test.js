@@ -6,6 +6,7 @@ const tests=`
 function M:SetParent(p) self.parent=p end
 function M:SetEnabled(v) self.enabled=v end
 function M:SetWordWrap() end
+function M:GetFontString() return nil end
 function M:Enable() self.enabled=true end
 function M:Disable() self.enabled=false end
 function M:GetEffectiveScale() return 1 end
@@ -170,22 +171,36 @@ function ZG:RevokeZoneGrant(id,name) sent=sent+1;self:GetZone(id).grantedTo[name
 function ZG:SendPlaceGrant(id,name) sent=sent+1;local item=self:FindPlace(id);item.grantedTo[name]=true;return true end
 function ZG:RevokePlaceGrant(id,name) sent=sent+1;self:FindPlace(id).grantedTo[name]=nil;return true end
 z.grantedTo={Alice=true,Absent=true}
-local picker=ZG:OpenDiscoveryPicker('zone',z.id)
-assert(picker.selection.Alice and not picker.selection.Bob and #picker.members==2)
-click('Tout décocher',picker);click('Annuler',picker);assert(sent==0 and z.grantedTo.Alice)
-picker=ZG:OpenDiscoveryPicker('place',woods.id)
-click('Tout cocher',picker)
-roster={'Tester','Alice'};picker.scripts.OnEvent(picker,'GROUP_ROSTER_UPDATE')
-click('Valider',picker);assert(woods.grantedTo.Alice and not woods.grantedTo.Bob,'departed member is not modified')
-picker:Hide()
+local k=ZG:OpenKnowledge()
+local names={};for _,p in ipairs(k:PlayerEntries()) do names[#names+1]=p.name end
+assert(table.concat(names,',')=='Absent,Alice,Bob','players: known names and the group')
+click('Tout le groupe',k);assert(k.players.Alice and k.players.Bob and not k.players.Absent)
+local entries=k:ItemEntries();assert(entries[1].region,'regions come first, then their places')
+local zrow;for _,e in ipairs(entries) do if e.key=='Z:'..z.id then zrow=e end end;assert(zrow)
+local function hasPlace(list) for _,e in ipairs(list) do if e.key=='P:'..woods.id then return true end end end
+assert(not zrow.open and not hasPlace(entries),'regions start folded')
+k.open[z.id]=true;assert(hasPlace(k:ItemEntries()),'an unfolded region shows its places')
+k.open[z.id]=nil;k.search:SetText('bois des Anciens');assert(hasPlace(k:ItemEntries()),'a search unfolds everything');k.search:SetText('')
+k.items['Z:'..z.id]=true;k.items['P:'..woods.id]=true;k:Refresh()
+assert(k:KnownText(z,{'Alice','Bob'}):find('1/2'),'how many selected players know a name')
+click('Apprendre',k)
+assert(z.grantedTo.Bob and woods.grantedTo.Alice and woods.grantedTo.Bob and sent==3,'only missing names are sent, to every selected player')
+click('Apprendre',k);assert(sent==3,'nothing is sent twice')
+k.nameBox:SetText('carla');k.nameBox.scripts.OnEnterPressed(k.nameBox)
+assert(k.players.Carla,'a player added by name is selected')
+k.players={Alice=true};click('Faire oublier',k)
+assert(not z.grantedTo.Alice and not woods.grantedTo.Alice and z.grantedTo.Bob and sent==5,'forgetting only touches the selected players')
+k:Hide();k=ZG:OpenKnowledge({place=woods.id})
+assert(k.items['P:'..woods.id] and not k.items['Z:'..z.id],'opening from a place selects it')
+k:Hide()
 
 -- A hidden remote name must not become searchable, nor editable.
 local remote=ZG:CreateZone('Secret Sanctuary');ZG:CreatePlace(remote.id,'Crypte');remote.creator='Other'
 panel:RefreshTree()
 local unknownShown=false
-for _,o in ipairs(objects) do if o.kind=='FontString' and o.parent and o.parent.w==264 and o.parent.shown and (o.text or ''):find('^Région inconnue') then unknownShown=true end end
+for _,o in ipairs(objects) do if o.kind=='FontString' and o.parent and o.parent.w==264 and o.parent.shown and (o.text or ''):find('^%?+ %?+') then unknownShown=true end end
 assert(unknownShown,'an unknown region still shows without search')
-panel.searchBox:SetText('Secret');assert(not treeHas('Secret Sanctuary') and not treeHas('Région inconnue'),'search leaked an unknown name')
+panel.searchBox:SetText('Secret');assert(not treeHas('Secret Sanctuary') and not treeHas('?????? ?????????'),'search leaked an unknown name')
 panel.searchBox:SetText('Crypte');assert(not treeHas('Crypte'))
 panel.searchBox:SetText('')
 panel.mode='zone';panel.zoneId=remote.id;panel.zoneTab='places';panel:RefreshAll()
@@ -260,12 +275,23 @@ for _,item in ipairs(src.items()) do if not item.title and item.value.border the
 assert(declared and declared.text:find('Frontière Nord',1,true),'declared borders are offered first')
 src.onSelect(declared.value);assert(pick.from==5 and pick.to==2 and pick.forward==true,'the declared stretch is prefilled')
 click('Ajouter 4 points',pick);assert(#pc.points==4 and pc.points[4].name=='Gué du Nord')
+-- Grouped by region: this one first, then neighbours (nearest first), then the rest.
+local near=ZG:CreateZone('Voisine');local pn=ZG:CreateSubZone(near.id,'N');ZG:SetSubZoneShape(pn.id,'polygon')
+pn.points={{x=30,y=0},{x=40,y=0},{x=40,y=10}};pn.mapID=1;ZG:DeclareBorder(pn.id,'Rive',1,2,true)
+local far=ZG:CreateZone('Lointaine');local pf=ZG:CreateSubZone(far.id,'F');ZG:SetSubZoneShape(pf.id,'polygon')
+pf.points={{x=5000,y=0},{x=5010,y=0},{x=5010,y=10}};pf.mapID=1
+local list={};for _,item in ipairs(src.items()) do list[#list+1]=(item.title and '#' or '')..item.text end
+local joined=table.concat(list,'|')
+local iThis,iNear,iFar=joined:find('#Frontières  (cette région)',1,true),joined:find('#Voisine  (région voisine',1,true),joined:find('#Lointaine  (plus loin)',1,true)
+assert(iThis and iNear and iFar and iThis<iNear and iNear<iFar,'regions: this one, neighbours, then the rest')
+local iRive,iWhole=joined:find('Frontière : Rive',1,true),joined:find('Périmètre entier : N',1,true)
+assert(iRive and iWhole and iNear<iRive and iRive<iWhole and iWhole<iFar,'borders before whole perimeters, inside their region')
 ZG:RemoveLastRegionPoint(pa.id);assert(#pa.borders==1,'border still valid while its points exist')
 -- Starting a new perimeter from a declared border: empty contour, dialog opened, either end, renumbered from 1.
 ZG:FinishRegion(pa.id)
 local pd=ZG:CreateSubZone(borders.id,'D');ZG:SetSubZoneShape(pd.id,'polygon');assert(#pd.points==0,'a new perimeter starts empty')
 panel:EnterTrace(pd.id);assert(pick:IsShown() and pick.title.text=="Partir d'une frontière",'starting from a border is offered')
-local first;for _,item in ipairs(selects()[1].items()) do if not item.title and item.value.border then first=item end end
+local first;for _,item in ipairs(selects()[1].items()) do if not item.title and item.value.border and item.value.border.name=='Frontière Nord' then first=item end end
 selects()[1].onSelect(first.value);click('Inverser',pick);assert(pick.from==2 and pick.to==5 and pick.forward==false)
 click('Ajouter 3 points',pick)
 assert(#pd.points==3 and pd.points[1].name=='Gué du Nord' and pd.points[3].x==pa.points[5].x,'the border opens the new contour, renumbered from 1')

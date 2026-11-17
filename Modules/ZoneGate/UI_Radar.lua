@@ -156,17 +156,48 @@ local function RootOf(frame)
     while root:GetParent() and root:GetParent()~=UIParent do root=root:GetParent() end
     return root
 end
+local ReleaseMinimap
+-- Cadre de remplacement laissé dans le coin pendant l'emprunt : un disque
+-- sombre là où était le terrain, et les boutons de la minimap autour.
+local standInFrame
+local function StandIn()
+    if standInFrame then return standInFrame end
+    local f=CreateFrame("Frame","ZoneGateMinimapStandIn",UIParent)
+    local disc=f:CreateTexture(nil,"BACKGROUND");disc:SetAllPoints();disc:SetColorTexture(.02,.03,.04,.85)
+    if disc.SetMask then disc:SetMask(ROUND_MASK) end
+    local text=f:CreateFontString(nil,"ARTWORK","GameFontNormalSmall")
+    text:SetPoint("CENTER");text:SetWidth(110);text:SetText("Carte dans\nle tracé")
+    if UI.ApplyMutedText then UI.ApplyMutedText(text) end
+    f:Hide();standInFrame=f
+    return f
+end
 local function BorrowMinimap(guide,canvas,layer)
-    if borrowed or not Minimap then return end
+    if not Minimap or (borrowed and borrowed.guide==guide) then return end
+    -- Encore prêtée à l'autre tracé (panneau / fenêtre de tracé) : on la reprend.
+    if borrowed then ReleaseMinimap() end
     local m=Minimap
     borrowed={parent=m:GetParent(),points={},w=m:GetWidth(),h=m:GetHeight(),scale=m:GetScale(),
         strata=m:GetFrameStrata(),level=m:GetFrameLevel(),zoom=m:GetZoom(),alpha=m:GetAlpha(),
         mouse=m:IsMouseEnabled(),wheel=m:IsMouseWheelEnabled(),rotate=GetCVar("rotateMinimap"),children={},
         mask=m.GetMaskTexture and m:GetMaskTexture() or ROUND_MASK}
     for i=1,m:GetNumPoints() do borrowed.points[i]={m:GetPoint(i)} end
-    -- Zoom buttons and addon icons stay hidden: only the terrain is wanted here.
+    -- Seul le terrain part dans le tracé. Le cadre de remplacement prend
+    -- exactement la place de la minimap ; ses boutons (zoom, addons, suivi…)
+    -- y sont rattachés et restent utilisables dans le coin de l'écran.
+    local standIn=StandIn()
+    standIn:SetParent(borrowed.parent or UIParent);standIn:ClearAllPoints()
+    for _,point in ipairs(borrowed.points) do standIn:SetPoint(unpack(point)) end
+    standIn:SetSize(borrowed.w,borrowed.h);standIn:SetScale(borrowed.scale)
+    standIn:SetFrameStrata(borrowed.strata);standIn:SetFrameLevel(borrowed.level);standIn:Show()
     for _,child in ipairs({m:GetChildren()}) do
-        if child:IsShown() then borrowed.children[#borrowed.children+1]=child;child:Hide() end
+        local saved={frame=child,points={}}
+        for i=1,child:GetNumPoints() do saved.points[i]={child:GetPoint(i)} end
+        borrowed.children[#borrowed.children+1]=saved
+        child:SetParent(standIn);child:ClearAllPoints()
+        for _,point in ipairs(saved.points) do
+            local p,rel,rp,x,y=unpack(point)
+            child:SetPoint(p,(rel==m or rel==nil) and standIn or rel,rp,x,y)
+        end
     end
     -- Rattachée à la fenêtre elle-même (pas au cadre du tracé) : un enfant est
     -- toujours dessiné au-dessus de son parent, il faut qu'elle passe dessous.
@@ -187,7 +218,7 @@ local function BorrowMinimap(guide,canvas,layer)
     -- The guide is always facing up: the map turns, never the arrow.
     SetCVar("rotateMinimap","1")
 end
-local function ReleaseMinimap()
+function ReleaseMinimap()
     if not borrowed then return end
     local m,b=Minimap,borrowed;borrowed=nil
     m:SetParent(b.parent);m:ClearAllPoints()
@@ -199,7 +230,13 @@ local function ReleaseMinimap()
     if b.guide.covers then b.guide.covers:Hide() end
     for _,frame in ipairs({b.guide,b.canvas}) do if frame.surfaceBg then frame.surfaceBg:SetAlpha(1) end end
     SetCVar("rotateMinimap",b.rotate or "0")
-    for _,child in ipairs(b.children) do child:Show() end
+    -- Les boutons reviennent sur la minimap, à leurs ancrages d'origine.
+    for _,saved in ipairs(b.children) do
+        local child=saved.frame
+        child:SetParent(m);child:ClearAllPoints()
+        for _,point in ipairs(saved.points) do child:SetPoint(unpack(point)) end
+    end
+    if standInFrame then standInFrame:Hide() end
 end
 -- Never leave the minimap borrowed (or its rotation forced) across a logout.
 local logout=CreateFrame("Frame")
@@ -304,7 +341,7 @@ function ZG.CreatePassageGuide(parent,getter)
         detail:SetText(r.hint or "Flèche bleue : vous. Contour bronze : checkpoint.")
         if not cp or not px or not py or cp.mapID~=mapID then return end
         local points,cx,cy,scale,reach=ZG:PlacementGeometry(cp,px,py)
-        if borrowed then scale=MinimapScale(reach,guide.zoomBias)
+        if borrowed and borrowed.guide==guide then scale=MinimapScale(reach,guide.zoomBias)
         else scale=math.max(scale,MIN_SCALE)*2^(1+(guide.zoomBias or 0)) end
         local function map(x,y)
             local right,forward=ZG:PlacementOffset(x-cx,y-cy,facing)
@@ -413,7 +450,7 @@ function ZG.CreatePassageGuide(parent,getter)
     end
     guide:SetScript("OnUpdate",function(_,dt) elapsed=elapsed+dt;if elapsed>=.1 then elapsed=0;Refresh() end end)
     guide:SetScript("OnShow",function() BorrowMinimap(guide,canvas,layer);Refresh() end)
-    guide:SetScript("OnHide",ReleaseMinimap)
+    guide:SetScript("OnHide",function() if borrowed and borrowed.guide==guide then ReleaseMinimap() end end)
     guide.Refresh=Refresh;Refresh()
     return guide
 end

@@ -5,4 +5,40 @@
     <Binding name="OMEGA_GMMASTER_TOGGLE" category="ADDONS">
         if GMMaster then GMMaster:Toggle() end
     </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT1" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(1) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT2" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(2) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT3" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(3) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT4" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(4) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT5" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(5) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT6" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(6) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT7" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(7) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT8" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(8) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT9" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(9) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT10" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(10) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT11" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(11) end
+    </Binding>
+    <Binding name="OMEGA_GMMASTER_SLOT12" category="ADDONS">
+        if GMMaster and GMMaster.enabled then GMMaster:RunSlot(12) end
+    </Binding>
 </Bindings>

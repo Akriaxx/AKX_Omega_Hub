@@ -1065,14 +1065,17 @@ local function OpenTransferReceiver(sender,token,recipe)
     Hit(866,-19,24,24,Decline)
 end
 
-local function HandleTransferMessage(message,sender)
+local function HandleTransferMessage(message,sender,channel)
     local kind,token,a,b,chunk=strsplit(";",message or "",5)
     if kind=="HELLO" then
         local rpName=UnescapeTransfer(token or sender or "Artisan")
         GC_PEERS[sender]={rpName=rpName,version=a or "?",seen=time()}
         if UI.transferSender and UI.transferSender:IsShown() and UI.transferSender.RefreshPeerList then UI.transferSender:RefreshPeerList(true) end
         -- Répondre discrètement afin que le nouvel arrivant découvre aussi les grimoires déjà connectés.
-        if sender and NormalizePlayerName(sender)~=NormalizePlayerName(UnitName("player")) then
+        -- Seulement à une annonce de guilde : un HELLO reçu en chuchotement est
+        -- déjà une réponse, y répondre relancerait l'échange sans fin entre
+        -- les deux grimoires (et saturerait l'envoi des messages de discussion).
+        if channel=="GUILD" and sender and NormalizePlayerName(sender)~=NormalizePlayerName(UnitName("player")) then
             local reply="HELLO;"..EscapeTransfer(GetOwnRPName())..";"..TRANSFER_VERSION
             SendTransferMessage(sender,reply)
         end
@@ -4440,7 +4443,7 @@ events:SetScript("OnEvent",function(_,event,addonName,...)
 
     if event=="CHAT_MSG_ADDON" then
         local prefix,message,channel,sender=addonName,...
-        if prefix==TRANSFER_PREFIX then HandleTransferMessage(message,sender) end
+        if prefix==TRANSFER_PREFIX then HandleTransferMessage(message,sender,channel) end
         return
     elseif event and event:find("^CHAT_MSG_") then
         local message=addonName
@@ -4449,6 +4452,11 @@ events:SetScript("OnEvent",function(_,event,addonName,...)
     end
 
     if event=="PLAYER_ENTERING_WORLD" or event=="GUILD_ROSTER_UPDATE" then
+        -- GUILD_ROSTER_UPDATE tombe à chaque connexion/déconnexion d'un membre :
+        -- une seule annonce à la guilde par minute au plus, les autres sont ignorées.
+        local now=GetTime()
+        if now<(UI.nextPresenceAnnounce or 0) then return end
+        UI.nextPresenceAnnounce=now+60
         if C_Timer and C_Timer.After then C_Timer.After(1,AnnounceGrimoirePresence) else AnnounceGrimoirePresence() end
     elseif event=="BAG_UPDATE_DELAYED" then
         -- Mise à jour immédiate des couleurs lorsqu'un objet entre ou sort des sacs.

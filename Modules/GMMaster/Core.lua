@@ -322,6 +322,7 @@ function GM:Emit(cmds)
         self.SendRaw(texts[i])
     end
     self.lastCommand = table.concat(texts, "  ·  ")
+    self.lastNotice = nil
     Notify()
 end
 
@@ -374,6 +375,35 @@ function GM:RunAction(domain, action, values)
     return true, self.lastCommand
 end
 
+--- Fige une action du catalogue, avec les valeurs saisies, en macro
+--- technique dans la barre MJ. Le suivi des auras n'est pas repris :
+--- la case envoie toujours la même commande.
+function GM:AddActionToBar(domain, action, values)
+    values = values or self:GetValues(domain)
+    local templates = type(action.cmd) == "table" and action.cmd or { action.cmd }
+    local lines = {}
+    for i, template in ipairs(templates) do
+        local cmd, err = self.Build(domain, template, values)
+        if not cmd then
+            self.lastError = err
+            Notify()
+            return nil, err
+        end
+        lines[i] = cmd
+    end
+    local label = action.label
+    for _, template in ipairs(templates) do
+        for _, key in ipairs(self.TemplateKeys(template)) do
+            local field = domain.fieldByKey[key]
+            if field and field.kind ~= "choice" and field.kind ~= "text" and Trim(values[key]) ~= "" then
+                label = label .. " " .. Trim(values[key])
+                break
+            end
+        end
+    end
+    return self:AddToBar(label:sub(1, 24), table.concat(lines, "\n"))
+end
+
 -- ── Enable / Disable ──────────────────────────────────────────────────────
 
 function GM:Toggle()
@@ -381,15 +411,42 @@ function GM:Toggle()
     if GMMasterPanel then GMMasterPanel:Toggle() end
 end
 
+--- /gmm            : fenêtre
+--- /gmm barre      : afficher / masquer la barre MJ
+--- /gmm réglages   : réglages de la barre
+--- /gmm auras      : banque d'auras
+--- /gmm case <n>   : exécuter la case n
+local function Slash(msg)
+    local cmd, arg = GM.Trim(msg):lower():match("^(%S*)%s*(.-)$")
+    if cmd == "barre" or cmd == "bar" then
+        GM:ToggleBar()
+    elseif cmd == "réglages" or cmd == "reglages" or cmd == "config" then
+        GM:ToggleBar(true)
+        if GM.OpenBarSettings then GM.OpenBarSettings() end
+    elseif cmd == "auras" or cmd == "aura" or cmd == "banque" then
+        if GM.ToggleAuraBank then GM:ToggleAuraBank() end
+    elseif cmd == "case" or cmd == "slot" then
+        local n = tonumber(arg)
+        if n then GM:RunSlot(n) end
+    elseif cmd == "aide" or cmd == "help" then
+        OmegaHub.Print("GM Master : |cffAAAAAA/gmm|r fenêtre · |cffAAAAAA/gmm barre|r barre MJ · "
+            .. "|cffAAAAAA/gmm auras|r banque d'auras · |cffAAAAAA/gmm réglages|r · |cffAAAAAA/gmm case <n>|r")
+    else
+        GM:Toggle()
+    end
+end
+GM.Slash = Slash
+
 function GM:Enable()
     self.enabled = true
     SLASH_OMEGAGMMASTER1 = "/gmm"
     SLASH_OMEGAGMMASTER2 = "/gmmaster"
-    SlashCmdList["OMEGAGMMASTER"] = function() GM:Toggle() end
+    SlashCmdList["OMEGAGMMASTER"] = Slash
+    if GM.ToggleBar then GM:ToggleBar(GM.EnsureBar().shown) end
 
     OmegaHub:SetModuleLoaded("GMMaster", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("GM Master activé.  |cffAAAAAA/gmm|r")
+        OmegaHub.Print("GM Master activé.  |cffAAAAAA/gmm|r  ·  barre MJ : |cffAAAAAA/gmm barre|r")
     end
 end
 
@@ -399,6 +456,10 @@ function GM:Disable()
     SLASH_OMEGAGMMASTER2 = nil
     SlashCmdList["OMEGAGMMASTER"] = nil
     if GMMasterPanel then GMMasterPanel:Hide() end
+    if GMMasterBar then GMMasterBar:Hide() end
+    if GMMasterMacroEditor then GMMasterMacroEditor:Hide() end
+    if GMMasterBarSettings then GMMasterBarSettings:Hide() end
+    if GMMasterAuraBank then GMMasterAuraBank:Hide() end
 
     OmegaHub:SetModuleLoaded("GMMaster", false)
     OmegaHub.Print("GM Master désactivé.")
@@ -412,7 +473,7 @@ f:SetScript("OnEvent", function()
     OmegaHub:RegisterModule({
         name    = "GMMaster",
         title   = "GM Master",
-        desc    = "Commandes MJ en quelques clics — /gmm",
+        desc    = "Commandes MJ en quelques clics et barre MJ de macros techniques — /gmm",
         version = GMMASTER_VERSION,
         module  = GM,
     })

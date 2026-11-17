@@ -83,7 +83,7 @@ GM.Domains = {
     -- Syntaxe : EpsilonLib/CommandDefinitions/init.lua. Les commandes
     -- visent le PNJ forgé ciblé (son modèle : tous ceux qui l'utilisent).
     {
-        key = "forge", title = "Forge de PNJ", tab = "Forge", prefix = ".phase forge npc",
+        key = "forge", title = "Forge de PNJ", tab = "PNJ forgé", prefix = ".phase forge npc",
         desc = "Créer et personnaliser un PNJ forgé de la phase. Ciblez le PNJ forgé avant d'agir.",
         fields = {
             { key = "name",    label = "Nom",        kind = "text", enter = "name" },
@@ -114,6 +114,33 @@ GM.Domains = {
             { key = "unaura",     label = "Retirer l'aura",      cmd = "phase forge npc unaura {aura}" },
             { key = "on",         label = "Option : oui",        cmd = "phase forge npc {option} on" },
             { key = "off",        label = "Option : non",        cmd = "phase forge npc {option} off" },
+        },
+    },
+
+    -- ── Réglages du PNJ forgé ──────────────────────────────────────────
+    {
+        key = "forgestats", title = "Forge : réglages", tab = "Réglages", prefix = ".phase forge npc",
+        desc = "Niveau, vie, faction, monture et flottement du PNJ forgé ciblé.",
+        fields = {
+            { key = "level",   label = "Niveau",        kind = "id", enter = "level" },
+            { key = "health",  label = "Vie (multipl.)", kind = "number", step = 1, default = "1", enter = "health" },
+            { key = "faction", label = "Faction (ID)",  kind = "id", enter = "faction" },
+            { key = "mount",   label = "Monture (display)", kind = "id", enter = "mount" },
+            { key = "hover",   label = "Flottement",    kind = "choice", options = {
+                { value = "off",     label = "Jamais" },
+                { value = "dynamic", label = "Dynamique" },
+                { value = "always",  label = "Toujours" },
+            } },
+        },
+        actions = {
+            { key = "level",    label = "Appliquer le niveau",  cmd = "phase forge npc level {level}" },
+            { key = "health",   label = "Appliquer la vie",     cmd = "phase forge npc health {health}", tip = "Multiplicateur de points de vie." },
+            { key = "faction",  label = "Appliquer la faction", cmd = "phase forge npc faction {faction}" },
+            { key = "mount",    label = "Monter",               cmd = "phase forge npc mount {mount}" },
+            { key = "unmount",  label = "Descendre",            cmd = "phase forge npc mount 0" },
+            { key = "hover",    label = "Appliquer le flottement", cmd = "phase forge npc autohover {hover}" },
+            { key = "displays", label = "Lister les displays",  cmd = "phase forge npc displays list" },
+            { key = "listnext", label = "Liste : suite",        cmd = "phase forge npc list next" },
         },
     },
 
@@ -250,10 +277,14 @@ GM.Domains = {
         fields = {
             { key = "id", label = "ID du sort", kind = "id", spell = true, enter = "cast" },
         },
+        -- Doc : « .cast » vise la cible (soi-même sans cible) ; « .cast self »
+        -- fait lancer le sort PAR la cible SUR elle-même ; « .cast back »
+        -- fait lancer le sort par la cible sur vous.
         actions = {
-            { key = "cast",    label = "Lancer",          cmd = "cast {id}" },
-            { key = "self",    label = "Sur moi",         cmd = "cast self {id}" },
-            { key = "npccast", label = "Lancé par le PNJ", cmd = "npc cast {id}" },
+            { key = "cast",    label = "Lancer",              cmd = "cast {id}", tip = "Sur votre cible, ou sur vous sans cible." },
+            { key = "self",    label = "Cible sur elle-même", cmd = "cast self {id}", tip = "La cible lance le sort sur elle-même." },
+            { key = "back",    label = "Cible sur moi",       cmd = "cast back {id}", tip = "La cible lance le sort sur vous." },
+            { key = "npccast", label = "Lancé par le PNJ",    cmd = "npc cast {id}" },
         },
     },
 
@@ -334,7 +365,8 @@ GM.Domains = {
 -- et auras suivies sont rangés par section.
 
 GM.Groups = {
-    { key = "npc",    title = "PNJ",         sections = { "npc", "npcaura", "forge", "forgeoutfit", "gossip" } },
+    { key = "npc",    title = "PNJ",         sections = { "npc", "npcaura" } },
+    { key = "forge",  title = "Forge",       sections = { "forge", "forgestats", "forgeoutfit", "gossip" } },
     { key = "spell",  title = "Sorts",       sections = { "aura", "cast" } },
     { key = "object", title = "Objets",      sections = { "gobject" } },
     { key = "self",   title = "Personnage",  sections = { "morph", "modify", "cheat" } },
