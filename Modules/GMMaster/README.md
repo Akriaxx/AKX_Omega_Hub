@@ -67,10 +67,11 @@ En commande libre, chaque ligne est vérifiée en direct par rapport à la liste
 | `/gmm` | Fenêtre GM Master |
 | `/gmm barre` | Afficher ou masquer la barre MJ |
 | `/gmm réglages` | Réglages de la barre |
-| `/gmm auras` | Banque d'auras |
+| `/gmm banque` ou `/gmm auras` | Banque MJ (auras, émotes, animations, casts) |
+| `/gmm emotes`, `/gmm anim`, `/gmm casts` | Ouvrir directement la catégorie correspondante |
 | `/gmm case <n>` | Exécuter la case n |
 
-## Banque d'auras
+## Banque MJ
 
 `/gmm auras`, ou le bouton « Banque d'auras » de la fenêtre et des réglages de la barre. On y range ses auras favorites (ID de sort, note facultative), chacune avec sa cible : **Moi** (`.aura <id> self`), **Ma cible** (`.aura <id>`) ou **PNJ ciblé** (`.npc set aura <id>`, aura permanente). Chaque ligne a ses boutons *Poser*, *Retirer* et *Barre +* :
 
@@ -79,11 +80,14 @@ En commande libre, chaque ligne est vérifiée en direct par rapport à la liste
 
 La banque est commune à tous vos personnages (200 auras au plus, molette pour défiler).
 
+Les onglets **Émotes**, **Animations** et **Casts** conservent chacun jusqu'à 200 favoris. Saisir un nom dans « Note », puis **Chercher** lance `.lookup emote` ou `.lookup spell` ; les résultats et leurs IDs arrivent dans le chat. Saisir un ID affiche automatiquement l'action sur la poupée à droite, sans agir sur le PNJ ciblé. **Tester ID** l'essaie sur le PNJ ciblé ; **Ajouter** le range dans la liste. Cliquer un favori l'affiche aussi sur la poupée. Chaque favori a **Tester** et **Barre +**. Pour une émote, **Répéter** utilise `.npc emote <id> repeat` ; pour un cast, **Zone** utilise `.npc cast area <id>` à votre position. Les animations utilisent `.modify anim <id>` sur la cible. La barre MJ permet ensuite de rejouer les actions ; pour les émotes, Alt + clic arrête l'émote, et pour les casts il lance le sort à votre position.
+
 ### Aperçu sur un modèle
 
-La colonne de droite de la banque montre un modèle 3D sur lequel l'aura se joue aussitôt, sans rien envoyer au serveur :
+La colonne de droite de la banque montre un modèle 3D sur lequel l'aura, l'émote, l'animation ou les visuels du cast se jouent aussitôt, sans rien envoyer au serveur :
 
 - **Saisir un ID** dans le champ « ID du sort » : l'aura se joue dès que la frappe s'arrête. **Cliquer une aura de la liste** la joue aussi (la ligne est alors surlignée).
+- Dans **Émotes**, taper `1` affiche immédiatement l'émote sur la poupée et la répète en boucle tant que cet aperçu est sélectionné. L'ID d'émote est converti en ID d'animation du client (par exemple, émote `1` → animation `60`). Une émote sans animation connue est signalée. Dans **Animations**, l'ID saisi est joué directement. Dans **Casts**, les kits d'incantation et d'impact connus se jouent sur la poupée ; les sorts propres au serveur peuvent ne rien afficher.
 - **Race** : menu déroulant avec les 23 races jouables, plus *Mon personnage* (votre apparence et votre tenue). **Homme / Femme** à côté. Certaines auras ne s'accrochent qu'à certains squelettes : changer de race rejoue l'aura sur le nouveau modèle.
 - **Tenue** : *non* montre le modèle de base, sans équipement (le plus lisible) ; *oui* habille la race choisie avec votre tenue actuelle.
 - **Rejouer** recharge le modèle et rejoue l'aura, effets ponctuels compris. **Face** remet le modèle de face, au centre. Sur le modèle : **clic droit** glissé pour le faire tourner, **clic gauche** glissé pour le déplacer dans sa case, **molette** pour zoomer.
@@ -97,6 +101,12 @@ Un modèle ne sait pas jouer un sort, seulement des kits visuels, et le client n
 
 ```
 node Modules/GMMaster/Tools/build-auravisuals.js <dossier des CSV>
+```
+
+La correspondance émote → animation vient de `Emotes.csv` du même client et se régénère avec :
+
+```
+node Modules/GMMaster/Tools/build-emoteanimations.js <Emotes.csv>
 ```
 
 ## Commandes abrégées et vérifiées

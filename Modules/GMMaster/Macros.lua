@@ -260,6 +260,14 @@ GM.SlotRecipes = {
       desc = "Clic : le PNJ ciblé joue l'émote. Alt + clic : l'arrête.",
       fields = { { key = "id", label = "ID d'émote", kind = "id" } }, mode = "alt",
       cmds = "npc emote {id}", second = "npc emote 0", label = "Émote {id}" },
+    { key = "npccast", title = "Sort lancé par PNJ",
+      desc = "Clic : le PNJ ciblé lance le sort sur lui-même. Alt + clic : le lance à votre position.",
+      fields = { SPELL }, mode = "alt",
+      cmds = "npc cast {id}", second = "npc cast area {id}", label = "{spell}" },
+    { key = "npcanim", title = "Animation de cible",
+      desc = "Joue une animation sur la cible. Chercher son ID avec .lookup emote.",
+      fields = { { key = "id", label = "ID d'animation", kind = "id" } },
+      cmds = "modify anim {id}", label = "Animation {id}" },
     { key = "npcspawn", title = "Faire apparaître un PNJ",
       desc = "Fait apparaître la créature devant vous.",
       fields = { { key = "id", label = "ID créature", kind = "id" } },
@@ -662,6 +670,61 @@ function GM:AuraToBar(entry)
     local values = { id = tostring(entry.id) }
     local built = GM.BuildRecipe(recipe, values)
     local label = GM.Utf8Cut(GM.AuraLabel(entry), 24)
+    return self:AddToBar(label, built.cmds, built.icon, GM.RecipeSlotOptions(recipe, values, built))
+end
+
+-- Émotes, animations et casts favoris. La banque d'auras historique reste intacte.
+GM.NPC_ACTIONS = {
+    emote = { label = "Émote", command = "npc emote %d", alternate = "npc emote %d repeat", lookup = "lookup emote" },
+    anim  = { label = "Animation", command = "modify anim %d", lookup = "lookup emote" },
+    cast  = { label = "Cast", command = "npc cast %d", alternate = "npc cast area %d", lookup = "lookup spell" },
+}
+
+function GM.EnsureNpcActionBank(kind)
+    local db = GM.EnsureDB()
+    db.npcActionBank = db.npcActionBank or {}
+    db.npcActionBank[kind] = db.npcActionBank[kind] or {}
+    return db.npcActionBank[kind]
+end
+
+function GM:AddNpcAction(kind, id, note)
+    if not GM.NPC_ACTIONS[kind] then return false, "Type inconnu" end
+    id = tonumber(Trim(id))
+    if not id or id <= 0 or id % 1 ~= 0 then return false, "ID entier positif attendu" end
+    local list = GM.EnsureNpcActionBank(kind)
+    for _, entry in ipairs(list) do if entry.id == id then return false, "Déjà dans la banque : " .. id end end
+    if #list >= 200 then return false, "Banque pleine (200)" end
+    note = Trim(note)
+    table.insert(list, 1, { id = id, note = note ~= "" and note or nil })
+    self.Notify()
+    return true
+end
+
+function GM:RemoveNpcAction(kind, index)
+    if not GM.NPC_ACTIONS[kind] then return end
+    table.remove(GM.EnsureNpcActionBank(kind), index)
+    self.Notify()
+end
+
+function GM:NpcActionCommand(kind, id, alternate)
+    local spec = GM.NPC_ACTIONS[kind]
+    if not spec then return nil end
+    return (alternate and spec.alternate or spec.command):format(id)
+end
+
+function GM:RunNpcAction(kind, id, alternate)
+    local command = self:NpcActionCommand(kind, id, alternate)
+    if not command then return false, "Action indisponible" end
+    return self:RunMacro(command)
+end
+
+function GM:NpcActionToBar(kind, entry)
+    local key = ({ emote = "npcemote", anim = "npcanim", cast = "npccast" })[kind]
+    local recipe = key and GM.RecipeByKey[key]
+    if not recipe then return nil end
+    local values = { id = tostring(entry.id) }
+    local built = GM.BuildRecipe(recipe, values)
+    local label = GM.Utf8Cut(entry.note or built.label, 24)
     return self:AddToBar(label, built.cmds, built.icon, GM.RecipeSlotOptions(recipe, values, built))
 end
 

@@ -499,7 +499,7 @@ settings.labels = Check(-176, "labels", "Libellés sur les icônes")
 local openPanel = UI.CreatePanelButton(settings, 106, 22, "GM Master")
 openPanel:SetPoint("TOPLEFT", 16, -206)
 openPanel:SetScript("OnClick", function() if GMMasterPanel then GMMasterPanel:Show() end end)
-local openBank = UI.CreatePanelButton(settings, 106, 22, "Banque d'auras")
+local openBank = UI.CreatePanelButton(settings, 106, 22, "Banque MJ")
 openBank:SetPoint("LEFT", openPanel, "RIGHT", 6, 0)
 openBank:SetScript("OnClick", function() if GM.ToggleAuraBank then GM:ToggleAuraBank(true) end end)
 

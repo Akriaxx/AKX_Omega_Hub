@@ -85,7 +85,7 @@ OmegaHub = { _startingUp = true, Print = noop,
 SlashCmdList = {}
 
 dofile("UI/UI.lua")
-for _, file in ipairs({ "Version", "Abbrev.generated", "AuraVisuals.generated", "Commands", "Core", "Macros", "UI_Panel", "UI_Bar", "UI_AuraBank", "UI_AuraPreview" }) do dofile("Modules/GMMaster/" .. file .. ".lua") end
+for _, file in ipairs({ "Version", "Abbrev.generated", "AuraVisuals.generated", "EmoteAnimations.generated", "Commands", "Core", "Macros", "UI_Panel", "UI_Bar", "UI_AuraBank", "UI_AuraPreview" }) do dofile("Modules/GMMaster/" .. file .. ".lua") end
 for _, f in ipairs(frames) do
     if f.events.PLAYER_LOGIN then f.scripts.OnEvent(f, "PLAYER_LOGIN") end
 end
@@ -519,6 +519,25 @@ bankUI.rows[1].delete:Click(); assert(#bankList == 3, "premier clic : confirmati
 bankUI.rows[1].delete:Click(); assert(#bankList == 2 and bankList[1].id == 1234)
 assert(GM.Utf8Cut("Vitesse éclair", 9) == "Vitesse ", "coupure UTF-8 sûre")
 
+-- Banque MJ : recherche, essai immédiat, favoris et barre pour les autres actions.
+assert(not GM:AddNpcAction("cast", "abc") and not GM:AddNpcAction("cast", "0"))
+bankUI.tabs.cast:Click(); assert(bankUI.kind == "cast" and bankUI.previewColumn:IsShown())
+bankUI.castListBtn:Click(); assert(last() == S("npc cast list"))
+bankUI.idBox:Type("1234"); bankUI.testBtn:Click(); assert(last() == S("npc cast 1234"))
+bankUI.noteBox:SetText("Flamme"); bankUI.lookupBtn:Click(); assert(last() == S("lookup spell Flamme"))
+bankUI.addBtn:Click(); assert(GM.EnsureNpcActionBank("cast")[1].id == 1234)
+bankUI.rows[1].remove:Click(); assert(last() == S("npc cast area 1234"))
+local ci = GM:NpcActionToBar("cast", GM.EnsureNpcActionBank("cast")[1])
+assert(cfg.slots[ci].cmds == "npc cast 1234" and cfg.slots[ci].cmdsAlt == "npc cast area 1234")
+bankUI.tabs.emote:Click(); bankUI.idBox:Type("10"); bankUI.addBtn:Click()
+bankUI.rows[1].apply:Click(); assert(last() == S("npc emote 10"))
+bankUI.rows[1].remove:Click(); assert(last() == S("npc emote 10 repeat"))
+bankUI.tabs.anim:Click(); bankUI.idBox:Type("145"); bankUI.testBtn:Click()
+assert(last() == S("modify anim 145"))
+bankUI.tabs.aura:Click(); assert(bankUI.previewColumn:IsShown() and #bankList == 2)
+SlashCmdList.OMEGAGMMASTER("emotes"); assert(bankUI.kind == "emote")
+SlashCmdList.OMEGAGMMASTER("auras"); assert(bankUI.kind == "aura" and bankUI:IsShown())
+
 -- Onglets : jamais plus de 5 sections par domaine
 for _, group in ipairs(GM.Groups) do assert(#group.sections <= 5, group.key) end
 
@@ -576,6 +595,24 @@ assert(not GM.AuraVisualKits(17).animKit and not GM.AuraVisualKits(17).stand, "1
 local anims = {}
 pv.model.PlayAnimKit = function(_, kit, loop) anims[#anims + 1] = "kit" .. kit .. (loop and "" or "!") end
 pv.model.SetAnimation = function(_, a) anims[#anims + 1] = "anim" .. a end
+local sentBeforePreview = #sent
+bankUI.tabs.emote:Click(); bankUI.idBox:Type("1")
+assert(GM.EmoteAnimations[1] == 60 and anims[#anims] == "anim60" and pv.status.text:find("Émote 1"), "aperçu d'émote automatique")
+local animCount = #anims
+pv.model.scripts.OnAnimFinished(pv.model)
+pv.model.scripts.OnAnimFinished(pv.model)
+assert(#anims == animCount + 2 and anims[#anims] == "anim60", "l'émote se répète après chaque fin")
+animCount = #anims
+bankUI.idBox:Type("99999999")
+assert(#anims == animCount and pv.status.text:find("Aucune animation"), "émote inconnue sans animation parasite")
+bankUI.tabs.anim:Click(); bankUI.idBox:Type("145")
+assert(anims[#anims] == "anim145" and pv.status.text:find("Animation 145"), "aperçu d'animation automatique")
+animCount = #anims; pv.model.scripts.OnAnimFinished(pv.model)
+assert(#anims == animCount, "la boucle d'émote cesse dans un autre onglet")
+bankUI.tabs.cast:Click(); bankUI.idBox:Type("7")
+assert(applied[#applied] == "142191!" and pv.status.text:find("incantation"), "aperçu de cast automatique")
+assert(#sent == sentBeforePreview, "l'aperçu ne doit rien envoyer au serveur")
+bankUI.tabs.aura:Click()
 GM:PreviewAura(178683); assert(anims[#anims] == "kit7832" and applied[#applied] == "53659", "caisse : objet + bras")
 GM:PreviewAura(244874); assert(anims[#anims - 1] == "anim1208" and anims[#anims] == "kit13291")
 assert(pv.status.text:find("AnimKit 13291") and pv.status.text:find("pose 1208"))

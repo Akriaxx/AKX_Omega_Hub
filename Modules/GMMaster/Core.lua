@@ -423,14 +423,29 @@ local function Slash(msg)
     elseif cmd == "réglages" or cmd == "reglages" or cmd == "config" then
         GM:ToggleBar(true)
         if GM.OpenBarSettings then GM.OpenBarSettings() end
-    elseif cmd == "auras" or cmd == "aura" or cmd == "banque" then
+    elseif cmd == "banque" then
         if GM.ToggleAuraBank then GM:ToggleAuraBank() end
+    elseif cmd == "auras" or cmd == "aura" then
+        if GMMasterAuraBank then
+            GMMasterAuraBank.kind = "aura"
+            GM:ToggleAuraBank(true)
+            GMMasterAuraBank:UpdateInput()
+            GMMasterAuraBank:Refresh()
+        end
+    elseif cmd == "emotes" or cmd == "emote" or cmd == "animations" or cmd == "anim" or cmd == "casts" or cmd == "cast" then
+        if GMMasterAuraBank then
+            GMMasterAuraBank.kind = (cmd == "emotes" or cmd == "emote") and "emote"
+                or (cmd == "animations" or cmd == "anim") and "anim" or "cast"
+            GM:ToggleAuraBank(true)
+            GMMasterAuraBank:UpdateInput()
+            GMMasterAuraBank:Refresh()
+        end
     elseif cmd == "case" or cmd == "slot" then
         local n = tonumber(arg)
         if n then GM:RunSlot(n) end
     elseif cmd == "aide" or cmd == "help" then
         OmegaHub.Print("GM Master : |cffAAAAAA/gmm|r fenêtre · |cffAAAAAA/gmm barre|r barre MJ · "
-            .. "|cffAAAAAA/gmm auras|r banque d'auras · |cffAAAAAA/gmm réglages|r · |cffAAAAAA/gmm case <n>|r")
+            .. "|cffAAAAAA/gmm banque|r banque MJ · |cffAAAAAA/gmm emotes|r · |cffAAAAAA/gmm casts|r · |cffAAAAAA/gmm réglages|r")
     else
         GM:Toggle()
     end

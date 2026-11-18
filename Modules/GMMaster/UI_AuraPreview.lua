@@ -1,7 +1,7 @@
 -- ============================================================
---  GM Master — Aperçu des auras
---  Colonne de droite de la banque d'auras : un modèle 3D sur lequel
---  l'aura saisie (ou cliquée dans la liste) se joue aussitôt. Toutes
+--  GM Master — Aperçu des auras, émotes, animations et casts
+--  Colonne de droite de la banque MJ : un modèle 3D sur lequel
+--  l'action saisie (ou cliquée dans la liste) se joue aussitôt. Toutes
 --  les races jouables, homme ou femme, nues ou habillées : certaines
 --  auras ne s'accrochent qu'à certains squelettes.
 --
@@ -20,7 +20,7 @@ local COL_W   = bank.previewWidth
 local INNER_W = COL_W - 2 * PAD
 local TOP     = -46
 local MODEL_TOP, MODEL_BOTTOM = -76, 130
-local TYPE_DELAY = 0.35   -- délai après la frappe avant de jouer l'aura
+local TYPE_DELAY = 0.35   -- délai après la frappe avant de jouer l'aperçu
 
 local function After(delay, fn)
     if C_Timer and C_Timer.After then C_Timer.After(delay, fn) else fn() end
@@ -138,7 +138,7 @@ do
     UI.ApplySeparator(vsep, true)
 end
 
-local preview = { kits = nil, id = nil, token = 0 }
+local preview = { kits = nil, id = nil, kind = "aura", token = 0 }
 bank.auraPreview = preview
 
 -- Race (menu déroulant) et sexe
@@ -248,6 +248,9 @@ end
 --- et une remarque si l'aura n'a pas de visuel propre.
 local function Plan(kits)
     if not kits then return {}, {}, nil end
+    if preview.kind == "cast" then
+        return kits.cast, kits.impact, "Effets d'incantation et d'impact disponibles dans le client."
+    end
     if #kits.loop > 0 or #kits.once > 0 then return kits.loop, kits.once, nil end
     if #kits.cast > 0 or #kits.impact > 0 then
         return kits.cast, kits.impact, "Pas de visuel d'aura : effet d'incantation et d'impact du sort."
@@ -258,8 +261,20 @@ end
 local function UpdateStatus()
     local id = preview.id
     if not id then
-        status:SetText("|cff888888Saisissez un ID de sort à gauche, ou cliquez une aura de la liste : "
-            .. "elle se joue aussitôt sur le modèle.|r")
+        status:SetText(preview.kind == "aura"
+            and "|cff888888Saisissez un ID de sort à gauche, ou cliquez une aura de la liste : elle se joue aussitôt sur le modèle.|r"
+            or preview.kind == "cast"
+            and "|cff888888Saisissez un ID de sort : son incantation et son impact se jouent ici, sans lancer le sort en jeu.|r"
+            or "|cff888888Saisissez un ID d'émote ou d'animation : la poupée la joue aussitôt.|r")
+        return
+    end
+    if preview.kind == "emote" or preview.kind == "anim" then
+        local anim = preview.kind == "emote" and GM.EmoteAnimations and GM.EmoteAnimations[id] or nil
+        local detail = preview.kind == "anim" and "Animation " .. id
+            or anim and anim > 0 and "Animation du client : " .. anim
+            or "Aucune animation de modèle connue pour cette émote"
+        status:SetText("|cffffffff" .. (preview.kind == "emote" and "Émote " or "Animation ") .. id .. "|r\n"
+            .. "|cffd7b35f" .. detail .. ". Le résultat dépend du squelette du PNJ ciblé.|r")
         return
     end
     local name, icon = GM.SpellInfo(id)
@@ -282,8 +297,9 @@ local function UpdateStatus()
         lines[#lines + 1] = "|cffd7b35fAura de transformation : elle remplace le modèle, "
             .. "l'aperçu ne peut pas la montrer.|r"
     elseif #loop == 0 and #once == 0 then
-        lines[#lines + 1] = "|cffd7b35fAucun visuel connu pour ce sort (sort sans effet visible, "
-            .. "ou propre au serveur).|r"
+        lines[#lines + 1] = preview.kind == "cast"
+            and "|cffd7b35fAucun kit d'incantation ou d'impact connu pour ce sort.|r"
+            or "|cffd7b35fAucun visuel connu pour ce sort (sort sans effet visible, ou propre au serveur).|r"
     end
     status:SetText(table.concat(lines, "\n"))
 end
@@ -292,6 +308,11 @@ local function ApplyView()
     if model.SetFacing then model:SetFacing(view.facing) end
     if model.SetCamDistanceScale then model:SetCamDistanceScale(view.zoom) end
     if model.SetPosition then model:SetPosition(0, view.y, view.z) end
+end
+
+local function EmoteAnimation()
+    local animation = preview.id and GM.EmoteAnimations and GM.EmoteAnimations[preview.id]
+    return animation and animation > 0 and animation or nil
 end
 
 --- Joue les kits de l'aura courante sur le modèle fraîchement chargé.
@@ -318,7 +339,12 @@ local function ApplyKits(token, fromLoad)
     -- L'animation du kit (bras qui portent la caisse…) n'est pas jouée par
     -- ApplySpellVisualKit : on la lance nous-mêmes.
     local kits = preview.kits
-    if kits then
+    if preview.kind == "emote" or preview.kind == "anim" then
+        local animation = preview.kind == "anim" and preview.id or EmoteAnimation()
+        if animation and animation > 0 and model.SetAnimation then
+            pcall(model.SetAnimation, model, animation)
+        end
+    elseif kits then
         if kits.stand then pcall(model.SetAnimation, model, kits.stand) end
         if kits.animKit then pcall(model.PlayAnimKit, model, kits.animKit, kits.animLoop)
         elseif kits.anim then pcall(model.SetAnimation, model, kits.anim) end
@@ -345,6 +371,13 @@ local function Reload()
     After(0.5, function() ApplyKits(token) end)
 end
 model:SetScript("OnModelLoaded", function() ApplyKits(preview.token, true) end)
+-- SetAnimation joue les émotes ponctuelles une seule fois. Dès la fin,
+-- relancer l'animation tant que cette émote est affichée dans la banque.
+model:SetScript("OnAnimFinished", function(self)
+    if not bank:IsShown() or preview.kind ~= "emote" or not preview.applied then return end
+    local animation = EmoteAnimation()
+    if animation and self.SetAnimation then pcall(self.SetAnimation, self, animation) end
+end)
 
 local function SyncControls()
     local s = Settings()
@@ -362,27 +395,33 @@ local function SyncControls()
     for _, b in ipairs(preview.raceButtons) do SetActive(b, b.raceID == s.race) end
 end
 
---- Joue une aura sur le modèle (nil : modèle seul).
-function GM:PreviewAura(id)
+--- Joue une aura, une animation ou les visuels d'un cast sur le modèle.
+function GM:PreviewAction(kind, id)
     id = tonumber(id)
     if id and (id <= 0 or id % 1 ~= 0) then id = nil end
+    if kind ~= "emote" and kind ~= "anim" and kind ~= "cast" then kind = "aura" end
+    preview.kind = kind
     preview.id = id
-    preview.kits = id and GM.AuraVisualKits(id) or nil
+    preview.kits = id and (kind == "aura" or kind == "cast") and GM.AuraVisualKits(id) or nil
     UpdateStatus()
     if bank.Refresh then bank.Refresh() end
     if bank:IsShown() then Reload() end
 end
 
+function GM:PreviewAura(id) return self:PreviewAction("aura", id) end
+
 --- Même chose, après un court délai : pour la saisie au clavier.
-function GM:PreviewAuraSoon(id)
+function GM:PreviewActionSoon(kind, id)
     preview.typing = (preview.typing or 0) + 1
     local mine = preview.typing
     After(TYPE_DELAY, function()
-        if mine == preview.typing then GM:PreviewAura(id) end
+        if mine == preview.typing and bank.kind == kind then GM:PreviewAction(kind, id) end
     end)
 end
 
-function GM.PreviewedAura() return preview.id end
+function GM:PreviewAuraSoon(id) return self:PreviewActionSoon("aura", id) end
+
+function GM.PreviewedAura() return preview.kind == "aura" and preview.id or nil end
 
 local function SetRace(raceID)
     Settings().race = raceID
@@ -422,7 +461,7 @@ end)
 dressBtn:SetScript("OnLeave", HideTooltip)
 replayBtn:SetScript("OnClick", function() Reload() end)
 replayBtn:SetScript("OnEnter", function(self)
-    ShowTooltip(self, { "Rejouer", "Recharge le modèle et rejoue l'aura, effets ponctuels compris." })
+    ShowTooltip(self, { "Rejouer", "Recharge le modèle et rejoue l'aperçu, effets ponctuels compris." })
 end)
 replayBtn:SetScript("OnLeave", HideTooltip)
 resetBtn:SetScript("OnClick", function()
