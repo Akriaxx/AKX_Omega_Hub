@@ -86,7 +86,7 @@ end
 local idLabel = Label("ID du sort", PAD, -50)
 local idBox = UI.CreateStyledEditBox(bank, 90, 22)
 idBox:SetPoint("TOPLEFT", PAD, -64)
-idBox:SetNumeric(true)
+idBox:SetNumeric(false)
 bank.idBox = idBox
 
 local whoLabel = Label("Sur", PAD + 100, -50)
@@ -99,6 +99,7 @@ testBtn:SetPoint("TOPLEFT", PAD + 100, -64)
 testBtn:Hide()
 testBtn:SetScript("OnClick", function()
     local id = tonumber(idBox:GetText())
+    if not id and bank.kind == "cast" then local _, _, found = GM.SpellInfo(idBox:GetText()); id = found end
     if not id or id <= 0 or id % 1 ~= 0 then return end
     GM:RunNpcAction(bank.kind, id)
 end)
@@ -145,10 +146,22 @@ whoBtn:SetScript("OnClick", function()
     SyncWho()
 end)
 
+local SearchSpells
+local function InputID()
+    if bank.selectedSearchID then return bank.selectedSearchID end
+    local text = GM.Trim(idBox:GetText())
+    local id = tonumber(text)
+    if id then return id end
+    if bank.kind == "aura" or bank.kind == "cast" then
+        local _, _, spellID = GM.SpellInfo(text)
+        return spellID
+    end
+end
+
 local function UpdatePreview()
     if bank.kind ~= "aura" then
         local spec = GM.NPC_ACTIONS[bank.kind]
-        local id = tonumber(idBox:GetText())
+        local id = InputID()
         if id then
             local name = bank.kind == "cast" and GM.SpellInfo(id)
             preview:SetText((name and name .. "  ·  " or "") .. "." .. spec.command:format(id))
@@ -157,13 +170,14 @@ local function UpdatePreview()
         end
         return
     end
-    local id = tonumber(idBox:GetText())
+    local id = InputID()
     if not id then
         preview:SetText("Moi : interrupteur sur la barre  ·  Ma cible / PNJ ciblé : clic = poser, Alt + clic = retirer")
         return
     end
     local name, icon = GM.SpellInfo(id)
-    preview:SetText(name and ((icon and ("|T" .. icon .. ":14|t ") or "") .. "|cffffffff" .. name .. "|r") or "|cff888888Sort inconnu|r")
+    local caption = tonumber(idBox:GetText()) and name or tostring(id)
+    preview:SetText(name and ((icon and ("|T" .. icon .. ":14|t ") or "") .. "|cffffffff" .. caption .. "|r") or "|cff888888Sort inconnu|r")
 end
 
 local castListBtn = UI.CreatePanelButton(bank, 160, 22, "Casts du PNJ ciblé")
@@ -174,9 +188,11 @@ bank.castListBtn = castListBtn
 
 local function DoAdd()
     local ok, err
-    if bank.kind == "aura" then ok, err = GM:AddAura(idBox:GetText(), bank.newWho, noteBox:GetText())
-    else ok, err = GM:AddNpcAction(bank.kind, idBox:GetText(), noteBox:GetText()) end
+    if bank.kind == "aura" then ok, err = GM:AddAura(InputID(), bank.newWho, noteBox:GetText())
+    else ok, err = GM:AddNpcAction(bank.kind, InputID(), noteBox:GetText()) end
     if ok then
+        bank.selectedSearchID = nil
+        bank.searchQuery = nil
         idBox:SetText(""); noteBox:SetText("")
         bank.offset = 0
         UpdatePreview()
@@ -190,14 +206,17 @@ idBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); DoAdd() end)
 noteBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); DoAdd() end)
 idBox:SetScript("OnTextChanged", function(self, user)
     if not user then return end
+    bank.selectedSearchID = nil
+    if SearchSpells then SearchSpells() end
     UpdatePreview()
     -- L'aura saisie se joue sur le modèle, sans attendre « Ajouter ».
-    if GM.PreviewActionSoon then GM:PreviewActionSoon(bank.kind, self:GetText()) end
+    if GM.PreviewActionSoon then GM:PreviewActionSoon(bank.kind, InputID()) end
 end)
 
 function bank:UpdateInput()
     local aura = self.kind == "aura"
-    idLabel:SetText((aura or self.kind == "cast") and "ID du sort" or "ID d'émote / animation")
+    idBox:SetNumeric(not (aura or self.kind == "cast"))
+    idLabel:SetText((aura or self.kind == "cast") and "ID / nom du sort" or "ID d'émote / animation")
     whoLabel:SetShown(aura)
     whoBtn:SetShown(aura)
     testBtn:SetShown(not aura)
@@ -205,7 +224,7 @@ function bank:UpdateInput()
     if self.previewColumn then self.previewColumn:Show() end
     castListBtn:SetShown(self.kind == "cast")
     UpdatePreview()
-    if GM.PreviewAction then GM:PreviewAction(self.kind, idBox:GetText()) end
+    if GM.PreviewAction then GM:PreviewAction(self.kind, InputID()) end
 end
 
 local sep = bank:CreateTexture(nil, "ARTWORK")
@@ -237,7 +256,43 @@ local function EntryTooltip(owner, entry)
         "Poser :  |cffffffff." .. (GM.ResolveLine(on).short or on) .. "|r",
         "Retirer :  |cffffffff." .. (GM.ResolveLine(off).short or off) .. "|r",
         "|cffAAAAAAClic : aperçu sur le modèle|r",
+        "|cffAAAAAAClic droit : Enregistrer / Essayer / Retirer|r",
     })
+end
+
+-- Menu de ligne : conserve une copie, les résultats évoluant pendant la recherche.
+local contextMenu = CreateFrame("Frame", nil, bank, "BackdropTemplate")
+contextMenu:SetSize(138, 88)
+contextMenu:SetFrameStrata("TOOLTIP")
+contextMenu:SetClampedToScreen(true)
+contextMenu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12 })
+contextMenu:SetBackdropColor(0.06, 0.06, 0.06, 1)
+contextMenu:EnableMouse(true)
+contextMenu:Hide()
+bank:HookScript("OnHide", function() contextMenu:Hide() end)
+local menuActions = {
+    { "Enregistrer", function(entry)
+        local ok, err = GM:AddAura(entry.id, entry.who, noteBox:GetText())
+        if not ok then preview:SetText("|cffdd5555" .. err .. "|r") end
+    end },
+    { "Essayer", function(entry) GM:ApplyAura(entry, false) end },
+    { "Retirer", function(entry) GM:ApplyAura(entry, true) end },
+}
+for index, action in ipairs(menuActions) do
+    local button = UI.CreatePanelButton(contextMenu, 122, 22, action[1])
+    button:SetPoint("TOPLEFT", 8, -8 - (index - 1) * 25)
+    button:SetScript("OnClick", function()
+        local entry = contextMenu.entry
+        contextMenu:Hide()
+        if entry then action[2](entry) end
+    end)
+end
+local function OpenAuraMenu(owner, entry)
+    HideTooltip()
+    contextMenu.entry = { id = entry.id, who = bank.searchQuery and bank.newWho or entry.who, note = entry.note }
+    contextMenu:ClearAllPoints()
+    contextMenu:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, 0)
+    contextMenu:Show()
 end
 
 for i = 1, ROWS do
@@ -272,9 +327,18 @@ for i = 1, ROWS do
     hover:SetScript("OnEnter", function(self) if row.entry then EntryTooltip(self, row.entry) end end)
     hover:SetScript("OnLeave", HideTooltip)
     hover:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" and row.entry and bank.kind == "aura" then
+            OpenAuraMenu(row.hover, row.entry)
+            return
+        end
+        contextMenu:Hide()
         if button == "LeftButton" and row.entry then
             if GM.PreviewAction then GM:PreviewAction(bank.kind, row.entry.id) end
-            if bank.kind ~= "aura" then idBox:SetText(tostring(row.entry.id)); UpdatePreview() end
+            if bank.searchQuery then
+                bank.selectedSearchID = row.entry.id
+                UpdatePreview()
+                bank:Refresh()
+            elseif bank.kind ~= "aura" then idBox:SetText(tostring(row.entry.id)); UpdatePreview() end
         end
     end)
     row.hover = hover
@@ -325,7 +389,8 @@ UI.ApplySoftText(pager)
 local function Refresh()
     if not bank:IsShown() then return end
     SyncWho()
-    local list = bank.kind == "aura" and GM.EnsureAuraBank() or GM.EnsureNpcActionBank(bank.kind)
+    local searching = bank.searchQuery and (bank.kind == "aura" or bank.kind == "cast")
+    local list = searching and bank.searchResults or (bank.kind == "aura" and GM.EnsureAuraBank() or GM.EnsureNpcActionBank(bank.kind))
     for kind, tab in pairs(tabs) do tab:SetAlpha(kind == bank.kind and 1 or 0.55) end
     bank.offset = math.max(0, math.min(bank.offset, math.max(0, #list - ROWS)))
     for i, row in ipairs(bank.rows) do
@@ -343,13 +408,17 @@ local function Refresh()
             local label = bank.kind == "aura" and GM.AuraLabel(entry)
                 or entry.note or spellName or (GM.NPC_ACTIONS[bank.kind].label .. " " .. entry.id)
             row.text:SetText(label .. "  |cff888888" .. entry.id .. "|r")
-            row.who:SetShown(bank.kind == "aura")
+            row.who:SetShown(not searching and bank.kind == "aura")
             if bank.kind == "aura" then row.who:SetText(GM.AuraTargetLabel(entry.who)) end
             row.apply:SetText(bank.kind == "aura" and "Poser" or "Tester")
             row.remove:SetShown(bank.kind == "aura" or GM.NPC_ACTIONS[bank.kind].alternate ~= nil)
             row.remove:SetText(bank.kind == "aura" and "Retirer" or bank.kind == "emote" and "Répéter" or "Zone")
             local previewed = bank.kind == "aura" and GM.PreviewedAura and GM.PreviewedAura() == entry.id
             row.bg:SetColorTexture(unpack(previewed and UI.colors.rowBgSelected or UI.colors.rowBg))
+            row.apply:SetShown(not searching)
+            row.remove:SetShown(not searching and (bank.kind == "aura" or GM.NPC_ACTIONS[bank.kind].alternate ~= nil))
+            row.toBar:SetShown(not searching)
+            row.delete:SetShown(not searching)
             row.delete:SetText("×")
             row.armed = nil
             row:Show()
@@ -358,14 +427,55 @@ local function Refresh()
         end
     end
     empty:SetText("|cff888888Aucun favori. Cherchez un ID, saisissez-le puis cliquez Ajouter.|r")
+    if searching then empty:SetText(bank.searchRunning and "Recherche en cours…" or "Aucun sort correspondant.") end
     empty:SetShown(#list == 0)
     if #list > ROWS then
         pager:SetText((bank.offset + 1) .. "–" .. math.min(#list, bank.offset + ROWS) .. " sur " .. #list .. "  ·  molette pour défiler")
     else
         pager:SetText(#list > 0 and (#list .. " favori" .. (#list > 1 and "s" or "")) or "")
     end
+    if searching then pager:SetText(#list .. " résultat(s)" .. (bank.searchRunning and " · recherche en cours…" or "") .. " · molette pour défiler") end
 end
 bank.Refresh = Refresh
+
+-- Parcours réparti entre les images : aucune limite du nombre de résultats.
+local searchFrame = CreateFrame("Frame", nil, bank)
+local spellNames = {}
+local scanID = 1
+local SCAN_MAX = 1000000
+SearchSpells = function()
+    contextMenu:Hide()
+    local query = string.lower(GM.Trim(idBox:GetText()))
+    bank.searchQuery = query ~= "" and query or nil
+    bank.searchResults, bank.offset = {}, 0
+    if not bank.searchQuery then bank.searchRunning = false; Refresh(); return end
+    for id, name in pairs(spellNames) do
+        if tostring(id):find(query, 1, true) or name:find(query, 1, true) then
+            bank.searchResults[#bank.searchResults + 1] = { id = id, who = bank.newWho }
+        end
+    end
+    table.sort(bank.searchResults, function(a, b) return a.id < b.id end)
+    bank.searchRunning = scanID <= SCAN_MAX
+    Refresh()
+end
+searchFrame:SetScript("OnUpdate", function()
+    if not bank.searchQuery or (bank.kind ~= "aura" and bank.kind ~= "cast") or scanID > SCAN_MAX then return end
+    local query = bank.searchQuery
+    local stop = math.min(scanID + 999, SCAN_MAX)
+    for id = scanID, stop do
+        local name = GM.SpellInfo(id)
+        if name then
+            name = string.lower(name)
+            spellNames[id] = name
+            if tostring(id):find(query, 1, true) or name:find(query, 1, true) then
+                bank.searchResults[#bank.searchResults + 1] = { id = id, who = bank.newWho }
+            end
+        end
+    end
+    scanID = stop + 1
+    bank.searchRunning = scanID <= SCAN_MAX
+    Refresh()
+end)
 
 bank:SetScript("OnMouseWheel", function(_, delta)
     bank.offset = bank.offset - delta * 3

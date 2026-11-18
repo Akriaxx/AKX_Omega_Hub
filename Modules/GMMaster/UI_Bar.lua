@@ -816,8 +816,9 @@ function editor:Validate()
     local field = recipe.fields[1]
     if field and field.spell then
         local id = Values()[field.key]
-        local name, icon = GM.SpellInfo(id)
-        spellFS:SetText(name and ((icon and ("|T" .. icon .. ":16|t ") or "") .. name)
+        local name, icon, spellID = GM.SpellInfo(id)
+        local caption = tonumber(id) and name or (spellID and tostring(spellID))
+        spellFS:SetText(caption and ((icon and ("|T" .. icon .. ":16|t ") or "") .. caption)
             or (GM.Trim(id) ~= "" and "|cff888888Sort inconnu|r" or ""))
     else
         spellFS:SetText("")
@@ -878,7 +879,7 @@ local function RenderRecipe()
     fieldBox:SetShown(field ~= nil and not isPick)
     spellFS:SetShown(field ~= nil and not isPick)
     if field and not isPick then
-        fieldBox:SetNumeric(field.kind == "id")
+        fieldBox:SetNumeric(field.kind == "id" and not field.spell)
         fieldBox:SetWidth(field.kind == "text" and 260 or 150)
         local v = Values()[field.key]
         if v == nil then v = field.default or ""; Values()[field.key] = v end

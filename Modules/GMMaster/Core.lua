@@ -219,14 +219,14 @@ end
 -- ── Noms de sorts ─────────────────────────────────────────────────────────
 
 function GM.SpellInfo(id)
-    id = tonumber(id)
-    if not id then return nil end
+    id = tonumber(id) or GM.Trim(id)
+    if not id or id == "" then return nil end
     if C_Spell and C_Spell.GetSpellInfo then
         local info = C_Spell.GetSpellInfo(id)
-        if info then return info.name, info.iconID end
+        if info then return info.name, info.iconID, info.spellID end
     elseif GetSpellInfo then
-        local name, _, icon = GetSpellInfo(id)
-        return name, icon
+        local name, _, icon, _, _, _, spellID = GetSpellInfo(id)
+        return name, icon, spellID
     end
 end
 

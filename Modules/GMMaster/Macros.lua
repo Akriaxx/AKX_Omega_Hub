@@ -334,6 +334,11 @@ function GM.BuildRecipe(recipe, values)
     local cmds, second = recipe.cmds, recipe.second
     for _, f in ipairs(recipe.fields) do
         local v = Trim(values[f.key] or f.default or "")
+        if f.spell and v ~= "" and not tonumber(v) then
+            local _, _, spellID = GM.SpellInfo(v)
+            if not spellID then return nil, "Sort inconnu : " .. v end
+            v = tostring(spellID)
+        end
         if f.kind == "pick" then
             local opt
             for _, o in ipairs(f.options) do if o.value == v then opt = o end end
