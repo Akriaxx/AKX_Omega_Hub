@@ -87,6 +87,13 @@ bankToggle:SetScript("OnEnter", function(self)
 end)
 bankToggle:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 
+local homeBtn = UI.CreatePanelButton(panel, 80, 20, "Accueil")
+homeBtn:SetPoint("RIGHT", bankToggle, "LEFT", -6, 0)
+homeBtn:SetScript("OnClick", function()
+    panel:Hide()
+    if GMMasterHome then GMMasterHome:Show() end
+end)
+
 local sepTop = panel:CreateTexture(nil, "ARTWORK")
 sepTop:SetPoint("TOPLEFT", 4, -HEADER_H)
 sepTop:SetPoint("TOPRIGHT", -4, -HEADER_H)

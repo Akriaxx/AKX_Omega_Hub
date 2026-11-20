@@ -49,7 +49,7 @@ function GM.DescribeMacro(text, withSyntax)
     local report, worst = GM.CheckMacro(text)
     local lines = {}
     for _, res in ipairs(report) do
-        local line = GM.STATUS_ICONS[res.status] .. " |cffffffff." .. (res.short or res.raw) .. "|r"
+        local line = GM.STATUS_ICONS[res.status] .. " |cffffffff" .. (res.slash and "" or ".") .. (res.short or res.raw) .. "|r"
         if withSyntax and res.node and res.node.syn then
             line = line .. "   |cff888888" .. res.node.syn .. "|r"
         end
@@ -141,6 +141,7 @@ local function Flash(btn, ok)
 end
 
 local function SlotTooltip(btn)
+    if GM.dragSource then return end
     local slot = GM:GetSlot(btn.index)
     local tip
     if slot then
@@ -173,6 +174,116 @@ local function SlotUnderCursor()
     for i, b in ipairs(buttons) do
         if b:IsShown() and b:IsMouseOver() then return i end
     end
+end
+
+-- ── Déplacement d'une case : retour visuel ────────────────────────────────
+-- Pendant Maj + glisser, une vignette de la case suit le curseur, la case
+-- visée est encadrée et une étiquette dit ce qui va se passer (déplacer
+-- vers une case vide ou échanger). Au lâcher, les deux cases clignotent.
+
+local ghost = CreateFrame("Frame", "GMMasterDragGhost", UIParent, "BackdropTemplate")
+ghost:SetFrameStrata("TOOLTIP")
+ghost:SetSize(36, 36)
+ghost:EnableMouse(false)
+ghost:SetAlpha(0.85)
+ghost:Hide()
+ghost:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+ghost:SetBackdropBorderColor(unpack(UI.colors.tabLine))
+do
+    local gbg = ghost:CreateTexture(nil, "BACKGROUND")
+    gbg:SetAllPoints()
+    gbg:SetColorTexture(unpack(UI.colors.panelButtonBg))
+end
+ghost.icon = ghost:CreateTexture(nil, "ARTWORK")
+ghost.icon:SetPoint("TOPLEFT", 1, -1)
+ghost.icon:SetPoint("BOTTOMRIGHT", -1, 1)
+ghost.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+ghost.label = ghost:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ghost.label:SetPoint("TOPLEFT", 2, -2)
+ghost.label:SetPoint("BOTTOMRIGHT", -2, 2)
+ghost.label:SetWordWrap(true)
+ghost.label:SetJustifyH("CENTER")
+UI.ApplyBodyText(ghost.label)
+ghost.hint = ghost:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+ghost.hint:SetPoint("TOPLEFT", ghost, "BOTTOMLEFT", 0, -3)
+ghost.hint:SetShadowOffset(1, -1)
+ghost.hint:SetShadowColor(0, 0, 0, 1)
+GM.dragGhost = ghost
+
+local function SetDropTarget(btn, mode)
+    if not btn.drop then
+        local drop = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+        drop:SetAllPoints()
+        drop:SetFrameLevel((btn:GetFrameLevel() or 1) + 5)
+        drop:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 2 })
+        local fill = drop:CreateTexture(nil, "OVERLAY")
+        fill:SetAllPoints()
+        drop.fill = fill
+        btn.drop = drop
+    end
+    if not mode then btn.drop:Hide() return end
+    local c = mode == "swap" and { 0.95, 0.75, 0.25 } or { 0.40, 0.90, 0.40 }
+    btn.drop:SetBackdropBorderColor(c[1], c[2], c[3], 1)
+    btn.drop.fill:SetColorTexture(c[1], c[2], c[3], 0.18)
+    btn.drop:Show()
+end
+
+--- Met à jour la case visée et l'étiquette sous la vignette.
+local function UpdateDrag()
+    local from = GM.dragSource
+    if not from then return end
+    local to = SlotUnderCursor()
+    if to == from then to = nil end
+    if ghost.target ~= to then
+        if ghost.target and buttons[ghost.target] then SetDropTarget(buttons[ghost.target], nil) end
+        ghost.target = to
+        if to then SetDropTarget(buttons[to], GM:GetSlot(to) and "swap" or "move") end
+    end
+    if not to then
+        ghost.hint:SetText("|cffAAAAAALâcher sur une case|r")
+    elseif GM:GetSlot(to) then
+        ghost.hint:SetText("|cffF2C040Échanger avec la case " .. to .. "|r")
+    else
+        ghost.hint:SetText("|cff66dd66Déplacer vers la case " .. to .. "|r")
+    end
+end
+GM.UpdateSlotDrag = UpdateDrag
+
+ghost:SetScript("OnUpdate", function(self)
+    if GetCursorPosition then
+        local scale = UIParent:GetEffectiveScale() or 1
+        local x, y = GetCursorPosition()
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale + 10, y / scale - 10)
+    end
+    UpdateDrag()
+end)
+
+local function StartSlotDrag(btn)
+    local slot = GM:GetSlot(btn.index)
+    GM.dragSource = btn.index
+    btn:SetAlpha(0.35)
+    local size = GM.EnsureBar().size
+    ghost:SetSize(size, size)
+    local hasIcon = SetIcon(ghost.icon, slot.icon)
+    ghost.label:SetShown(not hasIcon)
+    ghost.label:SetText(GM.SlotLabel(slot))
+    ghost.target = nil
+    ghost:Show()
+    UpdateDrag()
+end
+
+--- Termine le glisser ; renvoie la case de départ et la case d'arrivée.
+local function StopSlotDrag(btn)
+    local from = GM.dragSource
+    UpdateDrag()
+    local to = ghost.target
+    GM.dragSource = nil
+    btn:SetAlpha(1)
+    if to and buttons[to] then SetDropTarget(buttons[to], nil) end
+    ghost.target = nil
+    ghost:Hide()
+    return from, to
 end
 
 local function CreateSlot(i)
@@ -256,17 +367,18 @@ local function CreateSlot(i)
     btn:SetScript("OnDragStart", function(self)
         if GM.EnsureBar().locked or not (IsShiftKeyDown and IsShiftKeyDown()) then return end
         if not GM:GetSlot(self.index) then return end
-        GM.dragSource = self.index
-        self:SetAlpha(0.4)
+        HideTooltip()
+        StartSlotDrag(self)
     end)
     btn:SetScript("OnDragStop", function(self)
-        local from = GM.dragSource
-        GM.dragSource = nil
-        self:SetAlpha(1)
-        if not from then return end
+        if not GM.dragSource then return end
+        local from, to = StopSlotDrag(self)
         self.dragged = GetTime and GetTime() or 0
-        local to = SlotUnderCursor()
-        if to and to ~= from then GM:SwapSlots(from, to) end
+        if to then
+            GM:SwapSlots(from, to)
+            Flash(buttons[from], true)
+            Flash(buttons[to], true)
+        end
     end)
     btn:SetScript("OnEnter", SlotTooltip)
     btn:SetScript("OnLeave", HideTooltip)
@@ -367,6 +479,9 @@ bar:SetScript("OnShow", function()
     ApplyPosition()
     Layout()
     RefreshSlots()
+end)
+bar:SetScript("OnHide", function()
+    if GM.dragSource and buttons[GM.dragSource] then StopSlotDrag(buttons[GM.dragSource]) end
 end)
 
 -- ── Poignée ───────────────────────────────────────────────────────────────
@@ -702,7 +817,7 @@ modeBtn:SetPoint("TOPLEFT", X, -104)
 modeBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 editor.modeBtn = modeBtn
 local freeHint = Text(X + 230, -110, nil, "ApplySoftText")
-freeHint:SetText("Une ligne = une commande  ·  {cible}  {moi}")
+freeHint:SetText("Une ligne = une commande  ·  /run, /reload…  ·  {cible}  {moi}")
 local box1Label = Text(X, -134)
 local box1 = CommandBox(150)
 box1:SetPoint("TOPLEFT", X, -148)

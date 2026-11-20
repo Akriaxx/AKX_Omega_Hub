@@ -1,6 +1,6 @@
 # GM Master
 
-Activer le module dans `/omh`, puis ouvrir la fenêtre avec `/gmm` (ou `/gmmaster`). Un raccourci clavier est aussi disponible dans les options de touches, rubrique Omega Hub.
+Activer le module dans `/omh`, puis ouvrir la page d'accueil avec `/gmm` (ou `/gmmaster`) : une tuile par fenêtre du module (commandes MJ, barre MJ et ses réglages, displays, auras, émotes, animations, casts). Les raccourcis `/gmm <mot>` ci-dessous ouvrent directement la fenêtre voulue. Un raccourci clavier est aussi disponible dans les options de touches, rubrique Omega Hub.
 
 La colonne de gauche liste les domaines. Chacun regroupe plusieurs sections, une par onglet :
 
@@ -35,6 +35,7 @@ Une barre de cases à placer où l'on veut, chaque case portant une **macro tech
   - *Simple* : le clic envoie les commandes.
   - *Interrupteur on / off* : un seul bouton qui active ou désactive selon l'état **actuel**. Le plus simple : `cheat fly [on/off]`, où `[on/off]` est remplacé par `on` ou `off`. On peut aussi écrire deux jeux de commandes (« Pour activer » / « Pour désactiver »). La case affiche `ON` (liseré vert) ou `OFF`. L'état vient du serveur pour les triches (`.cheat fly`, `god`, `cooldown`, `casttime`, `power`, `duration`, `waterwalk`, `slowcast`, suivies par EpsilonLib, même si elles sont changées à la main dans le chat), de vos auras pour `aura <id> self`, et sinon du dernier état envoyé par la case (par personnage).
   - *Clic / Alt + clic* : deux commandes, comme la macro `/run SendChatMessage(IsAltKeyDown() and ".n se una 301895" or ".n se aur 301895", …)` : clic = `.n se aur 301895`, Alt + clic = `.n se una 301895`.
+- **Maj + glisser une case** pour la déplacer : une vignette suit le curseur, la case visée est encadrée (vert : case vide, or : échange) et les deux cases clignotent au lâcher.
 - Les 12 premières cases ont un raccourci clavier (options de touches, rubrique Omega Hub), et `/gmm case <n>` exécute la case n.
 
 ### Éditeur de case : les recettes
@@ -60,15 +61,17 @@ Pas besoin d'écrire les commandes : à gauche de l'éditeur, on choisit une **r
 - Un libellé ou une icône modifiés à la main sont conservés ; sinon ils suivent l'ID.
 - Une case dont l'aperçu est en erreur n'est pas enregistrée.
 
-En commande libre, chaque ligne est vérifiée en direct par rapport à la liste des commandes du serveur : commande complète retrouvée, syntaxe officielle affichée, arguments manquants signalés. Une abréviation ambiguë (`n s` : say, scale, set, spawn…) ou une commande incomplète (`ph f n gossip` sans sous-commande) bloque l'envoi. Une commande absente de la liste est envoyée telle quelle, avec un avertissement. Le point initial est facultatif, `#` commence un commentaire, `{cible}` est remplacé par le nom de la cible et `{moi}` par le vôtre. Dix lignes au plus par case.
+En commande libre, chaque ligne est vérifiée en direct par rapport à la liste des commandes du serveur : commande complète retrouvée, syntaxe officielle affichée, arguments manquants signalés. Une abréviation ambiguë (`n s` : say, scale, set, spawn…) ou une commande incomplète (`ph f n gossip` sans sous-commande) bloque l'envoi. Une commande absente de la liste est envoyée telle quelle, avec un avertissement. Le point initial est facultatif, `#` commence un commentaire, une ligne qui commence par `/` est une commande du client exécutée telle quelle (`/run print(1)`, `/reload`, `/dance`, commandes d'addons), jamais envoyée au serveur, `{cible}` est remplacé par le nom de la cible et `{moi}` par le vôtre. Dix lignes au plus par case.
 
 | Commande | Effet |
 |---|---|
-| `/gmm` | Fenêtre GM Master |
+| `/gmm` | Page d'accueil |
+| `/gmm commandes` | Fenêtre des commandes MJ |
 | `/gmm barre` | Afficher ou masquer la barre MJ |
 | `/gmm réglages` | Réglages de la barre |
-| `/gmm banque` ou `/gmm auras` | Banque MJ (auras, émotes, animations, casts) |
-| `/gmm emotes`, `/gmm anim`, `/gmm casts` | Ouvrir directement la catégorie correspondante |
+| `/gmm display` | Fenêtre Displays (onglet M2) ; `/gmm wmo`, `/gmm pnj` ouvrent l'onglet voulu |
+| `/gmm auras` (ou `banque`) | Banque MJ, onglet Auras |
+| `/gmm emotes`, `/gmm anim`, `/gmm casts` | Banque MJ, catégorie correspondante |
 | `/gmm case <n>` | Exécuter la case n |
 
 ## Banque MJ
@@ -109,6 +112,20 @@ La correspondance émote → animation vient de `Emotes.csv` du même client et 
 node Modules/GMMaster/Tools/build-emoteanimations.js <Emotes.csv>
 ```
 
+## Displays
+
+`/gmm display`, ou la tuile « Displays » de l'accueil. Trois onglets : **M2**, **WMO** et **PNJ**. On tape un nom (`door`, ou plusieurs mots : `chair void`, tous doivent y figurer), la liste se remplit ; un clic affiche le résultat dans l'aperçu à droite, les **flèches haut / bas** passent au résultat précédent / suivant (la banque MJ fait de même), un clic droit ouvre le menu :
+
+- **M2 / WMO** : *Spawn* (`.gobject spawn <display>`). La recherche passe par le client Epsilon (`C_Epsilon.GODI_Search`), qui connaît les displays du jeu **et** ceux ajoutés par le serveur (`eps_…`). Les objets connus pour faire planter le client à l'affichage (`alphabet_morpheus`…) sont écartés, comme dans Epsilon_Viewer. Pas d'aperçu 3D pour les WMO : le client 9.2.7 plante s'il doit en afficher un dans une fenêtre (vérifié en jeu, et EpsilonLib s'en protège aussi). *Spawn* pour le voir en jeu.
+- **Aperçu en jeu** (M2 et WMO, bouton sous l'aperçu) : chaque objet choisi, au clic ou aux flèches, est posé devant vous à la distance réglée (10 par défaut) ; en choisir un autre retire le précédent. *Garder* le laisse en place, *Retirer* l'enlève, fermer la fenêtre ou changer d'onglet le retire aussi. Activé par défaut pour les WMO (l'onglet n'a alors plus de zone 3D), désactivé pour les M2. Passe par EpsilonLib pour connaître le GUID de l'objet posé.
+- **PNJ** : *Morph* (`.morph <display>`) et *Démorph*. Tous les displays de créatures du client 9.2.7 (88 003), cherchables par nom de modèle, par nom du PNJ qui les porte (anglais ou français) ou par numéro. Un numéro inconnu du client (display ajouté par le serveur) reste proposé tel quel.
+
+Les PNJ viennent de la table `Creature` du client, qui n'en connaît qu'une partie : environ 12 500 displays ont un nom de PNJ, les autres seulement leur nom de modèle. Les données sont dans `CreatureDisplays.generated.lua` ; pour les régénérer (sources indiquées en tête du script) :
+
+```
+node Modules/GMMaster/Tools/build-creaturedisplays.js <dossier des CSV>
+```
+
 ## Commandes abrégées et vérifiées
 
 Les commandes partent sous leur forme la plus courte **sans ambiguïté** : `.phase forge npc gossip text add` devient `.ph f n g t a`, `.npc spawn` devient `.n sp` (`.n s` serait ambigu : say, scale, set, spawn…). Seuls les mots de commande sont abrégés, jamais les valeurs saisies. Une commande de plus de 255 caractères est refusée avant l'envoi, avec le compte affiché en bas de la fenêtre.
@@ -123,7 +140,7 @@ Le fichier généré contient aussi la syntaxe documentée de chaque commande et
 
 Le catalogue des commandes se trouve dans `Commands.lua` : une table par section, puis `GM.Groups` qui range les sections dans les domaines. Pour corriger une syntaxe ou ajouter une action, il suffit de modifier ou d'ajouter un modèle (`cmd = "npc spawn {id}"`).
 
-`Tests/gmmaster-test.js` charge les vrais fichiers dans un faux client et vérifie la construction des commandes, la bascule appliquer/retirer, l'historique, les favoris, la fenêtre, la résolution des macros techniques, la barre MJ, la banque d'auras et son aperçu :
+`Tests/gmmaster-test.js` charge les vrais fichiers dans un faux client et vérifie la construction des commandes, la bascule appliquer/retirer, l'historique, les favoris, la fenêtre, la résolution des macros techniques, la barre MJ, la banque d'auras et son aperçu, l'accueil et la fenêtre Displays :
 
 ```
 node Modules/GMMaster/Tests/gmmaster-test.js <chemin vers fengari-node-cli/src/lua-cli.js>

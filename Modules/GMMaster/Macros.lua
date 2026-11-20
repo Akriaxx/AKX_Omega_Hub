@@ -8,7 +8,8 @@
 --  attendus, puis on l'envoie sous sa forme abrégée sans ambiguïté.
 --
 --  Variables : {cible} / {target} = nom de la cible, {moi} / {me} =
---  votre nom. Une ligne qui commence par # est un commentaire.
+--  votre nom. Une ligne qui commence par # est un commentaire, une
+--  ligne qui commence par / est une commande du client (/run, /reload).
 -- ============================================================
 
 GMMaster = GMMaster or {}
@@ -39,6 +40,13 @@ local function Candidates(level, word)
 end
 
 function GM.ResolveLine(line)
+    -- Commande du client (/run, /reload, /dance, /omh…) : exécutée telle
+    -- quelle par le jeu, sans passer par le serveur ni être abrégée.
+    local slash = Trim(line)
+    if slash:match("^/%S") then
+        return { path = {}, args = {}, raw = slash, short = slash, full = slash,
+                 slash = true, status = "ok" }
+    end
     local text = Trim(line):gsub("^%.+", "")
     local words = {}
     for w in text:gmatch("%S+") do words[#words + 1] = w end
@@ -175,6 +183,40 @@ function GM.CheckMacro(text)
     end
     if #lines > MACRO_LINES_MAX then worst = "error" end
     return report, worst
+end
+
+-- ── Commandes du client ───────────────────────────────────────────────────
+-- Une ligne qui commence par / est une commande du jeu ou d'un addon.
+-- On cherche d'abord son gestionnaire dans SlashCmdList (/run, /reload,
+-- commandes d'addons) ; sinon (émotes, commandes sécurisées) on la fait
+-- passer par la zone de saisie du chat, exactement comme si on la tapait.
+
+local function FindSlashHandler(command)
+    command = command:lower()
+    for key, handler in pairs(SlashCmdList or {}) do
+        for i = 1, 20 do
+            local alias = _G["SLASH_" .. key .. i]
+            if alias and alias:lower() == command then return handler end
+        end
+    end
+end
+
+function GM.RunSlash(line)
+    local command, rest = Trim(line):match("^(/%S+)%s*(.-)$")
+    if not command then return false end
+    local handler = FindSlashHandler(command)
+    if handler then
+        handler(rest, DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
+        return true
+    end
+    local editBox = (ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend())
+        or (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
+    if editBox and ChatEdit_SendText then
+        editBox:SetText(Trim(line))
+        ChatEdit_SendText(editBox, 0)
+        return true
+    end
+    return false
 end
 
 --- Exécute une macro technique. Renvoie ok, message.

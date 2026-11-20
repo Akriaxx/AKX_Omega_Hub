@@ -64,7 +64,7 @@ for i, item in ipairs(kinds) do
     local tab = UI.CreatePanelButton(bank, 94, 22, item[2])
     tab:SetPoint("TOPLEFT", PAD + 160 + (i - 1) * 98, -12)
     tab:SetScript("OnClick", function()
-        bank.kind, bank.offset = item[1], 0
+        bank.kind, bank.offset, bank.cursor = item[1], 0, nil
         if bank.Refresh then bank:Refresh() end
         if bank.UpdateInput then bank:UpdateInput() end
     end)
@@ -332,14 +332,7 @@ for i = 1, ROWS do
             return
         end
         contextMenu:Hide()
-        if button == "LeftButton" and row.entry then
-            if GM.PreviewAction then GM:PreviewAction(bank.kind, row.entry.id) end
-            if bank.searchQuery then
-                bank.selectedSearchID = row.entry.id
-                UpdatePreview()
-                bank:Refresh()
-            elseif bank.kind ~= "aura" then idBox:SetText(tostring(row.entry.id)); UpdatePreview() end
-        end
+        if button == "LeftButton" and row.entry then bank:SelectRow(row.index) end
     end)
     row.hover = hover
 
@@ -386,11 +379,41 @@ local pager = bank:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 pager:SetPoint("BOTTOMLEFT", PAD + 2, 14)
 UI.ApplySoftText(pager)
 
+--- Liste affichée : résultats de recherche, ou favoris de la catégorie.
+local function CurrentList()
+    local searching = bank.searchQuery and (bank.kind == "aura" or bank.kind == "cast")
+    return searching and bank.searchResults or (bank.kind == "aura" and GM.EnsureAuraBank() or GM.EnsureNpcActionBank(bank.kind)), searching
+end
+
+--- Sélectionne la ligne n de la liste (clic ou flèches) : aperçu aussitôt.
+function bank:SelectRow(index)
+    local entry = CurrentList()[index]
+    if not entry then return end
+    self.cursor = index
+    if GM.PreviewAction then GM:PreviewAction(self.kind, entry.id) end
+    if self.searchQuery then
+        self.selectedSearchID = entry.id
+        UpdatePreview()
+    elseif self.kind ~= "aura" then idBox:SetText(tostring(entry.id)); UpdatePreview() end
+    self:Refresh()
+end
+
+--- Flèches haut / bas : ligne précédente / suivante.
+function bank:Step(delta)
+    local index, offset = GM.StepCursor(self.cursor, delta, #CurrentList(), self.offset, ROWS)
+    if not index then return false end
+    if index == self.cursor then return true end   -- déjà au bout de la liste
+    self.offset = offset
+    contextMenu:Hide()
+    self:SelectRow(index)
+    return true
+end
+GM.BindArrowKeys(bank, function(delta) return bank:Step(delta) end, { idBox })
+
 local function Refresh()
     if not bank:IsShown() then return end
     SyncWho()
-    local searching = bank.searchQuery and (bank.kind == "aura" or bank.kind == "cast")
-    local list = searching and bank.searchResults or (bank.kind == "aura" and GM.EnsureAuraBank() or GM.EnsureNpcActionBank(bank.kind))
+    local list, searching = CurrentList()
     for kind, tab in pairs(tabs) do tab:SetAlpha(kind == bank.kind and 1 or 0.55) end
     bank.offset = math.max(0, math.min(bank.offset, math.max(0, #list - ROWS)))
     for i, row in ipairs(bank.rows) do
@@ -413,7 +436,8 @@ local function Refresh()
             row.apply:SetText(bank.kind == "aura" and "Poser" or "Tester")
             row.remove:SetShown(bank.kind == "aura" or GM.NPC_ACTIONS[bank.kind].alternate ~= nil)
             row.remove:SetText(bank.kind == "aura" and "Retirer" or bank.kind == "emote" and "Répéter" or "Zone")
-            local previewed = bank.kind == "aura" and GM.PreviewedAura and GM.PreviewedAura() == entry.id
+            local previewed = bank.cursor == index
+                or (not bank.cursor and bank.kind == "aura" and GM.PreviewedAura and GM.PreviewedAura() == entry.id)
             row.bg:SetColorTexture(unpack(previewed and UI.colors.rowBgSelected or UI.colors.rowBg))
             row.apply:SetShown(not searching)
             row.remove:SetShown(not searching and (bank.kind == "aura" or GM.NPC_ACTIONS[bank.kind].alternate ~= nil))
@@ -447,7 +471,7 @@ SearchSpells = function()
     contextMenu:Hide()
     local query = string.lower(GM.Trim(idBox:GetText()))
     bank.searchQuery = query ~= "" and query or nil
-    bank.searchResults, bank.offset = {}, 0
+    bank.searchResults, bank.offset, bank.cursor = {}, 0, nil
     if not bank.searchQuery then bank.searchRunning = false; Refresh(); return end
     for id, name in pairs(spellNames) do
         if tostring(id):find(query, 1, true) or name:find(query, 1, true) then

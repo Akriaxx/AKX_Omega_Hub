@@ -318,8 +318,14 @@ GM.Notify = Notify
 function GM:Emit(cmds)
     local texts = {}
     for i, cmd in ipairs(cmds) do
-        texts[i] = "." .. cmd
-        self.SendRaw(texts[i])
+        if cmd:sub(1, 1) == "/" then
+            -- Commande du client (/run, /reload…) : jamais envoyée au serveur.
+            texts[i] = cmd
+            self.RunSlash(cmd)
+        else
+            texts[i] = "." .. cmd
+            self.SendRaw(texts[i])
+        end
     end
     self.lastCommand = table.concat(texts, "  ·  ")
     self.lastNotice = nil
@@ -404,50 +410,131 @@ function GM:AddActionToBar(domain, action, values)
     return self:AddToBar(label:sub(1, 24), table.concat(lines, "\n"))
 end
 
--- ── Enable / Disable ──────────────────────────────────────────────────────
+-- ── Flèches haut / bas dans les listes avec aperçu ────────────────────────
+-- La fenêtre ne garde que ces deux touches (et seulement quand onMove dit
+-- les avoir utilisées) : tout le reste passe au jeu. En combat, on ne
+-- touche à rien. Les champs de saisie donnés réagissent aussi aux flèches.
 
-function GM:Toggle()
-    if not self.enabled then return end
-    if GMMasterPanel then GMMasterPanel:Toggle() end
+local function SetPropagate(frame, on)
+    if not frame.SetPropagateKeyboardInput then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    pcall(frame.SetPropagateKeyboardInput, frame, on)
 end
 
---- /gmm            : fenêtre
---- /gmm barre      : afficher / masquer la barre MJ
---- /gmm réglages   : réglages de la barre
---- /gmm auras      : banque d'auras
+function GM.BindArrowKeys(frame, onMove, editBoxes)
+    frame:EnableKeyboard(true)
+    SetPropagate(frame, true)
+    frame:SetScript("OnKeyDown", function(self, key)
+        local delta = key == "DOWN" and 1 or key == "UP" and -1 or nil
+        local used = delta and not (InCombatLockdown and InCombatLockdown()) and onMove(delta)
+        SetPropagate(self, not used)
+    end)
+    frame:SetScript("OnKeyUp", function(self) SetPropagate(self, true) end)
+    for _, box in ipairs(editBoxes or {}) do
+        box:SetScript("OnArrowPressed", function(_, key)
+            if key == "DOWN" then onMove(1) elseif key == "UP" then onMove(-1) end
+        end)
+    end
+end
+
+--- Nouvelle position dans une liste (cursor peut être nil) et décalage
+--- d'affichage à appliquer pour que la ligne reste visible.
+function GM.StepCursor(cursor, delta, count, offset, rows)
+    if count == 0 then return nil, offset end
+    local index = cursor and (cursor + delta) or (delta > 0 and offset + 1 or offset + rows)
+    index = math.max(1, math.min(count, index))
+    if index <= offset then offset = index - 1
+    elseif index > offset + rows then offset = index - rows end
+    return index, offset
+end
+
+-- ── Enable / Disable ──────────────────────────────────────────────────────
+
+--- La touche « Ouvrir / fermer GM Master » et /gmm ouvrent l'accueil.
+function GM:Toggle()
+    if not self.enabled then return end
+    if GMMasterHome then GMMasterHome:Toggle() end
+end
+
+--- Ouvre la banque MJ sur une catégorie (aura, emote, anim, cast).
+function GM:OpenBank(kind)
+    local bank = GMMasterAuraBank
+    if not bank then return end
+    if kind then bank.kind, bank.offset = kind, 0 end
+    self:ToggleAuraBank(true)
+    bank:UpdateInput()
+    bank:Refresh()
+end
+
+-- ── Destinations ──────────────────────────────────────────────────────────
+-- Une seule liste pour la page d'accueil (une tuile chacune) et pour les
+-- raccourcis /gmm <mot>. Ajouter une fenêtre = ajouter une ligne ici.
+--   keep : la page d'accueil reste ouverte (bascule sans nouvelle fenêtre).
+
+GM.HOME = {
+    { key = "commandes", title = "Commandes MJ", words = { "commandes", "fenetre", "fenêtre", "cmd" },
+      desc = "PNJ, sorts, téléportations… en quelques clics.",
+      open = function() if GMMasterPanel then GMMasterPanel:Show() end end },
+    { key = "barre", title = "Barre MJ", words = { "barre", "bar" }, keep = true,
+      desc = "Afficher ou masquer la barre de macros techniques.",
+      open = function() GM:ToggleBar() end,
+      state = function() return GM.EnsureBar().shown and "affichée" or "masquée" end },
+    { key = "réglages", title = "Réglages de la barre", words = { "réglages", "reglages", "config" },
+      desc = "Taille, colonnes, verrouillage, libellés.",
+      open = function() GM:ToggleBar(true); if GM.OpenBarSettings then GM.OpenBarSettings() end end },
+    { key = "display", title = "Displays", words = { "display", "displays", "disp" },
+      desc = "Objets M2 / WMO et PNJ : chercher, voir, Spawn ou Morph.",
+      open = function() if GM.OpenDisplays then GM:OpenDisplays() end end },
+    { key = "auras", title = "Auras", words = { "auras", "aura", "banque" },
+      desc = "Auras favorites, aperçu sur un modèle.",
+      open = function() GM:OpenBank("aura") end },
+    { key = "emotes", title = "Émotes de PNJ", words = { "emotes", "emote", "émotes" },
+      desc = "Émotes jouées par le PNJ ciblé.",
+      open = function() GM:OpenBank("emote") end },
+    { key = "anim", title = "Animations", words = { "anim", "animations" },
+      desc = "Animations en boucle du PNJ ciblé.",
+      open = function() GM:OpenBank("anim") end },
+    { key = "casts", title = "Casts", words = { "casts", "cast" },
+      desc = "Sorts lancés par le PNJ ciblé.",
+      open = function() GM:OpenBank("cast") end },
+}
+
+local homeByWord = {}
+for _, entry in ipairs(GM.HOME) do
+    for _, word in ipairs(entry.words) do homeByWord[word] = entry end
+end
+-- Raccourcis vers un onglet de la fenêtre Displays.
+for word, kind in pairs({ wmo = "wmo", pnj = "npc", npc = "npc" }) do
+    homeByWord[word] = { open = function() if GM.OpenDisplays then GM:OpenDisplays(kind) end end }
+end
+homeByWord.m2 = { open = function() if GM.OpenDisplays then GM:OpenDisplays("m2") end end }
+
+--- Ouvre une destination de l'accueil (clé ou mot de /gmm).
+function GM:OpenHomeEntry(word)
+    local entry = homeByWord[word]
+    if not entry then return false end
+    entry.open()
+    if not entry.keep and GMMasterHome then GMMasterHome:Hide() end
+    self.Notify()
+    return true
+end
+
+--- /gmm            : page d'accueil
+--- /gmm <mot>      : ouvrir directement (barre, réglages, display, m2,
+---                   wmo, pnj, auras, emotes, anim, casts, commandes)
 --- /gmm case <n>   : exécuter la case n
 local function Slash(msg)
     local cmd, arg = GM.Trim(msg):lower():match("^(%S*)%s*(.-)$")
-    if cmd == "barre" or cmd == "bar" then
-        GM:ToggleBar()
-    elseif cmd == "réglages" or cmd == "reglages" or cmd == "config" then
-        GM:ToggleBar(true)
-        if GM.OpenBarSettings then GM.OpenBarSettings() end
-    elseif cmd == "banque" then
-        if GM.ToggleAuraBank then GM:ToggleAuraBank() end
-    elseif cmd == "auras" or cmd == "aura" then
-        if GMMasterAuraBank then
-            GMMasterAuraBank.kind = "aura"
-            GM:ToggleAuraBank(true)
-            GMMasterAuraBank:UpdateInput()
-            GMMasterAuraBank:Refresh()
-        end
-    elseif cmd == "emotes" or cmd == "emote" or cmd == "animations" or cmd == "anim" or cmd == "casts" or cmd == "cast" then
-        if GMMasterAuraBank then
-            GMMasterAuraBank.kind = (cmd == "emotes" or cmd == "emote") and "emote"
-                or (cmd == "animations" or cmd == "anim") and "anim" or "cast"
-            GM:ToggleAuraBank(true)
-            GMMasterAuraBank:UpdateInput()
-            GMMasterAuraBank:Refresh()
-        end
+    if cmd == "" then
+        GM:Toggle()
     elseif cmd == "case" or cmd == "slot" then
         local n = tonumber(arg)
         if n then GM:RunSlot(n) end
-    elseif cmd == "aide" or cmd == "help" then
-        OmegaHub.Print("GM Master : |cffAAAAAA/gmm|r fenêtre · |cffAAAAAA/gmm barre|r barre MJ · "
-            .. "|cffAAAAAA/gmm banque|r banque MJ · |cffAAAAAA/gmm emotes|r · |cffAAAAAA/gmm casts|r · |cffAAAAAA/gmm réglages|r")
-    else
-        GM:Toggle()
+    elseif not GM:OpenHomeEntry(cmd) then
+        local words = {}
+        for _, entry in ipairs(GM.HOME) do words[#words + 1] = "|cffAAAAAA/gmm " .. entry.key .. "|r" end
+        OmegaHub.Print("GM Master : |cffAAAAAA/gmm|r accueil · " .. table.concat(words, " · ")
+            .. " · |cffAAAAAA/gmm case <n>|r")
     end
 end
 GM.Slash = Slash
@@ -461,7 +548,7 @@ function GM:Enable()
 
     OmegaHub:SetModuleLoaded("GMMaster", true)
     if not OmegaHub._startingUp then
-        OmegaHub.Print("GM Master activé.  |cffAAAAAA/gmm|r  ·  barre MJ : |cffAAAAAA/gmm barre|r")
+        OmegaHub.Print("GM Master activé.  |cffAAAAAA/gmm|r pour l'accueil.")
     end
 end
 
@@ -470,11 +557,13 @@ function GM:Disable()
     SLASH_OMEGAGMMASTER1 = nil
     SLASH_OMEGAGMMASTER2 = nil
     SlashCmdList["OMEGAGMMASTER"] = nil
+    if GMMasterHome then GMMasterHome:Hide() end
     if GMMasterPanel then GMMasterPanel:Hide() end
     if GMMasterBar then GMMasterBar:Hide() end
     if GMMasterMacroEditor then GMMasterMacroEditor:Hide() end
     if GMMasterBarSettings then GMMasterBarSettings:Hide() end
     if GMMasterAuraBank then GMMasterAuraBank:Hide() end
+    if GMMasterDisplay then GMMasterDisplay:Hide() end
 
     OmegaHub:SetModuleLoaded("GMMaster", false)
     OmegaHub.Print("GM Master désactivé.")

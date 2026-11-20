@@ -5,4 +5,4 @@
 --  dans Core.lua, en bas du fichier).
 -- ============================================================
 
-GMMASTER_VERSION = "1.3.0"
+GMMASTER_VERSION = "1.4.0"

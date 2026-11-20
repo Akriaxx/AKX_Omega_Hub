@@ -85,7 +85,7 @@ OmegaHub = { _startingUp = true, Print = noop,
 SlashCmdList = {}
 
 dofile("UI/UI.lua")
-for _, file in ipairs({ "Version", "Abbrev.generated", "AuraVisuals.generated", "EmoteAnimations.generated", "Commands", "Core", "Macros", "UI_Panel", "UI_Bar", "UI_AuraBank", "UI_AuraPreview" }) do dofile("Modules/GMMaster/" .. file .. ".lua") end
+for _, file in ipairs({ "Version", "Abbrev.generated", "AuraVisuals.generated", "EmoteAnimations.generated", "CreatureDisplays.generated", "Commands", "Core", "Macros", "UI_Panel", "UI_Bar", "UI_AuraBank", "UI_AuraPreview", "UI_Display", "UI_Home" }) do dofile("Modules/GMMaster/" .. file .. ".lua") end
 for _, f in ipairs(frames) do
     if f.events.PLAYER_LOGIN then f.scripts.OnEvent(f, "PLAYER_LOGIN") end
 end
@@ -182,8 +182,17 @@ assert(#GM:GetHistory(D.npc, idField) == 12)
 before = #sent
 assert(GM:RunAction(D.modify, D.modify.actionByKey.reset)); assert(#sent == before + 2 and sent[#sent - 1] == S("modify scale 1"))
 
--- Fenêtre
+-- Accueil : /gmm ouvre la page d'accueil, une tuile par fenêtre
 SlashCmdList.OMEGAGMMASTER("")
+assert(GMMasterHome:IsShown() and not GMMasterPanel:IsShown())
+assert(#GMMasterHome.tiles == #GM.HOME)
+for _, tile in ipairs(GMMasterHome.tiles) do assert(tile.name.text ~= "") end
+GMMasterHome.tiles[1]:Click()
+assert(GMMasterPanel:IsShown() and not GMMasterHome:IsShown(), "tuile Commandes")
+SlashCmdList.OMEGAGMMASTER(""); assert(GMMasterHome:IsShown())
+SlashCmdList.OMEGAGMMASTER(""); assert(not GMMasterHome:IsShown())
+-- Fenêtre
+SlashCmdList.OMEGAGMMASTER("commandes")
 assert(GMMasterPanel:IsShown())
 for _, domain in ipairs(GM.Domains) do GM.SelectDomain(domain.key); assert(GM.pages[domain.key]:IsShown()) end
 -- Domaines : chaque section appartient à un seul domaine, un onglet par section
@@ -434,6 +443,42 @@ SlashCmdList.OMEGAGMMASTER("barre"); assert(not GMMasterBar:IsShown() and not cf
 SlashCmdList.OMEGAGMMASTER("barre"); assert(GMMasterBar:IsShown() and cfg.shown)
 SlashCmdList.OMEGAGMMASTER("case 2"); assert(last() == S("modify speed 20"))
 SlashCmdList.OMEGAGMMASTER("réglages"); assert(GMMasterBarSettings:IsShown())
+-- Tuile « Barre MJ » de l'accueil : bascule sans fermer l'accueil
+SlashCmdList.OMEGAGMMASTER("")
+local barTile; for _, t in ipairs(GMMasterHome.tiles) do if t.entry.key == "barre" then barTile = t end end
+barTile:Click(); assert(not cfg.shown and GMMasterHome:IsShown() and barTile.name.text:find("masquée"))
+barTile:Click(); assert(cfg.shown and barTile.name.text:find("affichée"))
+GMMasterHome:Hide()
+-- Lignes en / : commandes du client, jamais envoyées au serveur
+local ran, NL = {}, string.char(10)
+SLASH_FAKERUN1 = "/run"; SlashCmdList.FAKERUN = function(msg) ran[#ran + 1] = msg end
+local report = GM.CheckMacro("/run print(1)" .. NL .. "mod speed 3")
+assert(report[1].slash and report[1].status == "ok" and report[2].short == S("modify speed 3"):sub(2))
+before = #sent
+assert(GM:RunMacro("/RUN print({moi})" .. NL .. "mod speed 3"))
+assert(ran[1] == "print(Moi)" and #sent == before + 1 and last() == S("modify speed 3"))
+local typed
+DEFAULT_CHAT_FRAME = { editBox = { SetText = function(_, t) typed = t end } }
+ChatEdit_SendText = function(eb) assert(eb == DEFAULT_CHAT_FRAME.editBox) end
+assert(GM:RunMacro("/dance")); assert(typed == "/dance" and #sent == before + 1)
+SLASH_FAKERUN1, SlashCmdList.FAKERUN, DEFAULT_CHAT_FRAME, ChatEdit_SendText = nil, nil, nil, nil
+-- Maj + glisser une case : vignette, case visée encadrée, échange au lâcher
+do
+    local b = GM.barButtons
+    local s1, s2 = cfg.slots[1], cfg.slots[2]
+    shift = true
+    b[1].scripts.OnDragStart(b[1])
+    assert(GM.dragSource == 1 and GMMasterDragGhost:IsShown())
+    b[2].IsMouseOver = function() return true end
+    GM.UpdateSlotDrag()
+    assert(b[2].drop:IsShown() and GMMasterDragGhost.hint.text:find("case 2"))
+    b[1].scripts.OnDragStop(b[1])
+    b[2].IsMouseOver = nil
+    shift = false
+    assert(not GMMasterDragGhost:IsShown() and not b[2].drop:IsShown() and GM.dragSource == nil)
+    assert(cfg.slots[1] == s2 and cfg.slots[2] == s1, "échange")
+    GM:SwapSlots(1, 2)
+end
 -- ── Interrupteurs ────────────────────────────────────────────────────────
 -- État serveur : la case « Vol » (cheat fly [on/off]) suit EpsilonLib.
 local volIndex
@@ -573,6 +618,8 @@ GM:PreviewAura(118); assert(pv.status.text:find("transformation"))
 n = #applied
 GM:PreviewAura(99999999); assert(#applied == n and pv.status.text:find("Aucun visuel"))
 -- Clic sur une ligne de la banque : aperçu + ligne surlignée
+-- (champ vidé : une saisie passe la banque en mode recherche)
+bankUI.idBox:Type("")
 bankUI.rows[1].hover.scripts.OnMouseUp(bankUI.rows[1].hover, "LeftButton")
 assert(GM.PreviewedAura() == 1234 and applied[#applied] == "17224")
 -- Une saisie rapide ne joue que la dernière valeur
@@ -635,6 +682,114 @@ pv.resetBtn:Click(); assert(facing == 0 and pos[2] == 0 and pos[3] == 0, "Face")
 GetCursorPosition = nil
 -- Retour à mon personnage
 pv.raceButtons[1]:Click(); n = #races; pv.replayBtn:Click(); assert(#races == n)
+
+-- ── Displays ─────────────────────────────────────────────────────────────
+do
+    local dw = GMMasterDisplay
+    -- Objets : recherche du client Epsilon, filtrée par extension et par mots
+    local gods = {
+        { name = "world/generic/door_wood01.m2", fileid = 11, displayid = 101 },
+        { name = "world/generic/door_iron.m2", fileid = 12, displayid = 102 },
+        { name = "world/wmo/dungeon/door_hall.wmo", fileid = 13, displayid = 103 },
+        { name = "eps_secret/door_wood_big.m2", fileid = 14, displayid = 104 },
+        { name = "alphabet_morpheus_door.m2", fileid = 15, displayid = 105 },
+    }
+    local searched
+    C_Epsilon = {
+        GODI_Search = function(q) searched = q; local n = 0; for _, g in ipairs(gods) do if g.name:find(q, 1, true) then n = n + 1 end end; return n end,
+        GODI_RetrieveSearch = function(i) local n = -1; for _, g in ipairs(gods) do if g.name:find(searched, 1, true) then n = n + 1; if n == i then return { name = g.name, fileid = g.fileid, displayid = g.displayid } end end end end,
+    }
+    SlashCmdList.OMEGAGMMASTER("display"); assert(dw:IsShown() and dw.kind == "m2")
+    dw.searchBox:SetText("door"); dw:Search()
+    assert(#dw.results == 3, "M2 sans WMO ni objets cassés : " .. #dw.results)
+    assert(dw.results[1].name == "door_iron.m2" and dw.results[3].name == "door_wood_big.m2", "tri, eps_secret -> eps")
+    dw.searchBox:SetText("wood door"); dw:Search()
+    assert(searched == "wood" or searched == "door")
+    assert(#dw.results == 2, "tous les mots")
+    dw:SetKind("wmo"); dw.searchBox:SetText("door"); dw:Search()
+    assert(#dw.results == 1 and dw.results[1].id == 103)
+    -- Clic : aperçu ; clic droit > Spawn
+    dw.rows[1]:Click("LeftButton"); assert(dw.selected == dw.results[1] and dw.actionBtn.text == "Spawn")
+    dw.rows[1]:Click("RightButton"); assert(dw.menu:IsShown() and dw.menu.buttons[1].text == "Spawn")
+    dw.menu.buttons[1]:Click(); assert(last() == S("gobject spawn 103") and not dw.menu:IsShown())
+    -- PNJ : données du client
+    dw:SetKind("npc"); dw.searchBox:SetText("murloc"); dw:Search()
+    assert(#dw.results > 10 and dw.results[1].kind == "npc")
+    -- Flèches : résultat suivant / précédent, la liste défile
+    local key = dw.scripts.OnKeyDown
+    key(dw, "DOWN"); assert(dw.cursor == 1 and dw.selected == dw.results[1], "première flèche")
+    key(dw, "DOWN"); assert(dw.cursor == 2 and dw.selected == dw.results[2])
+    key(dw, "UP"); key(dw, "UP"); assert(dw.cursor == 1, "pas avant le premier")
+    dw.rows[3]:Click("LeftButton"); assert(dw.cursor == 3)
+    for _ = 1, 20 do key(dw, "DOWN") end
+    assert(dw.cursor == 23 and dw.offset == 23 - #dw.rows and dw.rows[#dw.rows].entry == dw.results[23], "défilement")
+    dw.searchBox.scripts.OnArrowPressed(dw.searchBox, "DOWN"); assert(dw.cursor == 24, "depuis la recherche")
+    key(dw, "A")
+    dw.searchBox:SetText("mogu door"); dw:Search(); assert(dw.cursor == nil)
+    local found; for _, e in ipairs(dw.results) do if e.id == 41839 then found = e end end
+    assert(found and found.npcs:find("Mogu Door"), "nom de PNJ")
+    dw.searchBox:SetText("porte mogu"); dw:Search(); assert(#dw.results >= 1, "nom français")
+    dw.searchBox:SetText("4"); dw:Search(); assert(#dw.results == 1 and dw.results[1].id == 4 and dw.results[1].name == "murloc2")
+    dw.searchBox:SetText("99999999"); dw:Search(); assert(#dw.results == 1 and dw.results[1].id == 99999999, "display du serveur")
+    dw.searchBox:SetText("4"); dw:Search()
+    dw.rows[1]:Click("RightButton"); assert(dw.menu.buttons[1].text == "Morph" and dw.menu.buttons[2].text == "Démorph")
+    dw.menu.buttons[1]:Click(); assert(last() == S("morph 4"))
+    dw.rows[1]:Click("RightButton"); dw.menu.buttons[2]:Click(); assert(last() == S("demorph"))
+    -- Aperçu en jeu : pose devant soi, retire le précédent, garder / retirer
+    C_Timer = nil
+    local epsSent, nextGuid = {}, 500
+    EpsilonLib = { AddonCommands = { Register = function(name)
+        assert(name == "Omega GM Master")
+        return function(text, cb)
+            epsSent[#epsSent + 1] = text
+            if text:match("^gobject spawn") then nextGuid = nextGuid + 1; cb(true, { "Spawned |Hgameobject_GUID:" .. nextGuid .. "|h[obj]|h" })
+            else cb(true, {}) end
+        end
+    end } }
+    dw:SetKind("wmo"); dw.searchBox:SetText("door"); dw:Search()
+    assert(not dw.scene:IsShown() and not dw.sceneBg:IsShown() and not dw.sep:IsShown(), "WMO : colonne d'aperçu masquée")
+    assert(dw.compact == true, "WMO : fenêtre resserrée sur la liste")
+    assert(GMMasterDB.displayWorld.wmo == true and dw.worldToggle.text:find("oui"), "WMO : aperçu en jeu par défaut")
+    dw.distBox:Type("15")
+    dw.rows[1]:Click("LeftButton")
+    assert(epsSent[1] == "gobject spawn 103" and epsSent[2] == "gobject move 501 forwards 15", tostring(epsSent[2]))
+    assert(dw.world.guid == 501 and dw.keepBtn:IsShown())
+    key(dw, "UP"); assert(dw.cursor == 1 and #epsSent == 2, "pas de déplacement au premier")
+    dw.rows[1]:Click("LeftButton")
+    assert(epsSent[3] == "gobject delete 501" and epsSent[4] == "gobject spawn 103" and dw.world.guid == 502, "remplace le précédent")
+    dw.keepBtn:Click(); assert(dw.world.guid == nil)
+    dw.rows[1]:Click("LeftButton"); assert(dw.world.guid == 503 and epsSent[#epsSent - 1] == "gobject spawn 103", "gardé : pas supprimé")
+    for _, t in ipairs(epsSent) do assert(t ~= "gobject delete 502") end
+    dw.clearBtn:Click(); assert(epsSent[#epsSent] == "gobject delete 503" and dw.world.guid == nil)
+    -- M2 : désactivé par défaut, la 3D reste
+    dw:SetKind("m2"); dw.searchBox:SetText("door"); dw:Search()
+    assert(dw.scene:IsShown() and dw.sep:IsShown() and not dw.compact and dw.worldToggle.text:find("non"))
+    local n = #epsSent; dw.rows[1]:Click("LeftButton"); assert(#epsSent == n)
+    dw.worldToggle:Click(); assert(dw.world.guid == 504 and epsSent[#epsSent] == "gobject move 504 forwards 15")
+    dw:Hide(); assert(epsSent[#epsSent] == "gobject delete 504" and dw.world.guid == nil, "fermer retire")
+    dw:Show(); dw.worldToggle:Click()
+    dw:SetKind("npc"); assert(not dw.worldToggle:IsShown())
+    EpsilonLib = nil
+    -- Sans client Epsilon : message, pas d'erreur
+    C_Epsilon = nil
+    dw:SetKind("m2"); dw.searchBox:SetText("door"); dw:Search()
+    assert(#dw.results == 0 and dw.hint.text:find("Epsilon"))
+    SlashCmdList.OMEGAGMMASTER("pnj"); assert(dw.kind == "npc")
+    dw:Hide()
+end
+
+-- Banque : flèches dans les favoris
+do
+    local b = GMMasterAuraBank
+    b.kind, b.searchQuery, b.cursor, b.offset = "aura", nil, nil, 0
+    GM:AddAura(1234, "self"); GM:AddAura(17, "self")
+    b:Show(); b:Refresh()
+    local list = GM.EnsureAuraBank(); assert(#list >= 2)
+    b.scripts.OnKeyDown(b, "DOWN"); assert(b.cursor == 1 and GM.PreviewedAura() == list[1].id)
+    b.scripts.OnKeyDown(b, "DOWN"); assert(b.cursor == 2 and GM.PreviewedAura() == list[2].id)
+    b.idBox.scripts.OnArrowPressed(b.idBox, "UP"); assert(b.cursor == 1)
+    b:Hide()
+end
 
 -- Désactivation
 GM:Disable(); assert(not GMMasterAuraBank:IsShown())
